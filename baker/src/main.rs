@@ -32,11 +32,71 @@ struct Face {
     edge: Option<EdgeID>,
 }
 
+struct EdgeIter<'a> {
+    mesh: &'a WingedMesh,
+    start: EdgeID,
+    current: Option<EdgeID>,
+}
+impl<'a> Iterator for EdgeIter<'a> {
+    type Item = EdgeID;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let current = self.current;
+
+        if let Some(curr) = current {
+            self.current = Some(self.mesh.edges[curr.0].edge_left_cw);
+            if self.current == Some(self.start) {
+                self.current = None;
+            }
+        }
+
+        current
+    }
+}
+
 #[derive(Debug)]
 struct WingedMesh {
     verts: Vec<Vertex>,
     faces: Vec<Face>,
     edges: Vec<HalfEdge>,
+}
+
+impl std::ops::Index<VertID> for WingedMesh {
+    type Output = Vertex;
+
+    fn index(&self, index: VertID) -> &Self::Output {
+        &self.verts[index.0]
+    }
+}
+impl std::ops::IndexMut<VertID> for WingedMesh {
+    fn index_mut(&mut self, index: VertID) -> &mut Self::Output {
+        &mut self.verts[index.0]
+    }
+}
+
+impl std::ops::Index<EdgeID> for WingedMesh {
+    type Output = HalfEdge;
+
+    fn index(&self, index: EdgeID) -> &Self::Output {
+        &self.edges[index.0]
+    }
+}
+impl std::ops::IndexMut<EdgeID> for WingedMesh {
+    fn index_mut(&mut self, index: EdgeID) -> &mut Self::Output {
+        &mut self.edges[index.0]
+    }
+}
+impl std::ops::Index<FaceID> for WingedMesh {
+    type Output = Face;
+
+    fn index(&self, index: FaceID) -> &Self::Output {
+        &self.faces[index.0]
+    }
+}
+impl std::ops::IndexMut<FaceID> for WingedMesh {
+    fn index_mut(&mut self, index: FaceID) -> &mut Self::Output {
+        &mut self.faces[index.0]
+    }
 }
 
 impl WingedMesh {
@@ -57,17 +117,12 @@ impl WingedMesh {
         None
     }
 
-    pub fn vert(&self, v: VertID) -> &Vertex {
-        return &self.verts[v.0];
-    }
-    pub fn vert_mut(&mut self, v: VertID) -> &mut Vertex {
-        return &mut self.verts[v.0];
-    }
-    pub fn face(&self, f: FaceID) -> &Face {
-        return &self.faces[f.0];
-    }
-    pub fn face_mut(&mut self, f: FaceID) -> &mut Face {
-        return &mut self.faces[f.0];
+    pub fn iter_edge(&self, e: EdgeID) -> EdgeIter {
+        EdgeIter {
+            mesh: self,
+            start: e,
+            current: Some(e),
+        }
     }
 
     fn add_half_edge(&mut self, orig: VertID, dest: VertID, face: FaceID, cw: EdgeID, ccw: EdgeID) {
@@ -97,19 +152,19 @@ impl WingedMesh {
         self.add_half_edge(b, c, f, iec, iea);
         self.add_half_edge(c, a, f, iea, ieb);
 
-        if self.vert(a).edge == None {
-            self.vert_mut(a).edge = Some(iea);
+        if self[a].edge == None {
+            self[a].edge = Some(iea);
         }
 
-        if self.vert(b).edge == None {
-            self.vert_mut(b).edge = Some(ieb);
+        if self[b].edge == None {
+            self[b].edge = Some(ieb);
         }
 
-        if self.vert(c).edge == None {
-            self.vert_mut(c).edge = Some(iec);
+        if self[c].edge == None {
+            self[c].edge = Some(iec);
         }
 
-        self.face_mut(f).edge = Some(iea);
+        self[f].edge = Some(iea);
     }
 }
 
@@ -134,34 +189,21 @@ fn main() -> gltf::Result<()> {
                 let b = indices[i * 3 + 1] as usize;
                 let c = indices[i * 3 + 2] as usize;
 
-                println!("{a} {b} {c}");
+                println!("Face {i}: {a} {b} {c}");
 
                 mesh.add_tri(FaceID(i), VertID(a), VertID(b), VertID(c));
             }
 
             for f in &mesh.faces {
                 let e = f.edge.unwrap();
-                if let Some(te) = mesh.edges[e.0].twin {
-                    println!(
-                        "Face {:?} is connected to {:?}",
-                        mesh.edges[e.0].face, mesh.edges[te.0].face
-                    )
-                }
 
-                let e = mesh.edges[e.0].edge_left_cw;
-                if let Some(te) = mesh.edges[e.0].twin {
-                    println!(
-                        "Face {:?} is connected to {:?}",
-                        mesh.edges[e.0].face, mesh.edges[te.0].face
-                    )
-                }
-
-                let e = mesh.edges[e.0].edge_left_cw;
-                if let Some(te) = mesh.edges[e.0].twin {
-                    println!(
-                        "Face {:?} is connected to {:?}",
-                        mesh.edges[e.0].face, mesh.edges[te.0].face
-                    )
+                for e in mesh.iter_edge(e) {
+                    if let Some(te) = mesh[e].twin {
+                        println!(
+                            "Face {:?} is connected to {:?}",
+                            mesh[e].face.0, mesh[te].face.0
+                        )
+                    }
                 }
             }
         }
