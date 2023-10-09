@@ -1,7 +1,9 @@
 [package]
 name = "baker"
 version.workspace = true
+edition.workspace = true
 
 
 [dependencies]
 gltf = "1.3"
+metis = { path = "../metis" }

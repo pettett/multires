@@ -20,7 +20,12 @@
 				}
 			},
 			"args": [],
-			"cwd": "${workspaceFolder}"
+			"cwd": "${workspaceFolder}",
+			"env": {
+				"METISDIR": "C:\\Users\\maxwe\\OneDriveC\\sync\\projects\\vendor\\metis",
+				"CPATH": "C:\\Users\\maxwe\\OneDriveC\\sync\\projects\\vendor\\metis\\include",
+				"RUSTFLAGS": "-LC:\\Users\\maxwe\\OneDriveC\\sync\\projects\\vendor\\metis\\libmetis"
+			}
 		},
 		{
 			"type": "lldb",

@@ -1,5 +1,6 @@
 [workspace]
-members = ["baker"]
+members = ["baker", "metis"]
+resolver = "2"
 
 [workspace.package]
 authors = ["mp2015@cam.ac.uk"]

@@ -1,0 +1,15 @@
+[package]
+name = "metis"
+version.workspace = true
+edition.workspace = true
+
+
+[dependencies]
+log = "0.4"
+cxx = "1.0.94"
+thiserror = "1.0.40"
+
+[build-dependencies]
+bindgen = "0.64.0"
+cmake = "0.1.50"
+cxx-build = "1.0.94"

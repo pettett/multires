@@ -1,6 +1,9 @@
 extern crate gltf;
 
-use gltf::{mesh::util::ReadIndices, Gltf};
+use metis::{Graph, GraphEdge, GraphVertex, PartitioningConfig};
+use std::time;
+
+use gltf::mesh::util::ReadIndices;
 
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
 struct VertID(usize);
@@ -108,6 +111,35 @@ impl WingedMesh {
         }
     }
 
+    pub fn from_gltf(path: impl AsRef<std::path::Path>) -> gltf::Result<Self> {
+        let (doc, buffers, _) = gltf::import(path)?;
+
+        let mesh = doc.meshes().next().unwrap();
+        let p = mesh.primitives().next().unwrap();
+        let reader = p.reader(|buffer| Some(&buffers[buffer.index()]));
+
+        let iter = reader.read_positions().unwrap();
+        let verts: Vec<[f32; 3]> = iter.collect();
+
+        let indices: Vec<u16> = match reader.read_indices() {
+            Some(ReadIndices::U16(iter)) => iter.collect(),
+            _ => panic!("Unsupported index size"),
+        };
+        let mut mesh = WingedMesh::new(indices.len() / 3, verts.len());
+
+        for i in 0..mesh.faces.len() {
+            let a = indices[i * 3] as usize;
+            let b = indices[i * 3 + 1] as usize;
+            let c = indices[i * 3 + 2] as usize;
+
+            println!("Face {i}: {a} {b} {c}");
+
+            mesh.add_tri(FaceID(i), VertID(a), VertID(b), VertID(c));
+        }
+
+        Ok(mesh)
+    }
+
     fn find_edge(&self, a: VertID, b: VertID) -> Option<EdgeID> {
         for (i, e) in self.edges.iter().enumerate() {
             if e.vert_origin == a && e.vert_destination == b {
@@ -169,45 +201,71 @@ impl WingedMesh {
 }
 
 fn main() -> gltf::Result<()> {
-    let (doc, buffers, _) = gltf::import("../assets/cube.glb")?;
+    let mesh = WingedMesh::from_gltf("../assets/torus_low.glb")?;
 
-    for mesh in doc.meshes() {
-        for p in mesh.primitives() {
-            let reader = p.reader(|buffer| Some(&buffers[buffer.index()]));
+    for f in &mesh.faces {
+        let e = f.edge.unwrap();
 
-            let iter = reader.read_positions().unwrap();
-            let verts: Vec<[f32; 3]> = iter.collect();
-
-            let indices: Vec<u16> = match reader.read_indices() {
-                Some(ReadIndices::U16(iter)) => iter.collect(),
-                _ => panic!("Unsupported index size"),
-            };
-            let mut mesh = WingedMesh::new(indices.len() / 3, verts.len());
-
-            for i in 0..mesh.faces.len() {
-                let a = indices[i * 3] as usize;
-                let b = indices[i * 3 + 1] as usize;
-                let c = indices[i * 3 + 2] as usize;
-
-                println!("Face {i}: {a} {b} {c}");
-
-                mesh.add_tri(FaceID(i), VertID(a), VertID(b), VertID(c));
+        for e in mesh.iter_edge(e) {
+            if let Some(te) = mesh[e].twin {
+                println!(
+                    "Face {:?} is connected to {:?}",
+                    mesh[e].face.0, mesh[te].face.0
+                )
             }
+        }
+    }
+    let mut graph = Graph {
+        vertices: vec![
+            GraphVertex {
+                edges: vec![],
+                original_index: u32::MAX,
+                color: u32::MAX
+            };
+            mesh.faces.len()
+        ],
+    };
 
-            for f in &mesh.faces {
-                let e = f.edge.unwrap();
+    for f in &mesh.faces {
+        let e = f.edge.unwrap();
 
-                for e in mesh.iter_edge(e) {
-                    if let Some(te) = mesh[e].twin {
-                        println!(
-                            "Face {:?} is connected to {:?}",
-                            mesh[e].face.0, mesh[te].face.0
-                        )
-                    }
-                }
+        for e in mesh.iter_edge(e) {
+            if let Some(te) = mesh[e].twin {
+                graph.vertices[mesh[e].face.0].edges.push(GraphEdge {
+                    dst: mesh[te].face.0 as u32,
+                    weight: 1,
+                });
             }
         }
     }
 
+    let t1 = time::Instant::now();
+    graph
+        .partition(
+            &PartitioningConfig {
+                force_contiguous_partitions: Some(true),
+                ..Default::default()
+            },
+            1 + mesh.faces.len() as u32 / 128,
+        )
+        .unwrap();
+    println!("time: {}ms", t1.elapsed().as_millis());
+    println!("edge cut {}", graph.calculate_edge_cut());
+    let infos = graph.partition_info();
+    println!(
+        "partitions: {}, with sizes from {} to {} with an average of {})",
+        graph.count_partitions(),
+        infos.0,
+        infos.1,
+        infos.2
+    );
+    let sizes = graph.partition_sizes();
+    for c in 0..=graph.max_partition_color() {
+        let s = sizes[c as usize];
+        println!(
+            "partition {c} with size {s} has {} parts",
+            graph.count_partition_parts(c, s)
+        );
+    }
     Ok(())
 }
