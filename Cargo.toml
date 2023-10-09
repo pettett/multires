@@ -1,0 +1,9 @@
+[workspace]
+members = ["baker"]
+
+[workspace.package]
+authors = ["mp2015@cam.ac.uk"]
+version = "0.1.0"
+edition = "2021"
+
+[workspace.dependencies]

@@ -1,0 +1,7 @@
+[package]
+name = "baker"
+version.workspace = true
+
+
+[dependencies]
+gltf = "1.3"
