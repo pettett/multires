@@ -179,6 +179,7 @@ dependencies = [
 name = "baker"
 version = "0.1.0"
 dependencies = [
+ "common",
  "gltf",
  "metis",
 ]
@@ -1696,6 +1697,7 @@ version = "0.1.0"
 dependencies = [
  "bevy_ecs",
  "bytemuck",
+ "common",
  "env_logger",
  "glam",
  "gltf",

@@ -52,8 +52,9 @@ pub async fn run() {
                     state.input(event);
                 }
             },
+
             Event::RedrawRequested(window_id) if window_id == state.renderer().window().id() => {
-                state.render()
+                state.redraw()
 
                 // match state.render() {
                 //     Ok(_) => {}
@@ -68,6 +69,8 @@ pub async fn run() {
             Event::MainEventsCleared => {
                 // RedrawRequested will only trigger once, unless we manually
                 // request it.
+                state.update();
+
                 state.renderer().window().request_redraw();
             }
             _ => {}

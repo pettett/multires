@@ -6,10 +6,10 @@ use crate::components::transform::Transform;
 
 #[derive(Component)]
 pub struct Camera {
-    pub aspect: f32,
-    pub fovy: f32,
-    pub znear: f32,
-    pub zfar: f32,
+    aspect: f32,
+    fovy: f32,
+    znear: f32,
+    zfar: f32,
 }
 
 #[rustfmt::skip]
@@ -31,6 +31,10 @@ impl Camera {
             znear: 0.01,
             zfar: 100.0,
         }
+    }
+
+    pub fn on_resize(&mut self, size: &winit::dpi::PhysicalSize<u32>) {
+        self.aspect = size.width as f32 / size.height as f32;
     }
 
     pub fn build_view_projection_matrix(&self, transform: &Transform) -> Mat4 {

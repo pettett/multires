@@ -1,9 +1,6 @@
-use std::sync::{Arc, Mutex};
-
 use bevy_ecs::{
-    event::Events,
+    event::{Event, Events},
     schedule::Schedule,
-    system::Query,
     world::{Mut, World},
 };
 use glam::{Quat, Vec3A};
@@ -19,11 +16,20 @@ use crate::components::{
     transform::Transform,
 };
 
-use super::{renderer::render, Renderer};
+use super::{
+    renderer::{handle_screen_events, render},
+    Renderer,
+};
+
+#[derive(Event)]
+pub enum ScreenEvent {
+    Resize(winit::dpi::PhysicalSize<u32>),
+}
 
 pub struct App {
     world: World,
-    schedule: Schedule,
+    window_schedule: Schedule,
+    redraw_schedule: Schedule,
     //puffin_ui : puffin_imgui::ProfilerUi,
 }
 
@@ -36,29 +42,39 @@ impl App {
         world.insert_resource(Events::<MouseIn>::default());
         world.insert_resource(Events::<MouseMv>::default());
         world.insert_resource(Events::<KeyIn>::default());
+        world.insert_resource(Events::<ScreenEvent>::default());
 
         let mesh = Mesh::load_mesh(renderer.instance());
 
         world.spawn(mesh);
         world.spawn((
-            CameraController::new(0.5),
+            CameraController::new(0.05),
             Camera::new(1.0),
             Transform::new(Vec3A::ZERO, Quat::IDENTITY),
             CameraUniform::new(),
         ));
 
-        let mut schedule = Schedule::default();
-
         world.insert_resource(renderer);
 
-        // Add our system to the schedule
-        schedule.add_systems((camera_handle_input, update_camera, update_view_proj, render));
+        let mut window_schedule = Schedule::default();
+        window_schedule.add_systems((handle_screen_events, camera_handle_input));
 
-        Self { world, schedule }
+        let mut redraw_schedule = Schedule::default();
+        redraw_schedule.add_systems((update_camera, update_view_proj, render));
+
+        Self {
+            world,
+            window_schedule,
+            redraw_schedule,
+        }
     }
 
-    pub fn render(&mut self) {
-        self.schedule.run(&mut self.world);
+    pub fn redraw(&mut self) {
+        self.redraw_schedule.run(&mut self.world);
+    }
+
+    pub fn update(&mut self) {
+        self.window_schedule.run(&mut self.world);
     }
 
     pub fn renderer(&self) -> &Renderer {
@@ -67,10 +83,7 @@ impl App {
 
     // impl State
     pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
-        if new_size.width > 0 && new_size.height > 0 {
-            let mut r: Mut<'_, Renderer> = self.world.get_resource_mut().unwrap();
-            r.resize(new_size);
-        }
+        self.world.send_event(ScreenEvent::Resize(new_size));
     }
 
     pub fn size(&self) -> winit::dpi::PhysicalSize<u32> {

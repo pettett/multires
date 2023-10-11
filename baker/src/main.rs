@@ -1,11 +1,13 @@
 extern crate gltf;
 
 pub mod winged_mesh;
+use common::{asset::Asset, MultiResMesh};
 use metis::{Graph, GraphEdge, GraphVertex, PartitioningConfig};
 use std::time;
 
 fn main() -> gltf::Result<()> {
-    let mesh = winged_mesh::WingedMesh::from_gltf("../assets/torus_low.glb")?;
+    let mesh_name = "../assets/torus_low.glb";
+    let mesh = winged_mesh::WingedMesh::from_gltf(mesh_name)?;
 
     for f in mesh.faces() {
         let e = f.edge.unwrap();
@@ -74,5 +76,15 @@ fn main() -> gltf::Result<()> {
             graph.count_partition_parts(c, s)
         );
     }
+
+    let cols: Vec<_> = graph.vertices.iter().map(|v| v.color).collect();
+
+    MultiResMesh {
+        name: mesh_name.to_owned(),
+        clusters: cols,
+    }
+    .save()
+    .unwrap();
+
     Ok(())
 }

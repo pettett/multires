@@ -4,85 +4,46 @@ use std::{
 };
 
 use bevy_ecs::component::Component;
+use common::asset::Asset;
 use gltf::mesh::util::ReadIndices;
 use wgpu::util::DeviceExt;
 
-use crate::core::{Instance, Renderer};
+use crate::core::{Buffer, Instance, Renderer};
 
 #[derive(Component)]
 pub struct Mesh {
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
     index_format: wgpu::IndexFormat,
+    partitions: Buffer,
     num_indices: u32,
     //puffin_ui : puffin_imgui::ProfilerUi,
 }
 impl Mesh {
-    pub fn render_pass(
-        &self,
-        state: &Renderer,
-        encoder: &mut wgpu::CommandEncoder,
-        output: &wgpu::SurfaceTexture,
-        view: &wgpu::TextureView,
-    ) {
+    pub fn render_pass<'a>(&'a self, state: &'a Renderer, render_pass: &mut wgpu::RenderPass<'a>) {
         // 1.
-        let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("Render Pass"),
-            color_attachments: &[
-                // This is what @location(0) in the fragment shader targets
-                Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.1,
-                            g: 0.2,
-                            b: 0.3,
-                            a: 1.0,
-                        }),
-                        store: true,
-                    },
-                }),
-            ],
-            depth_stencil_attachment: None,
-        });
 
         render_pass.set_pipeline(state.render_pipeline());
 
         render_pass.set_bind_group(0, state.camera_bind_group(), &[]);
+        render_pass.set_bind_group(1, self.partitions.bind_group(), &[]);
+
         render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
         render_pass.set_index_buffer(self.index_buffer.slice(..), self.index_format);
 
         render_pass.draw_indexed(0..self.num_indices, 0, 0..1);
     }
 
-    pub fn init(renderer: &Renderer) -> Self {
-        let vertex_buffer =
-            renderer
-                .device()
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("Vertex Buffer"),
-                    contents: &[],
-                    usage: wgpu::BufferUsages::VERTEX,
-                });
-
-        let index_buffer =
-            renderer
-                .device()
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("Index Buffer"),
-                    contents: &[],
-                    usage: wgpu::BufferUsages::INDEX,
-                });
-
-        Mesh {
-            vertex_buffer,
-            index_buffer,
-            num_indices: 0,
-            index_format: wgpu::IndexFormat::Uint16,
-        }
-    }
     pub fn load_mesh(instance: Arc<Instance>) -> Self {
+        let asset = common::MultiResMesh::load().unwrap();
+
+        let partitions = Buffer::create_storage(
+            &asset.clusters[..],
+            instance.device(),
+            Some("Partition Buffer"),
+            &instance.partition_bind_group_layout(),
+        );
+
         let (document, buffers, images) =
             gltf::import("../assets/torus_low.glb").expect("Torus import should work");
 
@@ -111,7 +72,7 @@ impl Mesh {
                     instance
                         .device()
                         .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("Index Buffer"),
+                            label: Some("U16 Index Buffer"),
                             contents: bytemuck::cast_slice(&indicies[..]),
                             usage: wgpu::BufferUsages::INDEX,
                         }),
@@ -126,7 +87,7 @@ impl Mesh {
                     instance
                         .device()
                         .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("Index Buffer"),
+                            label: Some("U32 Index Buffer"),
                             contents: bytemuck::cast_slice(&indicies[..]),
                             usage: wgpu::BufferUsages::INDEX,
                         }),
@@ -141,6 +102,7 @@ impl Mesh {
             vertex_buffer,
             index_buffer,
             num_indices: num_indices as u32,
+            partitions,
             index_format,
         }
     }

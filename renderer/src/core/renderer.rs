@@ -1,15 +1,17 @@
 use std::sync::Arc;
 
-use crate::components::camera_controller::CameraController;
 use crate::components::camera_uniform::CameraUniform;
 use crate::components::mesh::Mesh;
+use crate::components::{camera::Camera, camera_controller::CameraController};
 use crate::vertex::Vertex;
+use bevy_ecs::event::EventReader;
 use bevy_ecs::system::{Query, ResMut, Resource};
 use wgpu::util::DeviceExt;
 use winit::dpi::PhysicalSize;
 use winit::window::Window;
 
-use super::Instance;
+use super::app::ScreenEvent;
+use super::{Instance, Texture};
 #[derive(Resource)]
 pub struct Renderer {
     instance: Arc<Instance>,
@@ -19,6 +21,7 @@ pub struct Renderer {
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
     render_pipeline: wgpu::RenderPipeline,
+    depth_texture: Texture,
 }
 
 impl Renderer {
@@ -51,7 +54,7 @@ impl Renderer {
         let (device, queue) = adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
-                    features: wgpu::Features::empty(),
+                    features: wgpu::Features::SHADER_PRIMITIVE_INDEX,
                     // WebGL doesn't support all of wgpu's features, so if
                     // we're building for the web we'll have to disable some.
                     limits: if cfg!(target_arch = "wasm32") {
@@ -110,6 +113,21 @@ impl Renderer {
                 label: Some("camera_bind_group_layout"),
             });
 
+        let partition_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+                label: Some("camera_bind_group_layout"),
+            });
+
         let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &camera_bind_group_layout,
             entries: &[wgpu::BindGroupEntry {
@@ -122,7 +140,7 @@ impl Renderer {
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
-                bind_group_layouts: &[&camera_bind_group_layout],
+                bind_group_layouts: &[&camera_bind_group_layout, &partition_bind_group_layout],
                 push_constant_ranges: &[],
             });
 
@@ -146,9 +164,9 @@ impl Renderer {
                 })],
             }),
             primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList, // 1.
+                topology: wgpu::PrimitiveTopology::TriangleList,
                 strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw, // 2.
+                front_face: wgpu::FrontFace::Ccw,
                 cull_mode: Some(wgpu::Face::Back),
                 // Setting this to anything other than Fill requires Features::NON_FILL_POLYGON_MODE
                 polygon_mode: wgpu::PolygonMode::Fill,
@@ -157,33 +175,47 @@ impl Renderer {
                 // Requires Features::CONSERVATIVE_RASTERIZATION
                 conservative: false,
             },
-            depth_stencil: None, // 1.
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: Texture::DEPTH_FORMAT,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::Less,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
             multisample: wgpu::MultisampleState {
-                count: 1,                         // 2.
-                mask: !0,                         // 3.
-                alpha_to_coverage_enabled: false, // 4.
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
             },
-            multiview: None, // 5.
+            multiview: None,
         });
 
-        let camera_controller = CameraController::new(0.2);
+        let depth_texture = Texture::create_depth_texture(&device, &config, "Depth Texture");
 
         Self {
             window,
-            instance: Arc::new(Instance::new(surface, device, queue)),
-
+            instance: Arc::new(Instance::new(
+                surface,
+                device,
+                queue,
+                camera_bind_group_layout,
+                partition_bind_group_layout,
+            )),
             config,
             size,
+            depth_texture,
             render_pipeline,
             camera_buffer,
             camera_bind_group,
         }
     }
-    pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
+    pub fn on_resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
         if new_size.width > 0 && new_size.height > 0 {
             self.size = new_size;
             self.config.width = new_size.width;
             self.config.height = new_size.height;
+            self.depth_texture =
+                Texture::create_depth_texture(self.device(), &self.config, "Resized Depth Texture");
             self.instance
                 .surface()
                 .configure(&self.instance.device(), &self.config);
@@ -241,13 +273,61 @@ pub fn render(mut renderer: ResMut<Renderer>, meshes: Query<&Mesh>, camera: Quer
             bytemuck::cast_slice(&[*camera]),
         );
     }
-    for mesh in meshes.iter() {
-        mesh.render_pass(&renderer, &mut encoder, &output, &view);
+    {
+        let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("Mesh Render Pass"),
+            color_attachments: &[
+                // This is what @location(0) in the fragment shader targets
+                Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: 0.1,
+                            g: 0.2,
+                            b: 0.3,
+                            a: 1.0,
+                        }),
+                        store: true,
+                    },
+                }),
+            ],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: &renderer.depth_texture.view(),
+                depth_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(1.0),
+                    store: true,
+                }),
+                stencil_ops: None,
+            }),
+        });
+
+        for mesh in meshes.iter() {
+            mesh.render_pass(&renderer, &mut render_pass);
+        }
     }
+
     // submit will accept anything that implements IntoIter
     renderer
         .instance
         .queue()
         .submit(std::iter::once(encoder.finish()));
     output.present();
+}
+
+pub fn handle_screen_events(
+    mut events: EventReader<ScreenEvent>,
+    mut renderer: ResMut<Renderer>,
+    mut cameras: Query<&mut Camera>,
+) {
+    for event in events.iter() {
+        match event {
+            ScreenEvent::Resize(new_size) => {
+                renderer.on_resize(*new_size);
+                for mut camera in cameras.iter_mut() {
+                    camera.on_resize(new_size);
+                }
+            }
+        }
+    }
 }
