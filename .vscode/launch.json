@@ -7,39 +7,34 @@
 		{
 			"type": "lldb",
 			"request": "launch",
-			"name": "Debug executable 'baker'",
+			"name": "Debug executable 'renderer'",
 			"cargo": {
 				"args": [
 					"build",
-					"--bin=baker",
-					"--package=baker"
+					"--bin=renderer",
+					"--package=renderer"
 				],
 				"filter": {
-					"name": "baker",
+					"name": "renderer",
 					"kind": "bin"
 				}
 			},
 			"args": [],
-			"cwd": "${workspaceFolder}",
-			"env": {
-				"METISDIR": "C:\\Users\\maxwe\\OneDriveC\\sync\\projects\\vendor\\metis",
-				"CPATH": "C:\\Users\\maxwe\\OneDriveC\\sync\\projects\\vendor\\metis\\include",
-				"RUSTFLAGS": "-LC:\\Users\\maxwe\\OneDriveC\\sync\\projects\\vendor\\metis\\libmetis"
-			}
+			"cwd": "${workspaceFolder}"
 		},
 		{
 			"type": "lldb",
 			"request": "launch",
-			"name": "Debug unit tests in executable 'baker'",
+			"name": "Debug unit tests in executable 'renderer'",
 			"cargo": {
 				"args": [
 					"test",
 					"--no-run",
-					"--bin=baker",
-					"--package=baker"
+					"--bin=renderer",
+					"--package=renderer"
 				],
 				"filter": {
-					"name": "baker",
+					"name": "renderer",
 					"kind": "bin"
 				}
 			},
