@@ -4,7 +4,7 @@ use std::env;
 use std::path::PathBuf;
 
 fn main() {
-    let dst = cmake::Config::new("../../vendor").build();
+    let dst = cmake::Config::new("../vendor/metis").build();
     println!("cargo:rustc-link-search={}", dst.join("lib").display());
     println!("cargo:rustc-link-lib=static=metis");
 
