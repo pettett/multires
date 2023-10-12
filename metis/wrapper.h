@@ -1,1 +1,1 @@
-#include "../../vendor/src/include/metis.h.in"
+#include "../vendor/metis/src/include/metis.h.in"

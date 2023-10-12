@@ -8,3 +8,4 @@ edition.workspace = true
 gltf = "1.3"
 metis = { path = "../metis" }
 common = { path = "../common" }
+petgraph.workspace = true

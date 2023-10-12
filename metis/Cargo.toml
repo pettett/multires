@@ -8,6 +8,7 @@ edition.workspace = true
 log = "0.4"
 cxx = "1.0.94"
 thiserror = "1.0.40"
+petgraph.workspace = true
 
 [build-dependencies]
 bindgen = "0.64.0"

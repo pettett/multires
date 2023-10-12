@@ -232,6 +232,37 @@ impl<'a> PartitioningConfig<'a> {
             options[moptions_et_METIS_OPTION_UFACTOR as usize] = x as idx_t;
         }
     }
+    pub fn partition_from_graph(
+        &self,
+        partitions: u32,
+        graph: petgraph::Graph<i32, i32>,
+    ) -> Result<Vec<idx_t>, PartitioningError> {
+        let mut adjacency = Vec::new();
+        let mut adjacency_idx = Vec::new();
+        //TODO: It may be possible for the neighbours to be duplicated, investigate
+        for v in graph.node_indices() {
+            adjacency_idx.push(adjacency.len() as idx_t);
+
+            for n in graph.neighbors(v) {
+                adjacency.push(n.index() as i32)
+            }
+        }
+
+        let adjacency_weight = vec![1; adjacency.len()];
+
+        adjacency_idx.push(adjacency.len() as idx_t);
+
+        let weights = Vec::new();
+
+        self.partition_from_adj(
+            partitions,
+            graph.node_count(),
+            weights,
+            adjacency,
+            adjacency_idx,
+            adjacency_weight,
+        )
+    }
 
     pub fn partition_from_adj(
         &self,

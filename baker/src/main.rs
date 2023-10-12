@@ -2,7 +2,7 @@ extern crate gltf;
 
 pub mod winged_mesh;
 use common::{asset::Asset, MultiResMesh};
-use metis::PartitioningConfig;
+use metis::PartitioningConfig; 
 use std::time;
 
 fn main() -> gltf::Result<()> {
@@ -27,6 +27,8 @@ fn main() -> gltf::Result<()> {
         .unwrap();
 
     println!("time: {}ms", t1.elapsed().as_millis());
+
+    let mut graph = petgraph::Graph::<i32, i32>::new();
 
     MultiResMesh {
         name: mesh_name.to_owned(),
