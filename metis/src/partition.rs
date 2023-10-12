@@ -10,8 +10,8 @@ use crate::{
     moptions_et_METIS_OPTION_SEED, moptions_et_METIS_OPTION_UFACTOR, mrtype_et_METIS_RTYPE_FM,
     mrtype_et_METIS_RTYPE_GREEDY, mrtype_et_METIS_RTYPE_SEP1SIDED, mrtype_et_METIS_RTYPE_SEP2SIDED,
     real_t, rstatus_et_METIS_ERROR, rstatus_et_METIS_ERROR_INPUT, rstatus_et_METIS_ERROR_MEMORY,
-    rstatus_et_METIS_OK, Graph, METIS_PartGraphKway, METIS_PartGraphRecursive,
-    METIS_SetDefaultOptions, METIS_NOPTIONS,
+    rstatus_et_METIS_OK, METIS_PartGraphKway, METIS_PartGraphRecursive, METIS_SetDefaultOptions,
+    METIS_NOPTIONS,
 };
 use std::ptr::null_mut;
 use thiserror::Error;
@@ -157,6 +157,8 @@ impl<'a> Default for PartitioningConfig<'a> {
 
 impl<'a> PartitioningConfig<'a> {
     fn apply(&self, options: &mut [idx_t]) {
+        assert_eq!(options.len(), METIS_NOPTIONS as usize);
+
         if let Some(x) = self.coarsening {
             options[moptions_et_METIS_OPTION_CTYPE as usize] = match x {
                 CoarseningScheme::RandomMatching => mctype_et_METIS_CTYPE_RM as idx_t,
@@ -230,52 +232,18 @@ impl<'a> PartitioningConfig<'a> {
             options[moptions_et_METIS_OPTION_UFACTOR as usize] = x as idx_t;
         }
     }
-}
 
-#[derive(Error, Debug)]
-pub enum PartitioningError {
-    #[error("number weights did not correspond to partition count")]
-    WeightsMismatch,
-    #[error("erroneous inputs and/or options")]
-    Input,
-    #[error("insufficient memory")]
-    Memory,
-    #[error("other error")]
-    Other,
-}
-
-impl Graph {
-    /// Partitions the graph using METIS.
-    pub fn partition(
-        &mut self,
-        config: &PartitioningConfig,
+    pub fn partition_from_adj(
+        &self,
         partitions: u32,
-    ) -> Result<(), PartitioningError> {
-        let mut n = self.vertices.len() as idx_t;
-        let mut adjacency = Vec::new(); // adjncy
-        let mut adjacency_weight = Vec::new(); // adjcwgt
-        let mut adjacency_idx = Vec::new(); // xadj
-        for v in self.vertices.iter() {
-            adjacency_idx.push(adjacency.len() as idx_t);
-            for e in v.edges.iter() {
-                adjacency.push(e.dst as idx_t);
-                adjacency_weight.push(e.weight as idx_t)
-            }
-        }
-        adjacency_idx.push(adjacency.len() as idx_t);
-
-        let mut weights = Vec::new();
-        if let Some(cw) = &config.weights {
-            if cw.len() != partitions as usize {
-                return Err(PartitioningError::WeightsMismatch);
-            }
-            weights.reserve(partitions as usize);
-            for &w in cw.iter() {
-                weights.push(w as real_t);
-            }
-        }
-
-        let mut part = vec![0 as idx_t; self.vertices.len()];
+        nodes: usize,
+        mut weights: Vec<f32>,
+        mut adjacency: Vec<i32>,
+        mut adjacency_idx: Vec<i32>,
+        mut adjacency_weight: Vec<i32>,
+    ) -> Result<Vec<idx_t>, PartitioningError> {
+        let mut n = nodes as idx_t;
+        let mut part = vec![0 as idx_t; nodes];
         let mut edge_cut = 0 as idx_t;
         let mut nparts = partitions as idx_t;
         let mut num_constraints = 1 as idx_t;
@@ -284,9 +252,9 @@ impl Graph {
         unsafe {
             METIS_SetDefaultOptions(&mut options as *mut idx_t);
         }
-        config.apply(&mut options);
+        self.apply(&mut options);
 
-        let status = if config.method == PartitioningMethod::MultilevelKWay {
+        let status = if self.method == PartitioningMethod::MultilevelKWay {
             unsafe {
                 METIS_PartGraphKway(
                     &mut n,
@@ -332,19 +300,23 @@ impl Graph {
             }
         };
 
-        if status == rstatus_et_METIS_ERROR_INPUT {
-            return Err(PartitioningError::Input);
+        match status {
+            rstatus_et_METIS_OK => Ok(part),
+            rstatus_et_METIS_ERROR_INPUT => Err(PartitioningError::Input),
+            rstatus_et_METIS_ERROR_MEMORY => Err(PartitioningError::Memory),
+            _ => Err(PartitioningError::Other),
         }
-        if status == rstatus_et_METIS_ERROR_MEMORY {
-            return Err(PartitioningError::Memory);
-        }
-        if status == rstatus_et_METIS_ERROR || status != rstatus_et_METIS_OK {
-            return Err(PartitioningError::Other);
-        }
-
-        for (i, &p) in part.iter().enumerate() {
-            self.vertices[i].color = p as u32;
-        }
-        Ok(())
     }
+}
+
+#[derive(Error, Debug)]
+pub enum PartitioningError {
+    #[error("number weights did not correspond to partition count")]
+    WeightsMismatch,
+    #[error("erroneous inputs and/or options")]
+    Input,
+    #[error("insufficient memory")]
+    Memory,
+    #[error("other error")]
+    Other,
 }

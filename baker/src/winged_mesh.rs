@@ -1,7 +1,11 @@
 extern crate gltf;
 
-use metis::{Graph, GraphEdge, GraphVertex, PartitioningConfig};
-use std::{collections::HashMap, time};
+use metis::{
+    idx_t, real_t, rstatus_et_METIS_ERROR_INPUT, rstatus_et_METIS_ERROR_MEMORY,
+    rstatus_et_METIS_OK, METIS_PartGraphKway, METIS_PartGraphRecursive, METIS_SetDefaultOptions,
+    PartitioningConfig, PartitioningError, PartitioningMethod, METIS_NOPTIONS,
+};
+use std::{collections::HashMap, ptr::null_mut, time};
 
 use gltf::mesh::util::ReadIndices;
 
@@ -67,6 +71,7 @@ impl<'a> Iterator for EdgeIter<'a> {
 pub struct WingedMesh {
     verts: Vec<Vertex>,
     faces: Vec<Face>,
+    partitions: Vec<i32>,
     edges: Vec<HalfEdge>,
     edge_map: HashMap<(VertID, VertID), EdgeID>,
 }
@@ -113,6 +118,7 @@ impl WingedMesh {
         Self {
             verts: vec![Default::default(); verts],
             faces: vec![Default::default(); faces],
+            partitions: vec![Default::default(); faces],
             edges: Default::default(),
             edge_map: Default::default(),
         }
@@ -203,5 +209,47 @@ impl WingedMesh {
 
     pub fn faces(&self) -> &[Face] {
         self.faces.as_ref()
+    }
+
+    pub fn partition(
+        &self,
+        config: &PartitioningConfig,
+        partitions: u32,
+    ) -> Result<Vec<idx_t>, PartitioningError> {
+        let mut adjacency = Vec::new(); // adjncy
+        let mut adjacency_idx = Vec::new(); // xadj
+
+        for v in self.faces.iter() {
+            adjacency_idx.push(adjacency.len() as idx_t);
+            for e in self.iter_edge(v.edge.unwrap()) {
+                if let Some(twin) = self[e].twin {
+                    adjacency.push(self[twin].face.0 as i32);
+                }
+            }
+        }
+
+        let adjacency_weight = vec![1; adjacency.len()]; // adjcwgt
+
+        adjacency_idx.push(adjacency.len() as idx_t);
+
+        let weights = Vec::new();
+        // if let Some(cw) = &config.weights {
+        //     if cw.len() != partitions as usize {
+        //         return Err(PartitioningError::WeightsMismatch);
+        //     }
+        //     weights.reserve(partitions as usize);
+        //     for &w in cw.iter() {
+        //         weights.push(w as real_t);
+        //     }
+        // }
+
+        config.partition_from_adj(
+            partitions,
+            self.faces.len(),
+            weights,
+            adjacency,
+            adjacency_idx,
+            adjacency_weight,
+        )
     }
 }

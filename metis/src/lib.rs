@@ -4,8 +4,6 @@
 
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 
-mod graph;
 mod partition;
 
-pub use graph::*;
 pub use partition::*;

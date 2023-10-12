@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Serialize, Deserialize)]
 pub struct MultiResMesh {
     pub name: String,
-    pub clusters: Vec<u32>,
+    pub clusters: Vec<i32>,
 }
 
 impl asset::Asset for MultiResMesh {}
