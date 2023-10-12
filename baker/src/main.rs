@@ -6,21 +6,24 @@ use metis::{Graph, GraphEdge, GraphVertex, PartitioningConfig};
 use std::time;
 
 fn main() -> gltf::Result<()> {
-    let mesh_name = "../assets/torus_low.glb";
+    let mesh_name = "../assets/Duck.glb";
+
+    println!("Loading from gltf!");
     let mesh = winged_mesh::WingedMesh::from_gltf(mesh_name)?;
 
-    for f in mesh.faces() {
-        let e = f.edge.unwrap();
+    println!("Loaded winged edge mesh from gltf!");
+    // for f in mesh.faces() {
+    //     let e = f.edge.unwrap();
 
-        for e in mesh.iter_edge(e) {
-            if let Some(te) = mesh[e].twin {
-                println!(
-                    "Face {:?} is connected to {:?}",
-                    mesh[e].face, mesh[te].face
-                )
-            }
-        }
-    }
+    //     for e in mesh.iter_edge(e) {
+    //         if let Some(te) = mesh[e].twin {
+    //             println!(
+    //                 "Face {:?} is connected to {:?}",
+    //                 mesh[e].face, mesh[te].face
+    //             )
+    //         }
+    //     }
+    // }
     let mut graph = Graph {
         vertices: vec![
             GraphVertex {
@@ -48,11 +51,12 @@ fn main() -> gltf::Result<()> {
         }
     }
 
+    println!("Partitioning Graph!");
     let t1 = time::Instant::now();
     graph
         .partition(
             &PartitioningConfig {
-                force_contiguous_partitions: Some(true),
+                //force_contiguous_partitions: Some(true),
                 ..Default::default()
             },
             1 + mesh.faces().len() as u32 / 128,

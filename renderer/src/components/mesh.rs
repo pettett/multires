@@ -45,7 +45,7 @@ impl Mesh {
         );
 
         let (document, buffers, images) =
-            gltf::import("../assets/torus_low.glb").expect("Torus import should work");
+            gltf::import(asset.name).expect("Torus import should work");
 
         let mesh = document.meshes().next().unwrap();
         let prim = mesh.primitives().next().unwrap();

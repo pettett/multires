@@ -1,15 +1,15 @@
 extern crate gltf;
 
 use metis::{Graph, GraphEdge, GraphVertex, PartitioningConfig};
-use std::time;
+use std::{collections::HashMap, time};
 
 use gltf::mesh::util::ReadIndices;
 
-#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default, Hash, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct VertID(usize);
-#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default, Hash, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FaceID(usize);
-#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default, Hash, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EdgeID(usize);
 
 impl Into<usize> for FaceID {
@@ -68,6 +68,7 @@ pub struct WingedMesh {
     verts: Vec<Vertex>,
     faces: Vec<Face>,
     edges: Vec<HalfEdge>,
+    edge_map: HashMap<(VertID, VertID), EdgeID>,
 }
 
 impl std::ops::Index<VertID> for WingedMesh {
@@ -113,6 +114,7 @@ impl WingedMesh {
             verts: vec![Default::default(); verts],
             faces: vec![Default::default(); faces],
             edges: Default::default(),
+            edge_map: Default::default(),
         }
     }
 
@@ -126,18 +128,17 @@ impl WingedMesh {
         let iter = reader.read_positions().unwrap();
         let verts: Vec<[f32; 3]> = iter.collect();
 
-        let indices: Vec<u16> = match reader.read_indices() {
-            Some(ReadIndices::U16(iter)) => iter.collect(),
+        let indices: Vec<usize> = match reader.read_indices() {
+            Some(ReadIndices::U16(iter)) => iter.map(|i| i as _).collect(),
+            Some(ReadIndices::U32(iter)) => iter.map(|i| i as _).collect(),
             _ => panic!("Unsupported index size"),
         };
         let mut mesh = WingedMesh::new(indices.len() / 3, verts.len());
 
         for i in 0..mesh.faces.len() {
-            let a = indices[i * 3] as usize;
-            let b = indices[i * 3 + 1] as usize;
-            let c = indices[i * 3 + 2] as usize;
-
-            println!("Face {i}: {a} {b} {c}");
+            let a = indices[i * 3];
+            let b = indices[i * 3 + 1];
+            let c = indices[i * 3 + 2];
 
             mesh.add_tri(FaceID(i), VertID(a), VertID(b), VertID(c));
         }
@@ -146,12 +147,7 @@ impl WingedMesh {
     }
 
     fn find_edge(&self, a: VertID, b: VertID) -> Option<EdgeID> {
-        for (i, e) in self.edges.iter().enumerate() {
-            if e.vert_origin == a && e.vert_destination == b {
-                return Some(EdgeID(i));
-            }
-        }
-        None
+        self.edge_map.get(&(a, b)).copied()
     }
 
     pub fn iter_edge(&self, e: EdgeID) -> EdgeIter {
@@ -177,6 +173,7 @@ impl WingedMesh {
             self.edges[te.0].twin = Some(EdgeID(self.edges.len()));
         }
 
+        self.edge_map.insert((orig, dest), EdgeID(self.edges.len()));
         self.edges.push(e);
     }
 

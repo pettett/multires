@@ -42,51 +42,6 @@ pub struct Graph {
 impl Graph {
     pub const MAX_EDGES_PER_VERTEX: u32 = 2048;
 
-    /// Deserializes an unweighted graph in the format used by the METIS library.
-    pub fn deserialize_metis<R: Read>(r: &mut R) -> Result<Self, Box<dyn std::error::Error>> {
-        let reader = BufReader::new(r);
-        let mut lines = reader.lines().map(|l| l.unwrap());
-
-        // Parse the header
-        let header = lines.next().ok_or("could not get header line")?;
-        let header_parts = header.split_ascii_whitespace().collect::<Vec<_>>();
-        let vertex_count = header_parts[0].parse::<usize>()?;
-        //let edge_count = header_parts[1].parse::<usize>().context("could not parse edge count")?;
-
-        let mut graph = Graph {
-            vertices: vec![
-                GraphVertex {
-                    edges: vec![],
-                    color: u32::MAX,
-                    original_index: u32::MAX,
-                };
-                vertex_count
-            ],
-        };
-
-        let mut src = 0;
-        for line in lines {
-            if line.starts_with('%') || line.starts_with('#') {
-                continue;
-            }
-            let parts: Vec<&str> = line.split_ascii_whitespace().collect();
-            for &dst_str in parts.iter() {
-                let dst = dst_str.parse::<u32>()? - 1;
-                graph.vertices[src as usize]
-                    .edges
-                    .push(GraphEdge { dst, weight: 1 });
-                if graph.vertices[src as usize].edges.len() as u32 > Self::MAX_EDGES_PER_VERTEX {
-                    panic!(
-                        "vertex has too many edges (the limit is {})",
-                        Self::MAX_EDGES_PER_VERTEX
-                    );
-                }
-            }
-            src += 1;
-        }
-        Ok(graph)
-    }
-
     /// Creates sub-graphs for all present partitions. Cut edges between partitions are lost.
     pub fn to_partitioned_graphs(&self) -> Vec<Graph> {
         // Remapping table for vertex indices
