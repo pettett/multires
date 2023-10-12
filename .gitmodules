@@ -1,0 +1,3 @@
+[submodule "vendor/metis"]
+    path = vendor/metis
+    url = https://github.com/KarypisLab/METIS
