@@ -3,8 +3,8 @@ pub struct Instance {
     surface: wgpu::Surface,
     device: wgpu::Device,
     queue: wgpu::Queue,
-    camera_bind_group_layout: wgpu::BindGroupLayout,
-    partition_bind_group_layout: wgpu::BindGroupLayout,
+    camera_bind_group_layout: super::buffer::BindGroupLayout<1>,
+    partition_bind_group_layout: super::buffer::BindGroupLayout<2>,
 }
 
 impl Instance {
@@ -12,8 +12,8 @@ impl Instance {
         surface: wgpu::Surface,
         device: wgpu::Device,
         queue: wgpu::Queue,
-        camera_bind_group_layout: wgpu::BindGroupLayout,
-        partition_bind_group_layout: wgpu::BindGroupLayout,
+        camera_bind_group_layout: super::buffer::BindGroupLayout<1>,
+        partition_bind_group_layout: super::buffer::BindGroupLayout<2>,
     ) -> Self {
         Self {
             surface,
@@ -34,11 +34,11 @@ impl Instance {
         &self.queue
     }
 
-    pub fn camera_bind_group_layout(&self) -> &wgpu::BindGroupLayout {
+    pub fn camera_bind_group_layout(&self) -> &super::buffer::BindGroupLayout<1> {
         &self.camera_bind_group_layout
     }
 
-    pub fn partition_bind_group_layout(&self) -> &wgpu::BindGroupLayout {
+    pub fn partition_bind_group_layout(&self) -> &super::buffer::BindGroupLayout<2> {
         &self.partition_bind_group_layout
     }
 }

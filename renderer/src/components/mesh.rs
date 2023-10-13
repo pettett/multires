@@ -8,14 +8,14 @@ use common::asset::Asset;
 use gltf::mesh::util::ReadIndices;
 use wgpu::util::DeviceExt;
 
-use crate::core::{Buffer, Instance, Renderer};
+use crate::core::{BufferGroup, Instance, Renderer};
 
 #[derive(Component)]
 pub struct Mesh {
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
     index_format: wgpu::IndexFormat,
-    partitions: Buffer,
+    partitions: BufferGroup<2>,
     num_indices: u32,
     //puffin_ui : puffin_imgui::ProfilerUi,
 }
@@ -25,7 +25,7 @@ impl Mesh {
 
         render_pass.set_pipeline(state.render_pipeline());
 
-        render_pass.set_bind_group(0, state.camera_bind_group(), &[]);
+        render_pass.set_bind_group(0, state.camera_buffer().bind_group(), &[]);
         render_pass.set_bind_group(1, self.partitions.bind_group(), &[]);
 
         render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
@@ -37,11 +37,11 @@ impl Mesh {
     pub fn load_mesh(instance: Arc<Instance>) -> Self {
         let asset = common::MultiResMesh::load().unwrap();
 
-        let partitions = Buffer::create_storage(
-            &asset.clusters[..],
+        let partitions = BufferGroup::create_plural_storage(
+            &[&asset.clusters[..], &asset.clusters2[..]],
             instance.device(),
-            Some("Partition Buffer"),
             &instance.partition_bind_group_layout(),
+            Some("Partition Buffer"),
         );
 
         let (document, buffers, images) =

@@ -7,7 +7,10 @@ struct CameraUniform {
 var<uniform> camera: CameraUniform;
 
 @group(1) @binding(0)
-var<storage, read> partitions: array<u32>;
+var<storage, read> partitions: array<i32>;
+
+@group(1) @binding(1)
+var<storage, read> partitions2: array<i32>;
 
 struct VertexInput {
     @location(0) position: vec3<f32>, 
@@ -36,9 +39,11 @@ fn vs_main(
 // Fragment shader
 @fragment
 fn fs_main(in: VertexOutput, @builtin(primitive_index) primitive_index: u32) -> @location(0) vec4<f32> {
-	var part = i32(partitions[primitive_index]);
+	var part1 = partitions[primitive_index];
+	var part2 = partitions2[part1];
 
-	var color = integer_to_rgb(&part);
+	var color1 = integer_to_rgb(&part1);
+	var color2 = integer_to_rgb(&part2);
 
-    return vec4<f32>(color, 1.0);
+    return vec4<f32>(mix(color1, color2, 0.7), 1.0);
 }

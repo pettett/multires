@@ -2,8 +2,12 @@ extern crate gltf;
 
 pub mod winged_mesh;
 use common::{asset::Asset, MultiResMesh};
-use metis::PartitioningConfig; 
-use std::time;
+use metis::PartitioningConfig;
+use petgraph::data::Build;
+use std::{
+    collections::{HashMap, HashSet},
+    time,
+};
 
 fn main() -> gltf::Result<()> {
     let mesh_name = "../assets/dragon_high.glb";
@@ -15,24 +19,46 @@ fn main() -> gltf::Result<()> {
 
     println!("Partitioning Graph!");
     let t1 = time::Instant::now();
-
+    let config = PartitioningConfig {
+        //force_contiguous_partitions: Some(true),
+        minimize_subgraph_degree: Some(true),
+        ..Default::default()
+    };
     let clusters = mesh
-        .partition(
-            &PartitioningConfig {
-                //force_contiguous_partitions: Some(true),
-                ..Default::default()
-            },
-            1 + mesh.faces().len() as u32 / 128,
-        )
+        .partition(&config, 1 + mesh.faces().len() as u32 / 128)
         .unwrap();
 
     println!("time: {}ms", t1.elapsed().as_millis());
 
+    println!("Generating the partition connections Graph!");
     let mut graph = petgraph::Graph::<i32, i32>::new();
+
+    let parts: HashSet<_> = clusters.iter().collect();
+    let nodes: HashMap<_, _> = parts
+        .iter()
+        .map(|i| {
+            let n = graph.add_node(1);
+            (n.index() as i32, n)
+        })
+        .collect();
+
+    for (i, face) in mesh.faces().iter().enumerate() {
+        for e in mesh.iter_edge(face.edge.unwrap()) {
+            if let Some(twin) = mesh[e].twin {
+                let idx: usize = mesh[twin].face.into();
+
+                graph.update_edge(nodes[&clusters[i]], nodes[&clusters[idx]], 1);
+            }
+        }
+    }
+
+    println!("Partitioning the partition!");
+    let clusters2 = config.partition_from_graph(5, &graph).unwrap();
 
     MultiResMesh {
         name: mesh_name.to_owned(),
         clusters,
+        clusters2,
     }
     .save()
     .unwrap();

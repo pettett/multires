@@ -235,7 +235,7 @@ impl<'a> PartitioningConfig<'a> {
     pub fn partition_from_graph(
         &self,
         partitions: u32,
-        graph: petgraph::Graph<i32, i32>,
+        graph: &petgraph::Graph<i32, i32>,
     ) -> Result<Vec<idx_t>, PartitioningError> {
         let mut adjacency = Vec::new();
         let mut adjacency_idx = Vec::new();
