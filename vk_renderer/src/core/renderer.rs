@@ -2,10 +2,10 @@ use std::sync::Arc;
 
 use crate::components::camera_uniform::CameraUniform;
 use crate::components::mesh::Mesh;
-use crate::components::{camera::Camera, camera_controller::CameraController};
 use crate::vertex::PosVertex;
 use bevy_ecs::event::EventReader;
 use bevy_ecs::system::{Query, ResMut, Resource};
+use common_renderer::components::camera::Camera;
 use vulkano::buffer::{Buffer, BufferCreateInfo, BufferUsage, Subbuffer};
 use vulkano::command_buffer::allocator::{
     StandardCommandBufferAllocator, StandardCommandBufferAllocatorCreateInfo,

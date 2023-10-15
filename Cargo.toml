@@ -1,5 +1,12 @@
 [workspace]
-members = ["baker", "metis", "renderer", "vk_renderer", "common"]
+members = [
+	"metis",
+	"common",
+	"baker",
+	"common_renderer",
+	"renderer",
+	"vk_renderer",
+]
 resolver = "2"
 
 [workspace.package]
@@ -12,4 +19,5 @@ glam = { version = "0.24.1", features = ["bytemuck"] }
 bytemuck = { version = "1.12", features = ["derive"] }
 env_logger = "0.10"
 log = "0.4"
+gltf = "1.3"
 petgraph.workspace = true

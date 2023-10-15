@@ -2,10 +2,10 @@ use std::sync::Arc;
 
 use crate::components::camera_uniform::CameraUniform;
 use crate::components::mesh::Mesh;
-use crate::components::{camera::Camera, camera_controller::CameraController};
 use crate::vertex::Vertex;
 use bevy_ecs::event::EventReader;
 use bevy_ecs::system::{Query, ResMut, Resource};
+use common_renderer::components::camera::Camera;
 use wgpu::util::DeviceExt;
 use winit::dpi::PhysicalSize;
 use winit::window::Window;

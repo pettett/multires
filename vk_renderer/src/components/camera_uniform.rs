@@ -2,9 +2,9 @@ use bevy_ecs::prelude::*;
 
 use glam::Mat4;
 
-use crate::components::transform::Transform;
+use common_renderer::components::transform::Transform;
 
-use super::camera::Camera;
+use common_renderer::components::camera::Camera;
 
 // We need this for Rust to store our data correctly for the shaders
 #[repr(C)]

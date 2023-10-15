@@ -3,17 +3,19 @@ use bevy_ecs::{
     schedule::Schedule,
     world::{Mut, World},
 };
-use glam::{Quat, Vec3A};
-use winit::event::WindowEvent;
-
-use crate::components::{
+use common_renderer::components::{
     camera::Camera,
     camera_controller::{
         camera_handle_input, update_camera, CameraController, KeyIn, MouseIn, MouseMv,
     },
+    transform::Transform,
+};
+use glam::{Quat, Vec3A};
+use winit::event::WindowEvent;
+
+use crate::components::{
     camera_uniform::{update_view_proj, CameraUniform},
     mesh::Mesh,
-    transform::Transform,
 };
 
 use super::{
