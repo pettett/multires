@@ -1,5 +1,5 @@
 [workspace]
-members = ["baker", "metis", "renderer", "common"]
+members = ["baker", "metis", "renderer", "vk_renderer", "common"]
 resolver = "2"
 
 [workspace.package]

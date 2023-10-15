@@ -40,6 +40,24 @@
 			},
 			"args": [],
 			"cwd": "${workspaceFolder}"
-		}
+		},
+		{
+			"type": "lldb",
+			"request": "launch",
+			"name": "Debug executable 'vk_renderer'",
+			"cargo": {
+				"args": [
+					"build",
+					"--bin=vk_renderer",
+					"--package=vk_renderer"
+				],
+				"filter": {
+					"name": "vk_renderer",
+					"kind": "bin"
+				}
+			},
+			"args": [],
+			"cwd": "${workspaceFolder}"
+		},
 	]
 }

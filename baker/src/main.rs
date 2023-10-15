@@ -10,7 +10,7 @@ use std::{
 };
 
 fn main() -> gltf::Result<()> {
-    let mesh_name = "../assets/dragon_high.glb";
+    let mesh_name = "../assets/torus.glb";
 
     println!("Loading from gltf!");
     let mesh = winged_mesh::WingedMesh::from_gltf(mesh_name)?;

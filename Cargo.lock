@@ -584,6 +584,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "crossbeam-queue"
+version = "0.3.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d1cfb3ea8a53f37c40dea2c7bedcbd88bdfae54f5e2175d6ecaff1c988353add"
+dependencies = [
+ "cfg-if",
+ "crossbeam-utils",
+]
+
+[[package]]
 name = "crossbeam-utils"
 version = "0.8.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -591,6 +601,12 @@ checksum = "5a22b2d63d4d1dc0b7f1b6b2747dd0088008a9be28b6ddf0b1e7d335e3037294"
 dependencies = [
  "cfg-if",
 ]
+
+[[package]]
+name = "crunchy"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7a81dae078cea95a014a339291cec439d2f232ebe854a9d672b796c6afafa9b7"
 
 [[package]]
 name = "cxx"
@@ -964,6 +980,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "half"
+version = "2.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bc52e53916c08643f1b56ec082790d1e86a32e58dc5268f897f313fbae7b4872"
+dependencies = [
+ "bytemuck",
+ "cfg-if",
+ "crunchy",
+]
+
+[[package]]
 name = "hashbrown"
 version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -994,6 +1021,12 @@ dependencies = [
  "widestring",
  "winapi",
 ]
+
+[[package]]
+name = "heck"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "95505c38b4572b2d910cecb0281560f54b440a19336cbbcb27bf6ce6adc6f5a8"
 
 [[package]]
 name = "hermit-abi"
@@ -1710,6 +1743,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "roxmltree"
+version = "0.14.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "921904a62e410e37e215c40381b7117f830d9d89ba60ab5236170541dd25646b"
+dependencies = [
+ "xmlparser",
+]
+
+[[package]]
 name = "rustc-demangle"
 version = "0.1.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1800,6 +1842,27 @@ dependencies = [
  "itoa",
  "ryu",
  "serde",
+]
+
+[[package]]
+name = "shaderc"
+version = "0.8.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "31cef52787a0db5108788ea20bed13d6bf4b96287c5c5201e55725f7070f3443"
+dependencies = [
+ "libc",
+ "shaderc-sys",
+]
+
+[[package]]
+name = "shaderc-sys"
+version = "0.8.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e8f8439fffcffd6efcd74197204addf935dbab5752696bd990a6cd36d54cf64"
+dependencies = [
+ "cmake",
+ "libc",
+ "roxmltree",
 ]
 
 [[package]]
@@ -2053,6 +2116,103 @@ name = "version_check"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
+
+[[package]]
+name = "vk-parse"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4c6a0bda9bbe6b9e50e6456c80aa8fe4cca3b21e4311a1130c41e4915ec2e32a"
+dependencies = [
+ "xml-rs",
+]
+
+[[package]]
+name = "vk_renderer"
+version = "0.1.0"
+dependencies = [
+ "bevy_ecs",
+ "bytemuck",
+ "common",
+ "env_logger",
+ "glam",
+ "gltf",
+ "log",
+ "pollster",
+ "vulkano",
+ "vulkano-shaders",
+ "vulkano-win",
+ "wgpu",
+ "winit",
+]
+
+[[package]]
+name = "vulkano"
+version = "0.33.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e1f15eeb9d93a05eb3c237332a10806eac1eb82444e54485bfcc1859c483c23"
+dependencies = [
+ "ahash",
+ "ash",
+ "bytemuck",
+ "core-graphics-types",
+ "crossbeam-queue",
+ "half",
+ "heck",
+ "indexmap 1.9.3",
+ "libloading",
+ "objc",
+ "once_cell",
+ "parking_lot",
+ "proc-macro2",
+ "quote",
+ "regex",
+ "serde",
+ "serde_json",
+ "smallvec",
+ "thread_local",
+ "vk-parse",
+ "vulkano-macros",
+]
+
+[[package]]
+name = "vulkano-macros"
+version = "0.33.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "895b8a2cac1e7650d2d0552f2392da0970a358515ac11a34adaf19bfdc771b98"
+dependencies = [
+ "proc-macro-crate",
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
+name = "vulkano-shaders"
+version = "0.33.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5f8cf18e9becbc6d39f1c39e26bcf69546c93989553eb5748cd734a8a697a6e5"
+dependencies = [
+ "ahash",
+ "heck",
+ "proc-macro2",
+ "quote",
+ "shaderc",
+ "syn 1.0.109",
+ "vulkano",
+]
+
+[[package]]
+name = "vulkano-win"
+version = "0.33.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "666c77efe5ea82837781961a6bcd957ee2e926777e8de0005f580335d6eaefe7"
+dependencies = [
+ "core-graphics-types",
+ "objc",
+ "raw-window-handle",
+ "vulkano",
+ "winit",
+]
 
 [[package]]
 name = "waker-fn"
@@ -2573,3 +2733,9 @@ name = "xml-rs"
 version = "0.8.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0fcb9cbac069e033553e8bb871be2fbdffcab578eb25bd0f7c508cedc6dcd75a"
+
+[[package]]
+name = "xmlparser"
+version = "0.13.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "66fee0b777b0f5ac1c69bb06d361268faafa61cd4682ae064a171c16c433e9e4"
