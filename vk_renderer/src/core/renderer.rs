@@ -17,10 +17,13 @@ use vulkano::descriptor_set::allocator::StandardDescriptorSetAllocator;
 use vulkano::descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet};
 use vulkano::device::physical::{PhysicalDevice, PhysicalDeviceType};
 use vulkano::device::{Device, DeviceCreateInfo, DeviceExtensions, Features, Queue, QueueFlags};
+use vulkano::format::Format;
+use vulkano::image::sys::{Image, ImageCreateInfo};
 use vulkano::image::view::ImageView;
-use vulkano::image::{ImageUsage, SwapchainImage};
+use vulkano::image::{AttachmentImage, ImageType, ImageUsage, StorageImage, SwapchainImage};
 use vulkano::instance::InstanceCreateInfo;
 use vulkano::memory::allocator::{AllocationCreateInfo, MemoryUsage, StandardMemoryAllocator};
+use vulkano::pipeline::graphics::depth_stencil::DepthStencilState;
 use vulkano::pipeline::graphics::input_assembly::InputAssemblyState;
 use vulkano::pipeline::graphics::viewport::{Viewport, ViewportState};
 use vulkano::pipeline::{GraphicsPipeline, Pipeline};
@@ -51,7 +54,7 @@ pub struct Renderer {
     images: Vec<Arc<SwapchainImage>>, // size = 24 (0x18), align = 0x8
 
     command_buffer_allocator: StandardCommandBufferAllocator,
-    //depth_texture: Texture,
+    depth_buffer: Arc<ImageView<AttachmentImage>>,
 }
 
 fn select_physical_device(
@@ -188,6 +191,12 @@ impl Renderer {
         )
         .unwrap();
 
+        let depth_buffer = ImageView::new_default(
+            AttachmentImage::transient(&memory_allocator, dimensions.into(), Format::D16_UNORM)
+                .unwrap(),
+        )
+        .unwrap();
+
         let render_pass = vulkano::single_pass_renderpass!(
             device.clone(),
             attachments: {
@@ -197,10 +206,16 @@ impl Renderer {
                     format: swapchain.image_format(),
                     samples: 1,
                 },
+                depth: {
+                    load: Clear,
+                    store: DontCare,
+                    format: Format::D16_UNORM,
+                    samples: 1,
+                }
             },
             pass: {
                 color: [color],
-                depth_stencil: {},
+                depth_stencil: {depth},
             },
         )
         .unwrap();
@@ -229,6 +244,8 @@ impl Renderer {
             .viewport_state(ViewportState::viewport_fixed_scissor_irrelevant([viewport]))
             // Same as the vertex input, but this for the fragment input
             .fragment_shader(fs.entry_point("main").unwrap(), ())
+            // do depth test
+            .depth_stencil_state(DepthStencilState::simple_depth_test())
             // This graphics pipeline object concerns the first pass of the render pass.
             .render_pass(Subpass::from(render_pass.clone(), 0).unwrap())
             // Now that everything is specified, we call `build`.
@@ -277,6 +294,7 @@ impl Renderer {
         );
         Self {
             window,
+            depth_buffer,
             instance: Arc::new(Instance::new(
                 surface,
                 device,
@@ -287,7 +305,6 @@ impl Renderer {
             )),
             //config,
             size,
-            //    depth_texture,
             command_buffer_allocator,
             render_pipeline,
             render_pass,
@@ -300,6 +317,7 @@ impl Renderer {
     pub fn on_resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
         if new_size.width > 0 && new_size.height > 0 {
             self.size = new_size;
+            //TODO:
             //self.config.width = new_size.width;
             //self.config.height = new_size.height;
             //self.depth_texture =
@@ -341,19 +359,6 @@ impl Renderer {
 }
 
 pub fn render(mut renderer: ResMut<Renderer>, meshes: Query<&Mesh>, camera: Query<&CameraUniform>) {
-    // let output = renderer.instance.surface().get_current_texture().unwrap();
-    // let view = output
-    //     .texture
-    //     .create_view(&wgpu::TextureViewDescriptor::default());
-
-    // let mut encoder =
-    //     renderer
-    //         .instance
-    //         .device()
-    //         .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-    //             label: Some("Render Encoder"),
-    //         });
-
     let (image_i, suboptimal, acquire_future) =
         match vulkano::swapchain::acquire_next_image(renderer.swapchain.clone(), None) {
             Ok(r) => r,
@@ -368,7 +373,7 @@ pub fn render(mut renderer: ResMut<Renderer>, meshes: Query<&Mesh>, camera: Quer
     let framebuffer = Framebuffer::new(
         renderer.render_pass.clone(),
         FramebufferCreateInfo {
-            attachments: vec![view],
+            attachments: vec![view, renderer.depth_buffer.clone()],
             ..Default::default()
         },
     )
@@ -384,18 +389,12 @@ pub fn render(mut renderer: ResMut<Renderer>, meshes: Query<&Mesh>, camera: Quer
     for camera in camera.iter() {
         let mut c = renderer.camera_buffer.write().unwrap();
         *c = *camera;
-
-        // renderer.instance.queue().write_buffer(
-        //     renderer.camera_buffer.buffer(),
-        //     0,
-        //     bytemuck::cast_slice(&[*camera]),
-        // );
     }
 
     builder
         .begin_render_pass(
             RenderPassBeginInfo {
-                clear_values: vec![Some([0.0, 0.0, 1.0, 1.0].into())],
+                clear_values: vec![Some([0.0, 0.0, 1.0, 1.0].into()), Some(1f32.into())],
                 ..RenderPassBeginInfo::framebuffer(framebuffer.clone())
             },
             SubpassContents::Inline,
@@ -403,44 +402,9 @@ pub fn render(mut renderer: ResMut<Renderer>, meshes: Query<&Mesh>, camera: Quer
         .unwrap()
         .bind_pipeline_graphics(renderer.render_pipeline.clone());
 
-    // let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-    //     label: Some("Mesh Render Pass"),
-    //     color_attachments: &[
-    //         // This is what @location(0) in the fragment shader targets
-    //         Some(wgpu::RenderPassColorAttachment {
-    //             view: &view,
-    //             resolve_target: None,
-    //             ops: wgpu::Operations {
-    //                 load: wgpu::LoadOp::Clear(wgpu::Color {
-    //                     r: 0.1,
-    //                     g: 0.2,
-    //                     b: 0.3,
-    //                     a: 1.0,
-    //                 }),
-    //                 store: true,
-    //             },
-    //         }),
-    //     ],
-    //     depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-    //         view: &renderer.depth_texture.view(),
-    //         depth_ops: Some(wgpu::Operations {
-    //             load: wgpu::LoadOp::Clear(1.0),
-    //             store: true,
-    //         }),
-    //         stencil_ops: None,
-    //     }),
-    // });
-
     for mesh in meshes.iter() {
         mesh.render_pass(&renderer, &mut builder);
     }
-
-    // submit will accept anything that implements IntoIter
-    // renderer
-    //     .instance
-    //     .queue()
-    //     .submit(std::iter::once(encoder.finish()));
-    // output.present();
 
     builder.end_render_pass().unwrap();
 
