@@ -16,7 +16,7 @@ use vulkano::command_buffer::{
 use vulkano::descriptor_set::allocator::StandardDescriptorSetAllocator;
 use vulkano::descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet};
 use vulkano::device::physical::{PhysicalDevice, PhysicalDeviceType};
-use vulkano::device::{Device, DeviceCreateInfo, DeviceExtensions, Queue, QueueFlags};
+use vulkano::device::{Device, DeviceCreateInfo, DeviceExtensions, Features, Queue, QueueFlags};
 use vulkano::image::view::ImageView;
 use vulkano::image::{ImageUsage, SwapchainImage};
 use vulkano::instance::InstanceCreateInfo;
@@ -144,6 +144,10 @@ impl Renderer {
                     ..Default::default()
                 }],
                 enabled_extensions: device_extensions,
+                enabled_features: Features {
+                    geometry_shader: true,
+                    ..Default::default()
+                },
                 ..Default::default()
             },
         )
@@ -245,7 +249,7 @@ impl Renderer {
         )
         .expect("failed to create camera buffer");
 
-        let descriptor_set_allocator = StandardDescriptorSetAllocator::new(device.clone());
+        let descriptor_set_memory_allocator = StandardDescriptorSetAllocator::new(device.clone());
         let pipeline_layout = render_pipeline.layout();
         let descriptor_set_layouts = pipeline_layout.set_layouts();
 
@@ -255,11 +259,16 @@ impl Renderer {
             .unwrap();
 
         let camera_descriptor_set = PersistentDescriptorSet::new(
-            &descriptor_set_allocator,
+            &descriptor_set_memory_allocator,
             camera_descriptor_set_layout.clone(),
             [WriteDescriptorSet::buffer(0, camera_buffer.clone())], // 0 is the binding
         )
         .unwrap();
+
+        let partitions_descriptor_set_layout_index = 1;
+        let partitions_descriptor_set_layout = descriptor_set_layouts
+            .get(partitions_descriptor_set_layout_index)
+            .unwrap();
 
         //let depth_texture = Texture::create_depth_texture(&device, &config, "Depth Texture");
         let command_buffer_allocator = StandardCommandBufferAllocator::new(
@@ -273,8 +282,8 @@ impl Renderer {
                 device,
                 queue,
                 memory_allocator,
-                // camera_bind_group_layout,
-                // partition_bind_group_layout,
+                descriptor_set_memory_allocator,
+                partitions_descriptor_set_layout.clone(),
             )),
             //config,
             size,
@@ -488,10 +497,29 @@ mod fs {
         src: "
             #version 460
 
-            layout(location = 0) out vec4 f_color;
+
+			layout(set = 1, binding = 0) buffer Data {
+                int data[];
+            } partitions;
+
+			layout(set = 1, binding = 1) buffer Data2 {
+                int data[];
+            } partitions2;
+
+
+			layout(location = 0) out vec4 f_color;
+
+
+			vec3 integer_to_rgb(int integer){
+				float red = 		float((integer * 109 + 47) % 269) / 269.0;
+				float green =  	float((integer * 83 + 251) % 127) / 127.0;
+				float blue =  	float((integer * 251 + 83) % 293) / 293.0;
+				return vec3(red, green, blue);
+			}
+			
 
             void main() {
-                f_color = vec4(1.0, 0.0, 0.0, 1.0);
+                f_color = vec4(integer_to_rgb(partitions2.data[partitions.data[gl_PrimitiveID]]), 1.0);
             }
         ",
     }

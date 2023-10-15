@@ -1,6 +1,12 @@
 use std::sync::Arc;
 
-use vulkano::memory::allocator::{FreeListAllocator, GenericMemoryAllocator};
+use vulkano::{
+    descriptor_set::{
+        allocator::StandardDescriptorSetAllocator, layout::DescriptorSetLayout,
+        PersistentDescriptorSet,
+    },
+    memory::allocator::{FreeListAllocator, GenericMemoryAllocator},
+};
 
 /// Data that will be read only for the course of the program
 pub struct Instance {
@@ -8,8 +14,9 @@ pub struct Instance {
     device: Arc<vulkano::device::Device>,
     queue: Arc<vulkano::device::Queue>,
     memory_allocator: GenericMemoryAllocator<Arc<FreeListAllocator>>,
+    descriptor_set_memory_allocator: StandardDescriptorSetAllocator,
     //camera_bind_group_layout: super::buffer::BindGroupLayout<1>,
-    //partition_bind_group_layout: super::buffer::BindGroupLayout<2>,
+    partitions_descriptor_set_layout: Arc<DescriptorSetLayout>,
 }
 
 impl Instance {
@@ -19,7 +26,8 @@ impl Instance {
         queue: Arc<vulkano::device::Queue>,
         memory_allocator: GenericMemoryAllocator<Arc<FreeListAllocator>>,
         //camera_bind_group_layout: super::buffer::BindGroupLayout<1>,
-        //partition_bind_group_layout: super::buffer::BindGroupLayout<2>,
+        descriptor_set_memory_allocator: StandardDescriptorSetAllocator,
+        partitions_descriptor_set_layout: Arc<DescriptorSetLayout>,
     ) -> Self {
         Self {
             surface,
@@ -27,7 +35,8 @@ impl Instance {
             queue,
             memory_allocator,
             //camera_bind_group_layout,
-            //partition_bind_group_layout,
+            descriptor_set_memory_allocator,
+            partitions_descriptor_set_layout,
         }
     }
 
@@ -51,5 +60,13 @@ impl Instance {
 
     pub fn memory_allocator(&self) -> &GenericMemoryAllocator<Arc<FreeListAllocator>> {
         &self.memory_allocator
+    }
+
+    pub fn partitions_descriptor_set_layout(&self) -> Arc<DescriptorSetLayout> {
+        self.partitions_descriptor_set_layout.clone()
+    }
+
+    pub fn descriptor_set_memory_allocator(&self) -> &StandardDescriptorSetAllocator {
+        &self.descriptor_set_memory_allocator
     }
 }

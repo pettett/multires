@@ -7,8 +7,9 @@ use bevy_ecs::component::Component;
 use common::asset::Asset;
 use gltf::mesh::util::ReadIndices;
 use vulkano::{
-    buffer::{BufferCreateInfo, BufferUsage, Subbuffer},
+    buffer::{Buffer, BufferCreateInfo, BufferUsage, Subbuffer},
     command_buffer::AutoCommandBufferBuilder,
+    descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet},
     memory::allocator::{AllocationCreateInfo, MemoryUsage},
     pipeline::Pipeline,
 };
@@ -19,7 +20,7 @@ use crate::core::{Instance, Renderer};
 pub struct Mesh {
     vertex_buffer: Subbuffer<[[f32; 3]]>,
     index_buffer: Subbuffer<[u32]>,
-    //partitions: BufferGroup<2>,
+    partitions: Arc<PersistentDescriptorSet>,
     num_indices: u32,
     //puffin_ui : puffin_imgui::ProfilerUi,
 }
@@ -37,7 +38,7 @@ impl Mesh {
                 vulkano::pipeline::PipelineBindPoint::Graphics,
                 state.render_pipeline().layout().clone(),
                 0,
-                state.camera_descriptor_set.clone(),
+                vec![state.camera_descriptor_set.clone(), self.partitions.clone()],
             )
             .bind_vertex_buffers(0, self.vertex_buffer.clone())
             .bind_index_buffer(self.index_buffer.clone())
@@ -54,6 +55,44 @@ impl Mesh {
         //    &instance.partition_bind_group_layout(),
         //    Some("Partition Buffer"),
         //);
+
+        let p1 = Buffer::from_iter(
+            instance.memory_allocator(),
+            BufferCreateInfo {
+                usage: BufferUsage::STORAGE_BUFFER,
+                ..Default::default()
+            },
+            AllocationCreateInfo {
+                usage: MemoryUsage::Upload,
+                ..Default::default()
+            },
+            asset.clusters,
+        )
+        .expect("failed to create p1 buffer");
+
+        let p2 = Buffer::from_iter(
+            instance.memory_allocator(),
+            BufferCreateInfo {
+                usage: BufferUsage::STORAGE_BUFFER,
+                ..Default::default()
+            },
+            AllocationCreateInfo {
+                usage: MemoryUsage::Upload,
+                ..Default::default()
+            },
+            asset.clusters2,
+        )
+        .expect("failed to create p2 buffer");
+
+        let partitions = PersistentDescriptorSet::new(
+            instance.descriptor_set_memory_allocator(),
+            instance.partitions_descriptor_set_layout(),
+            [
+                WriteDescriptorSet::buffer(0, p1),
+                WriteDescriptorSet::buffer(1, p2),
+            ], // 0 is the binding
+        )
+        .unwrap();
 
         let (document, buffers, images) =
             gltf::import(asset.name).expect("Torus import should work");
@@ -113,7 +152,8 @@ impl Mesh {
         Mesh {
             vertex_buffer,
             index_buffer,
-            num_indices, //partitions,
+            partitions,
+            num_indices,
         }
     }
 }
