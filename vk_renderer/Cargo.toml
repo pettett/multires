@@ -6,7 +6,6 @@ edition.workspace = true
 
 [dependencies]
 winit = "0.28"
-wgpu = "0.17"
 env_logger.workspace = true
 log.workspace = true
 bytemuck.workspace = true

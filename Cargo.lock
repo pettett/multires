@@ -2141,7 +2141,6 @@ dependencies = [
  "vulkano",
  "vulkano-shaders",
  "vulkano-win",
- "wgpu",
  "winit",
 ]
 

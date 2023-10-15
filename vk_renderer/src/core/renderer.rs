@@ -3,25 +3,27 @@ use std::sync::Arc;
 use crate::components::camera_uniform::CameraUniform;
 use crate::components::mesh::Mesh;
 use crate::components::{camera::Camera, camera_controller::CameraController};
-use crate::vertex::{MyVertex, Vertex};
+use crate::vertex::PosVertex;
 use bevy_ecs::event::EventReader;
 use bevy_ecs::system::{Query, ResMut, Resource};
+use vulkano::buffer::{Buffer, BufferCreateInfo, BufferUsage, Subbuffer};
 use vulkano::command_buffer::allocator::{
     StandardCommandBufferAllocator, StandardCommandBufferAllocatorCreateInfo,
 };
 use vulkano::command_buffer::{
     AutoCommandBufferBuilder, CommandBufferUsage, RenderPassBeginInfo, SubpassContents,
 };
+use vulkano::descriptor_set::allocator::StandardDescriptorSetAllocator;
+use vulkano::descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet};
 use vulkano::device::physical::{PhysicalDevice, PhysicalDeviceType};
 use vulkano::device::{Device, DeviceCreateInfo, DeviceExtensions, Queue, QueueFlags};
-use vulkano::format::Format;
 use vulkano::image::view::ImageView;
 use vulkano::image::{ImageUsage, SwapchainImage};
 use vulkano::instance::InstanceCreateInfo;
-use vulkano::memory::allocator::StandardMemoryAllocator;
+use vulkano::memory::allocator::{AllocationCreateInfo, MemoryUsage, StandardMemoryAllocator};
 use vulkano::pipeline::graphics::input_assembly::InputAssemblyState;
 use vulkano::pipeline::graphics::viewport::{Viewport, ViewportState};
-use vulkano::pipeline::GraphicsPipeline;
+use vulkano::pipeline::{GraphicsPipeline, Pipeline};
 use vulkano::render_pass::{Framebuffer, FramebufferCreateInfo, RenderPass, Subpass};
 use vulkano::swapchain::{
     AcquireError, Surface, Swapchain, SwapchainCreateInfo, SwapchainPresentInfo,
@@ -33,15 +35,16 @@ use winit::dpi::PhysicalSize;
 use winit::window::{Window, WindowBuilder};
 
 use super::app::ScreenEvent;
-use super::buffer::BindGroupLayout;
-use super::{BufferGroup, Instance, Texture};
+use super::Instance;
 #[derive(Resource)]
 pub struct Renderer {
     window: Arc<Window>,
     instance: Arc<Instance>,
     //config: wgpu::SurfaceConfiguration,
     size: winit::dpi::PhysicalSize<u32>,
-    //camera_buffer: BufferGroup<1>,
+    camera_buffer: Subbuffer<CameraUniform>,
+    pub camera_descriptor_set: Arc<PersistentDescriptorSet>,
+
     render_pipeline: Arc<GraphicsPipeline>,
     render_pass: Arc<RenderPass>,
     swapchain: Arc<Swapchain>,
@@ -118,6 +121,7 @@ impl Renderer {
 
         let device_extensions = DeviceExtensions {
             khr_swapchain: true,
+            ext_mesh_shader: true,
             ..DeviceExtensions::empty()
         };
 
@@ -180,89 +184,6 @@ impl Renderer {
         )
         .unwrap();
 
-        // let surface_caps = surface.get_capabilities(&adapter);
-        // // Shader code in this tutorial assumes an sRGB surface texture. Using a different
-        // // one will result all the colors coming out darker. If you want to support non
-        // // sRGB surfaces, you'll need to account for that when drawing to the frame.
-        // let surface_format = surface_caps
-        //     .formats
-        //     .iter()
-        //     .copied()
-        //     .find(|f| f.is_srgb())
-        //     .unwrap_or(surface_caps.formats[0]);
-        // let config = wgpu::SurfaceConfiguration {
-        //     usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-        //     format: surface_format,
-        //     width: size.width,
-        //     height: size.height,
-        //     present_mode: surface_caps.present_modes[0],
-        //     alpha_mode: surface_caps.alpha_modes[0],
-        //     view_formats: vec![],
-        // };
-        // surface.configure(&device, &config);
-
-        // let shader = device.create_shader_module(wgpu::include_wgsl!("../shaders/shader.wgsl"));
-
-        // let camera_bind_group_layout = BindGroupLayout::create(
-        //     &device,
-        //     &[wgpu::BindGroupLayoutEntry {
-        //         binding: 0,
-        //         visibility: wgpu::ShaderStages::VERTEX,
-        //         ty: wgpu::BindingType::Buffer {
-        //             ty: wgpu::BufferBindingType::Uniform,
-        //             has_dynamic_offset: false,
-        //             min_binding_size: None,
-        //         },
-        //         count: None,
-        //     }],
-        //     Some("camera_bind_group_layout"),
-        // );
-
-        // let camera_buffer = BufferGroup::create_single(
-        //     &[CameraUniform::new()],
-        //     wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        //     &device,
-        //     &camera_bind_group_layout,
-        //     Some("Camera Buffer"),
-        // );
-
-        // let partition_bind_group_layout = BindGroupLayout::create(
-        //     &device,
-        //     &[
-        //         wgpu::BindGroupLayoutEntry {
-        //             binding: 0,
-        //             visibility: wgpu::ShaderStages::FRAGMENT,
-        //             ty: wgpu::BindingType::Buffer {
-        //                 ty: wgpu::BufferBindingType::Storage { read_only: true },
-        //                 has_dynamic_offset: false,
-        //                 min_binding_size: None,
-        //             },
-        //             count: None,
-        //         },
-        //         wgpu::BindGroupLayoutEntry {
-        //             binding: 1,
-        //             visibility: wgpu::ShaderStages::FRAGMENT,
-        //             ty: wgpu::BindingType::Buffer {
-        //                 ty: wgpu::BufferBindingType::Storage { read_only: true },
-        //                 has_dynamic_offset: false,
-        //                 min_binding_size: None,
-        //             },
-        //             count: None,
-        //         },
-        //     ],
-        //     Some("partition_bind_group_layout"),
-        // );
-
-        // let render_pipeline_layout =
-        //     device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        //         label: Some("Render Pipeline Layout"),
-        //         bind_group_layouts: &[
-        //             (&camera_bind_group_layout).into(),
-        //             (&partition_bind_group_layout).into(),
-        //         ],
-        //         push_constant_ranges: &[],
-        //     });
-
         let render_pass = vulkano::single_pass_renderpass!(
             device.clone(),
             attachments: {
@@ -280,56 +201,10 @@ impl Renderer {
         )
         .unwrap();
 
-        // let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        //     label: Some("Render Pipeline"),
-        //     layout: Some(&render_pipeline_layout),
-        //     vertex: wgpu::VertexState {
-        //         module: &shader,
-        //         entry_point: "vs_main", // 1.
-        //         buffers: &[<[f32; 3]>::desc()],
-        //     },
-        //     fragment: Some(wgpu::FragmentState {
-        //         // 3.
-        //         module: &shader,
-        //         entry_point: "fs_main",
-        //         targets: &[Some(wgpu::ColorTargetState {
-        //             // 4.
-        //             format: config.format,
-        //             blend: Some(wgpu::BlendState::REPLACE),
-        //             write_mask: wgpu::ColorWrites::ALL,
-        //         })],
-        //     }),
-        //     primitive: wgpu::PrimitiveState {
-        //         topology: wgpu::PrimitiveTopology::TriangleList,
-        //         strip_index_format: None,
-        //         front_face: wgpu::FrontFace::Ccw,
-        //         cull_mode: Some(wgpu::Face::Back),
-        //         // Setting this to anything other than Fill requires Features::NON_FILL_POLYGON_MODE
-        //         polygon_mode: wgpu::PolygonMode::Fill,
-        //         // Requires Features::DEPTH_CLIP_CONTROL
-        //         unclipped_depth: false,
-        //         // Requires Features::CONSERVATIVE_RASTERIZATION
-        //         conservative: false,
-        //     },
-        //     depth_stencil: Some(wgpu::DepthStencilState {
-        //         format: Texture::DEPTH_FORMAT,
-        //         depth_write_enabled: true,
-        //         depth_compare: wgpu::CompareFunction::Less,
-        //         stencil: wgpu::StencilState::default(),
-        //         bias: wgpu::DepthBiasState::default(),
-        //     }),
-        //     multisample: wgpu::MultisampleState {
-        //         count: 1,
-        //         mask: !0,
-        //         alpha_to_coverage_enabled: false,
-        //     },
-        //     multiview: None,
-        // });
-
         // More on this latter
         let viewport = Viewport {
             origin: [0.0, 0.0],
-            dimensions: [1024.0, 1024.0],
+            dimensions: [size.width as _, size.height as _],
             depth_range: 0.0..1.0,
         };
 
@@ -339,7 +214,7 @@ impl Renderer {
         let render_pipeline = GraphicsPipeline::start()
             // Describes the layout of the vertex input and how should it behave
             .vertex_input_state(
-                <MyVertex as vulkano::pipeline::graphics::vertex_input::Vertex>::per_vertex(),
+                <PosVertex as vulkano::pipeline::graphics::vertex_input::Vertex>::per_vertex(),
             )
             // A Vulkan shader can in theory contain multiple entry points, so we have to specify
             // which one.
@@ -355,6 +230,36 @@ impl Renderer {
             // Now that everything is specified, we call `build`.
             .build(device.clone())
             .unwrap();
+
+        let camera_buffer = Buffer::from_data(
+            &memory_allocator,
+            BufferCreateInfo {
+                usage: BufferUsage::STORAGE_BUFFER,
+                ..Default::default()
+            },
+            AllocationCreateInfo {
+                usage: MemoryUsage::Upload,
+                ..Default::default()
+            },
+            CameraUniform::new(),
+        )
+        .expect("failed to create camera buffer");
+
+        let descriptor_set_allocator = StandardDescriptorSetAllocator::new(device.clone());
+        let pipeline_layout = render_pipeline.layout();
+        let descriptor_set_layouts = pipeline_layout.set_layouts();
+
+        let camera_descriptor_set_layout_index = 0;
+        let camera_descriptor_set_layout = descriptor_set_layouts
+            .get(camera_descriptor_set_layout_index)
+            .unwrap();
+
+        let camera_descriptor_set = PersistentDescriptorSet::new(
+            &descriptor_set_allocator,
+            camera_descriptor_set_layout.clone(),
+            [WriteDescriptorSet::buffer(0, camera_buffer.clone())], // 0 is the binding
+        )
+        .unwrap();
 
         //let depth_texture = Texture::create_depth_texture(&device, &config, "Depth Texture");
         let command_buffer_allocator = StandardCommandBufferAllocator::new(
@@ -379,6 +284,8 @@ impl Renderer {
             render_pass,
             swapchain,
             images, //camera_buffer,
+            camera_buffer,
+            camera_descriptor_set,
         }
     }
     pub fn on_resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
@@ -438,14 +345,6 @@ pub fn render(mut renderer: ResMut<Renderer>, meshes: Query<&Mesh>, camera: Quer
     //             label: Some("Render Encoder"),
     //         });
 
-    // for camera in camera.iter() {
-    //     renderer.instance.queue().write_buffer(
-    //         renderer.camera_buffer.buffer(),
-    //         0,
-    //         bytemuck::cast_slice(&[*camera]),
-    //     );
-    // }
-
     let (image_i, suboptimal, acquire_future) =
         match vulkano::swapchain::acquire_next_image(renderer.swapchain.clone(), None) {
             Ok(r) => r,
@@ -472,6 +371,17 @@ pub fn render(mut renderer: ResMut<Renderer>, meshes: Query<&Mesh>, camera: Quer
         CommandBufferUsage::OneTimeSubmit,
     )
     .unwrap();
+
+    for camera in camera.iter() {
+        let mut c = renderer.camera_buffer.write().unwrap();
+        *c = *camera;
+
+        // renderer.instance.queue().write_buffer(
+        //     renderer.camera_buffer.buffer(),
+        //     0,
+        //     bytemuck::cast_slice(&[*camera]),
+        // );
+    }
 
     builder
         .begin_render_pass(
@@ -558,11 +468,15 @@ mod vs {
         ty: "vertex",
         src: r"
             #version 460
-
-            layout(location = 0) in vec2 position;
+  
+			layout(set = 0, binding = 0) buffer Data {
+                mat4x4 mat;
+            } buf;
+			
+        	layout(location = 0) in vec3 position;
 
             void main() {
-                gl_Position = vec4(position, 0.0, 1.0);
+                gl_Position = buf.mat * vec4(position, 1.0);
             }
         ",
     }

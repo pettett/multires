@@ -10,10 +10,10 @@ use vulkano::{
     buffer::{BufferCreateInfo, BufferUsage, Subbuffer},
     command_buffer::AutoCommandBufferBuilder,
     memory::allocator::{AllocationCreateInfo, MemoryUsage},
+    pipeline::Pipeline,
 };
-use wgpu::util::DeviceExt;
 
-use crate::core::{BufferGroup, Instance, Renderer};
+use crate::core::{Instance, Renderer};
 
 #[derive(Component)]
 pub struct Mesh {
@@ -33,6 +33,12 @@ impl Mesh {
         //render_pass.set_bind_group(1, self.partitions.bind_group(), &[]);
 
         render_pass
+            .bind_descriptor_sets(
+                vulkano::pipeline::PipelineBindPoint::Graphics,
+                state.render_pipeline().layout().clone(),
+                0,
+                state.camera_descriptor_set.clone(),
+            )
             .bind_vertex_buffers(0, self.vertex_buffer.clone())
             .bind_index_buffer(self.index_buffer.clone())
             .draw_indexed(self.num_indices, 1, 0, 0, 0)
