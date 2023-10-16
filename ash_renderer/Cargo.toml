@@ -25,6 +25,7 @@ memoffset = "0.5.1"
 num = "0.2.0"
 tobj = "0.1.10"
 image = "0.22"
+shaderc = "0.8"
 
 
 [profile.dev]

@@ -9,9 +9,10 @@ use crate::utility::{
     window::{ProgramProc, VulkanApp},
 };
 
-use ash::vk;
+use ash::{extensions::ext::MeshShader, vk};
 use glam::{Mat4, Vec3};
 use memoffset::offset_of;
+use shaderc::CompilationArtifact;
 
 use std::ffi::CString;
 use std::path::Path;
@@ -167,6 +168,8 @@ struct VulkanApp26 {
     current_frame: usize,
 
     is_framebuffer_resized: bool,
+
+    ms: MeshShader,
 }
 
 impl VulkanApp26 {
@@ -184,6 +187,7 @@ impl VulkanApp26 {
             VALIDATION.is_enable,
             &VALIDATION.required_validation_layers.to_vec(),
         );
+
         println!("initing surface");
         let surface_stuff =
             share::create_surface(&entry, &instance, &window, WINDOW_WIDTH, WINDOW_HEIGHT);
@@ -191,6 +195,7 @@ impl VulkanApp26 {
             setup_debug_utils(VALIDATION.is_enable, &entry, &instance);
         let physical_device =
             share::pick_physical_device(&instance, &surface_stuff, &DEVICE_EXTENSIONS);
+
         let physical_device_memory_properties =
             unsafe { instance.get_physical_device_memory_properties(physical_device) };
         let (device, queue_family) = share::create_logical_device(
@@ -200,6 +205,8 @@ impl VulkanApp26 {
             &DEVICE_EXTENSIONS,
             &surface_stuff,
         );
+        let ms = MeshShader::new(&instance, &device);
+
         println!("Loading queues");
         let graphics_queue =
             unsafe { device.get_device_queue(queue_family.graphics_family.unwrap(), 0) };
@@ -271,6 +278,7 @@ impl VulkanApp26 {
             graphics_queue,
             &RECT_TEX_COORD_VERTICES_DATA,
         );
+
         let (index_buffer, index_buffer_memory) = share::v1::create_index_buffer(
             &device,
             &physical_device_memory_properties,
@@ -292,13 +300,16 @@ impl VulkanApp26 {
             descriptor_pool,
             ubo_layout,
             &uniform_buffers,
+            vertex_buffer,
             texture_image_view,
             texture_sampler,
             swapchain_stuff.swapchain_images.len(),
         );
 
         println!("Loading command buffers");
+
         let command_buffers = VulkanApp26::create_command_buffers(
+            &ms,
             &device,
             command_pool,
             graphics_pipeline,
@@ -398,6 +409,8 @@ impl VulkanApp26 {
             current_frame: 0,
 
             is_framebuffer_resized: false,
+
+            ms,
         }
     }
 
@@ -607,14 +620,35 @@ impl VulkanApp26 {
         swapchain_extent: vk::Extent2D,
         ubo_set_layout: vk::DescriptorSetLayout,
     ) -> (vk::Pipeline, vk::PipelineLayout) {
-        let vert_shader_module = share::create_shader_module(
-            device,
-            include_bytes!("../shaders/spv/26-shader-depth.vert.spv").to_vec(),
-        );
-        let frag_shader_module = share::create_shader_module(
-            device,
-            include_bytes!("../shaders/spv/26-shader-depth.frag.spv").to_vec(),
-        );
+        let mut compiler = shaderc::Compiler::new().unwrap();
+        let mut options = shaderc::CompileOptions::new().unwrap();
+        options.set_target_spirv(shaderc::SpirvVersion::V1_6);
+        options.add_macro_definition("EP", Some("main"));
+
+        let mesh_mesh = compiler
+            .compile_into_spirv(
+                include_str!("../shaders/src/mesh-shader.mesh"),
+                shaderc::ShaderKind::Mesh,
+                "mesh-shader.mesh",
+                "main",
+                Some(&options),
+            )
+            .unwrap();
+
+        let mesh_frag = compiler
+            .compile_into_spirv(
+                include_str!("../shaders/src/mesh-shader.frag"),
+                shaderc::ShaderKind::Fragment,
+                "mesh-shader.frag",
+                "main",
+                Some(&options),
+            )
+            .unwrap();
+
+        let mesh_shader_module =
+            share::create_shader_module(device, mesh_mesh.as_binary_u8().into());
+        let frag_shader_module =
+            share::create_shader_module(device, mesh_frag.as_binary_u8().into());
 
         let main_function_name = CString::new("main").unwrap(); // the beginning function name in shader code.
 
@@ -624,10 +658,10 @@ impl VulkanApp26 {
                 s_type: vk::StructureType::PIPELINE_SHADER_STAGE_CREATE_INFO,
                 p_next: ptr::null(),
                 flags: vk::PipelineShaderStageCreateFlags::empty(),
-                module: vert_shader_module,
+                module: mesh_shader_module,
                 p_name: main_function_name.as_ptr(),
                 p_specialization_info: ptr::null(),
-                stage: vk::ShaderStageFlags::VERTEX,
+                stage: vk::ShaderStageFlags::MESH_EXT,
             },
             vk::PipelineShaderStageCreateInfo {
                 // Fragment Shader
@@ -641,25 +675,25 @@ impl VulkanApp26 {
             },
         ];
 
-        let binding_description = VertexV3::get_binding_descriptions();
-        let attribute_description = VertexV3::get_attribute_descriptions();
+        // let binding_description = VertexV3::get_binding_descriptions();
+        // let attribute_description = VertexV3::get_attribute_descriptions();
 
-        let vertex_input_state_create_info = vk::PipelineVertexInputStateCreateInfo {
-            s_type: vk::StructureType::PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-            p_next: ptr::null(),
-            flags: vk::PipelineVertexInputStateCreateFlags::empty(),
-            vertex_attribute_description_count: attribute_description.len() as u32,
-            p_vertex_attribute_descriptions: attribute_description.as_ptr(),
-            vertex_binding_description_count: binding_description.len() as u32,
-            p_vertex_binding_descriptions: binding_description.as_ptr(),
-        };
-        let vertex_input_assembly_state_info = vk::PipelineInputAssemblyStateCreateInfo {
-            s_type: vk::StructureType::PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-            flags: vk::PipelineInputAssemblyStateCreateFlags::empty(),
-            p_next: ptr::null(),
-            primitive_restart_enable: vk::FALSE,
-            topology: vk::PrimitiveTopology::TRIANGLE_LIST,
-        };
+        // let vertex_input_state_create_info = vk::PipelineVertexInputStateCreateInfo {
+        //     s_type: vk::StructureType::PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+        //     p_next: ptr::null(),
+        //     flags: vk::PipelineVertexInputStateCreateFlags::empty(),
+        //     vertex_attribute_description_count: attribute_description.len() as u32,
+        //     p_vertex_attribute_descriptions: attribute_description.as_ptr(),
+        //     vertex_binding_description_count: binding_description.len() as u32,
+        //     p_vertex_binding_descriptions: binding_description.as_ptr(),
+        // };
+        // let vertex_input_assembly_state_info = vk::PipelineInputAssemblyStateCreateInfo {
+        //     s_type: vk::StructureType::PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+        //     flags: vk::PipelineInputAssemblyStateCreateFlags::empty(),
+        //     p_next: ptr::null(),
+        //     primitive_restart_enable: vk::FALSE,
+        //     topology: vk::PrimitiveTopology::TRIANGLE_LIST,
+        // };
 
         let viewports = [vk::Viewport {
             x: 0.0,
@@ -784,8 +818,8 @@ impl VulkanApp26 {
             flags: vk::PipelineCreateFlags::empty(),
             stage_count: shader_stages.len() as u32,
             p_stages: shader_stages.as_ptr(),
-            p_vertex_input_state: &vertex_input_state_create_info,
-            p_input_assembly_state: &vertex_input_assembly_state_info,
+            p_vertex_input_state: ptr::null(),
+            p_input_assembly_state: ptr::null(),
             p_tessellation_state: ptr::null(),
             p_viewport_state: &viewport_state_create_info,
             p_rasterization_state: &rasterization_statue_create_info,
@@ -811,7 +845,7 @@ impl VulkanApp26 {
         };
 
         unsafe {
-            device.destroy_shader_module(vert_shader_module, None);
+            device.destroy_shader_module(mesh_shader_module, None);
             device.destroy_shader_module(frag_shader_module, None);
         }
 
@@ -822,6 +856,7 @@ impl VulkanApp26 {
 // Fix content -------------------------------------------------------------------------------
 impl VulkanApp26 {
     fn create_command_buffers(
+        ms: &MeshShader,
         device: &ash::Device,
         command_pool: vk::CommandPool,
         graphics_pipeline: vk::Pipeline,
@@ -906,13 +941,13 @@ impl VulkanApp26 {
                 let offsets = [0_u64];
                 let descriptor_sets_to_bind = [descriptor_sets[i]];
 
-                device.cmd_bind_vertex_buffers(command_buffer, 0, &vertex_buffers, &offsets);
-                device.cmd_bind_index_buffer(
-                    command_buffer,
-                    index_buffer,
-                    0,
-                    vk::IndexType::UINT32,
-                );
+                //device.cmd_bind_vertex_buffers(command_buffer, 0, &vertex_buffers, &offsets);
+                //device.cmd_bind_index_buffer(
+                //    command_buffer,
+                //    index_buffer,
+                //    0,
+                //    vk::IndexType::UINT32,
+                //);
                 device.cmd_bind_descriptor_sets(
                     command_buffer,
                     vk::PipelineBindPoint::GRAPHICS,
@@ -922,14 +957,15 @@ impl VulkanApp26 {
                     &[],
                 );
 
-                device.cmd_draw_indexed(
-                    command_buffer,
-                    RECT_TEX_COORD_INDICES_DATA.len() as u32,
-                    1,
-                    0,
-                    0,
-                    0,
-                );
+                ms.cmd_draw_mesh_tasks(command_buffer, 1, 1, 1);
+                // device.cmd_draw_indexed(
+                //     command_buffer,
+                //     RECT_TEX_COORD_INDICES_DATA.len() as u32,
+                //     1,
+                //     0,
+                //     0,
+                //     0,
+                // );
 
                 device.cmd_end_render_pass(command_buffer);
 
@@ -1184,6 +1220,7 @@ impl VulkanApp for VulkanApp26 {
             self.swapchain_extent,
         );
         self.command_buffers = VulkanApp26::create_command_buffers(
+            &self.ms,
             &self.device,
             self.command_pool,
             self.graphics_pipeline,

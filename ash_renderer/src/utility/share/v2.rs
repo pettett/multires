@@ -2,6 +2,8 @@ use ash::vk;
 
 use std::ptr;
 
+use crate::VertexV3;
+
 use super::*;
 
 pub fn create_descriptor_pool(
@@ -41,7 +43,8 @@ pub fn create_descriptor_sets(
     device: &ash::Device,
     descriptor_pool: vk::DescriptorPool,
     descriptor_set_layout: vk::DescriptorSetLayout,
-    uniforms_buffers: &Vec<vk::Buffer>,
+    uniform_buffers: &Vec<vk::Buffer>,
+    vert_buffers: vk::Buffer,
     texture_image_view: vk::ImageView,
     texture_sampler: vk::Sampler,
     swapchain_images_size: usize,
@@ -67,9 +70,15 @@ pub fn create_descriptor_sets(
 
     for (i, &descritptor_set) in descriptor_sets.iter().enumerate() {
         let descriptor_buffer_infos = [vk::DescriptorBufferInfo {
-            buffer: uniforms_buffers[i],
+            buffer: uniform_buffers[i],
             offset: 0,
             range: ::std::mem::size_of::<UniformBufferObject>() as u64,
+        }];
+
+        let vertex_buffer_infos = [vk::DescriptorBufferInfo {
+            buffer: vert_buffers,
+            offset: 0,
+            range: ::std::mem::size_of::<VertexV3>() as u64 * 8,
         }];
 
         let descriptor_image_infos = [vk::DescriptorImageInfo {
@@ -90,6 +99,19 @@ pub fn create_descriptor_sets(
                 descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
                 p_image_info: ptr::null(),
                 p_buffer_info: descriptor_buffer_infos.as_ptr(),
+                p_texel_buffer_view: ptr::null(),
+            },
+            vk::WriteDescriptorSet {
+                // transform uniform
+                s_type: vk::StructureType::WRITE_DESCRIPTOR_SET,
+                p_next: ptr::null(),
+                dst_set: descritptor_set,
+                dst_binding: 2,
+                dst_array_element: 0,
+                descriptor_count: 1,
+                descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
+                p_image_info: ptr::null(),
+                p_buffer_info: vertex_buffer_infos.as_ptr(),
                 p_texel_buffer_view: ptr::null(),
             },
             vk::WriteDescriptorSet {
@@ -122,7 +144,15 @@ pub fn create_descriptor_set_layout(device: &ash::Device) -> vk::DescriptorSetLa
             binding: 0,
             descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
             descriptor_count: 1,
-            stage_flags: vk::ShaderStageFlags::VERTEX,
+            stage_flags: vk::ShaderStageFlags::MESH_EXT,
+            p_immutable_samplers: ptr::null(),
+        },
+        vk::DescriptorSetLayoutBinding {
+            // verts buffer
+            binding: 2,
+            descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
+            descriptor_count: 1,
+            stage_flags: vk::ShaderStageFlags::MESH_EXT,
             p_immutable_samplers: ptr::null(),
         },
         vk::DescriptorSetLayoutBinding {

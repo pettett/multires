@@ -4,7 +4,7 @@ use glam::Mat4;
 use memoffset::offset_of;
 
 pub struct DeviceExtension {
-    pub names: [&'static str; 1],
+    pub names: [&'static str; 2],
     //    pub raw_names: [*const i8; 1],
 }
 

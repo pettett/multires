@@ -150,6 +150,7 @@ dependencies = [
  "num",
  "pollster",
  "raw-window-handle",
+ "shaderc",
  "tobj",
  "winapi",
  "winit",

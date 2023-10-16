@@ -1,0 +1,56 @@
+
+#version 450
+#extension GL_EXT_mesh_shader  : require
+
+#extension GL_ARB_separate_shader_objects : enable
+
+layout (binding = 0) uniform UniformBufferObject {
+    mat4 model;
+    mat4 view;
+    mat4 proj;
+} ubo;
+
+struct Vertex{
+		vec3 pos;
+		vec3 col;
+		vec2 tc;
+	} ;
+
+layout(binding = 2) readonly buffer InputBuffer{
+    Vertex verts[];
+} sourceData;
+
+
+layout (local_size_x=1, local_size_y=1, local_size_z=1) in;
+layout (triangles) out;
+layout (max_vertices=256, max_primitives=256) out;
+
+layout(location=0) out Interpolants {
+	vec3  fragColor;
+	vec2  fragTexCoord;   
+} OUT[];
+
+
+void vert(uint v){
+	gl_MeshVerticesEXT[v].gl_Position = ubo.proj * ubo.view * ubo.model * vec4(sourceData.verts[v].pos, 1.0);
+    OUT[v].fragColor = sourceData.verts[v].col;
+    OUT[v].fragTexCoord =  sourceData.verts[v].tc;
+}
+
+
+void main() {
+
+	SetMeshOutputsEXT(8, 4);
+
+
+	// pub const RECT_TEX_COORD_INDICES_DATA: [u32; 12] = [0, 1, 2, 2, 3, 0, 4, 5, 6, 6, 7, 4];
+	for (uint i = 0; i < 8 ; i++){
+		vert(i);
+	}
+	
+	gl_PrimitiveTriangleIndicesEXT[0] = uvec3(0,1,2);
+	gl_PrimitiveTriangleIndicesEXT[1] = uvec3(2, 3, 0);
+	gl_PrimitiveTriangleIndicesEXT[2] = uvec3( 4, 5, 6);
+	gl_PrimitiveTriangleIndicesEXT[3] = uvec3(6, 7, 4);
+
+}

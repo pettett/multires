@@ -15,15 +15,16 @@ pub const VALIDATION: ValidationInfo = ValidationInfo {
     required_validation_layers: ["VK_LAYER_KHRONOS_validation"],
 };
 pub const DEVICE_EXTENSIONS: DeviceExtension = DeviceExtension {
-    names: ["VK_KHR_swapchain"],
+    names: ["VK_KHR_swapchain", "VK_EXT_mesh_shader"],
 };
 pub const MAX_FRAMES_IN_FLIGHT: usize = 2;
 pub const IS_PAINT_FPS_COUNTER: bool = false;
 
 impl DeviceExtension {
-    pub fn get_extensions_raw_names(&self) -> [*const c_char; 1] {
+    pub fn get_extensions_raw_names(&self) -> [*const c_char; 2] {
         [
             // currently just enable the Swapchain extension.
+            ash::extensions::ext::MeshShader::name().as_ptr(),
             ash::extensions::khr::Swapchain::name().as_ptr(),
         ]
     }

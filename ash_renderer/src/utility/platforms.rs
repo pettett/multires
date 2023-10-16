@@ -31,6 +31,8 @@ pub fn required_extension_names() -> Vec<*const i8> {
 
 #[cfg(all(windows))]
 pub fn required_extension_names() -> Vec<*const i8> {
+    use ash::extensions::ext::MeshShader;
+
     vec![
         Surface::name().as_ptr(),
         Win32Surface::name().as_ptr(),
