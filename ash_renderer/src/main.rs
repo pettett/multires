@@ -5,15 +5,19 @@ use crate::utility::{
     // the mod define some fixed functions that have been learned before.
     constants::*,
     debug::*,
+    pipeline::create_graphics_pipeline,
+    render_pass::create_render_pass,
     share,
     structures::*,
     window::{ProgramProc, VulkanApp},
 };
 
 use ash::{extensions::ext::MeshShader, vk};
-use glam::{Mat4, Vec3};
+use common_renderer::components::{camera::Camera, transform::Transform};
+use glam::{Mat4, Quat, Vec3, Vec3A};
 use memoffset::offset_of;
 use shaderc::CompilationArtifact;
+use utility::pipeline::Pipeline;
 
 use std::ffi::CString;
 use std::path::Path;
@@ -111,7 +115,6 @@ struct VulkanApp26 {
     window: winit::window::Window,
 
     // vulkan stuff
-    _entry: ash::Entry,
     instance: ash::Instance,
     surface_loader: ash::extensions::khr::Surface,
     surface: vk::SurfaceKHR,
@@ -136,8 +139,7 @@ struct VulkanApp26 {
 
     render_pass: vk::RenderPass,
     ubo_layout: vk::DescriptorSetLayout,
-    pipeline_layout: vk::PipelineLayout,
-    graphics_pipeline: vk::Pipeline,
+    graphics_pipeline: Pipeline,
 
     depth_image: vk::Image,
     depth_image_view: vk::ImageView,
@@ -225,15 +227,15 @@ impl VulkanApp26 {
             swapchain_stuff.swapchain_format,
             &swapchain_stuff.swapchain_images,
         );
-        let render_pass = VulkanApp26::create_render_pass(
+        let render_pass = create_render_pass(
             &instance,
             &device,
             physical_device,
             swapchain_stuff.swapchain_format,
         );
         let ubo_layout = share::v2::create_descriptor_set_layout(&device);
-        let (graphics_pipeline, pipeline_layout) = VulkanApp26::create_graphics_pipeline(
-            &device,
+        let graphics_pipeline = create_graphics_pipeline(
+            device.clone(),
             render_pass,
             swapchain_stuff.swapchain_extent,
             ubo_layout,
@@ -310,18 +312,21 @@ impl VulkanApp26 {
             &ms,
             &device,
             command_pool,
-            graphics_pipeline,
+            graphics_pipeline.pipeline(),
             &swapchain_framebuffers,
             render_pass,
             swapchain_stuff.swapchain_extent,
             &vertex_buffer,
             &index_buffer,
-            pipeline_layout,
+            graphics_pipeline.layout(),
             &descriptor_sets,
         );
         let sync_ojbects = share::v1::create_sync_objects(&device, MAX_FRAMES_IN_FLIGHT);
 
         println!("Generated App");
+
+        let cam = Camera::new(1.0);
+        let transform = Transform::new(Vec3A::ZERO, Quat::IDENTITY);
 
         // cleanup(); the 'drop' function will take care of it.
         VulkanApp26 {
@@ -329,7 +334,6 @@ impl VulkanApp26 {
             window,
 
             // vulkan stuff
-            _entry: entry,
             instance,
             surface: surface_stuff.surface,
             surface_loader: surface_stuff.surface_loader,
@@ -352,7 +356,6 @@ impl VulkanApp26 {
             swapchain_imageviews,
             swapchain_framebuffers,
 
-            pipeline_layout,
             ubo_layout,
             render_pass,
             graphics_pipeline,
@@ -371,24 +374,7 @@ impl VulkanApp26 {
 
             uniform_transform: UniformBufferObject {
                 model: Mat4::from_rotation_z(1.5),
-                view: Mat4::look_at_rh(
-                    Vec3::new(2.0, 2.0, 2.0),
-                    Vec3::new(0.0, 0.0, 0.0),
-                    Vec3::new(0.0, 0.0, 1.0),
-                ),
-                proj: {
-                    let mut proj = glam::Mat4::perspective_rh(
-                        1.0,
-                        swapchain_stuff.swapchain_extent.width as f32
-                            / swapchain_stuff.swapchain_extent.height as f32,
-                        0.1,
-                        10.0,
-                    )
-                    .to_cols_array_2d();
-                    proj[1][1] = proj[1][1] * -1.0;
-
-                    Mat4::from_cols_array_2d(&proj)
-                },
+                view_proj: cam.build_view_projection_matrix(&transform),
             },
             uniform_buffers,
 
@@ -488,91 +474,6 @@ impl VulkanApp26 {
         format == vk::Format::D32_SFLOAT_S8_UINT || format == vk::Format::D24_UNORM_S8_UINT
     }
 
-    fn create_render_pass(
-        instance: &ash::Instance,
-        device: &ash::Device,
-        physcial_device: vk::PhysicalDevice,
-        surface_format: vk::Format,
-    ) -> vk::RenderPass {
-        let color_attachment = vk::AttachmentDescription {
-            flags: vk::AttachmentDescriptionFlags::empty(),
-            format: surface_format,
-            samples: vk::SampleCountFlags::TYPE_1,
-            load_op: vk::AttachmentLoadOp::CLEAR,
-            store_op: vk::AttachmentStoreOp::STORE,
-            stencil_load_op: vk::AttachmentLoadOp::DONT_CARE,
-            stencil_store_op: vk::AttachmentStoreOp::DONT_CARE,
-            initial_layout: vk::ImageLayout::UNDEFINED,
-            final_layout: vk::ImageLayout::PRESENT_SRC_KHR,
-        };
-
-        let depth_attachment = vk::AttachmentDescription {
-            flags: vk::AttachmentDescriptionFlags::empty(),
-            format: VulkanApp26::find_depth_format(instance, physcial_device),
-            samples: vk::SampleCountFlags::TYPE_1,
-            load_op: vk::AttachmentLoadOp::CLEAR,
-            store_op: vk::AttachmentStoreOp::DONT_CARE,
-            stencil_load_op: vk::AttachmentLoadOp::DONT_CARE,
-            stencil_store_op: vk::AttachmentStoreOp::DONT_CARE,
-            initial_layout: vk::ImageLayout::UNDEFINED,
-            final_layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-        };
-
-        let color_attachment_ref = vk::AttachmentReference {
-            attachment: 0,
-            layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-        };
-
-        let depth_attachment_ref = vk::AttachmentReference {
-            attachment: 1,
-            layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-        };
-
-        let subpasses = [vk::SubpassDescription {
-            color_attachment_count: 1,
-            p_color_attachments: &color_attachment_ref,
-            p_depth_stencil_attachment: &depth_attachment_ref,
-            flags: vk::SubpassDescriptionFlags::empty(),
-            pipeline_bind_point: vk::PipelineBindPoint::GRAPHICS,
-            input_attachment_count: 0,
-            p_input_attachments: ptr::null(),
-            p_resolve_attachments: ptr::null(),
-            preserve_attachment_count: 0,
-            p_preserve_attachments: ptr::null(),
-        }];
-
-        let render_pass_attachments = [color_attachment, depth_attachment];
-
-        let subpass_dependencies = [vk::SubpassDependency {
-            src_subpass: vk::SUBPASS_EXTERNAL,
-            dst_subpass: 0,
-            src_stage_mask: vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-            dst_stage_mask: vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-            src_access_mask: vk::AccessFlags::empty(),
-            dst_access_mask: vk::AccessFlags::COLOR_ATTACHMENT_READ
-                | vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
-            dependency_flags: vk::DependencyFlags::empty(),
-        }];
-
-        let renderpass_create_info = vk::RenderPassCreateInfo {
-            s_type: vk::StructureType::RENDER_PASS_CREATE_INFO,
-            flags: vk::RenderPassCreateFlags::empty(),
-            p_next: ptr::null(),
-            attachment_count: render_pass_attachments.len() as u32,
-            p_attachments: render_pass_attachments.as_ptr(),
-            subpass_count: subpasses.len() as u32,
-            p_subpasses: subpasses.as_ptr(),
-            dependency_count: subpass_dependencies.len() as u32,
-            p_dependencies: subpass_dependencies.as_ptr(),
-        };
-
-        unsafe {
-            device
-                .create_render_pass(&renderpass_create_info, None)
-                .expect("Failed to create render pass!")
-        }
-    }
-
     fn create_framebuffers(
         device: &ash::Device,
         render_pass: vk::RenderPass,
@@ -607,244 +508,6 @@ impl VulkanApp26 {
         }
 
         framebuffers
-    }
-
-    fn create_graphics_pipeline(
-        device: &ash::Device,
-        render_pass: vk::RenderPass,
-        swapchain_extent: vk::Extent2D,
-        ubo_set_layout: vk::DescriptorSetLayout,
-    ) -> (vk::Pipeline, vk::PipelineLayout) {
-        let mut compiler = shaderc::Compiler::new().unwrap();
-        let mut options = shaderc::CompileOptions::new().unwrap();
-        options.set_target_spirv(shaderc::SpirvVersion::V1_6);
-        options.add_macro_definition("EP", Some("main"));
-
-        let mesh_mesh = compiler
-            .compile_into_spirv(
-                include_str!("../shaders/src/mesh-shader.mesh"),
-                shaderc::ShaderKind::Mesh,
-                "mesh-shader.mesh",
-                "main",
-                Some(&options),
-            )
-            .unwrap();
-
-        let mesh_frag = compiler
-            .compile_into_spirv(
-                include_str!("../shaders/src/mesh-shader.frag"),
-                shaderc::ShaderKind::Fragment,
-                "mesh-shader.frag",
-                "main",
-                Some(&options),
-            )
-            .unwrap();
-
-        let mesh_shader_module =
-            share::create_shader_module(device, mesh_mesh.as_binary_u8().into());
-        let frag_shader_module =
-            share::create_shader_module(device, mesh_frag.as_binary_u8().into());
-
-        let main_function_name = CString::new("main").unwrap(); // the beginning function name in shader code.
-
-        let shader_stages = [
-            vk::PipelineShaderStageCreateInfo {
-                // Vertex Shader
-                s_type: vk::StructureType::PIPELINE_SHADER_STAGE_CREATE_INFO,
-                p_next: ptr::null(),
-                flags: vk::PipelineShaderStageCreateFlags::empty(),
-                module: mesh_shader_module,
-                p_name: main_function_name.as_ptr(),
-                p_specialization_info: ptr::null(),
-                stage: vk::ShaderStageFlags::MESH_EXT,
-            },
-            vk::PipelineShaderStageCreateInfo {
-                // Fragment Shader
-                s_type: vk::StructureType::PIPELINE_SHADER_STAGE_CREATE_INFO,
-                p_next: ptr::null(),
-                flags: vk::PipelineShaderStageCreateFlags::empty(),
-                module: frag_shader_module,
-                p_name: main_function_name.as_ptr(),
-                p_specialization_info: ptr::null(),
-                stage: vk::ShaderStageFlags::FRAGMENT,
-            },
-        ];
-
-        // let binding_description = VertexV3::get_binding_descriptions();
-        // let attribute_description = VertexV3::get_attribute_descriptions();
-
-        // let vertex_input_state_create_info = vk::PipelineVertexInputStateCreateInfo {
-        //     s_type: vk::StructureType::PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-        //     p_next: ptr::null(),
-        //     flags: vk::PipelineVertexInputStateCreateFlags::empty(),
-        //     vertex_attribute_description_count: attribute_description.len() as u32,
-        //     p_vertex_attribute_descriptions: attribute_description.as_ptr(),
-        //     vertex_binding_description_count: binding_description.len() as u32,
-        //     p_vertex_binding_descriptions: binding_description.as_ptr(),
-        // };
-        // let vertex_input_assembly_state_info = vk::PipelineInputAssemblyStateCreateInfo {
-        //     s_type: vk::StructureType::PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-        //     flags: vk::PipelineInputAssemblyStateCreateFlags::empty(),
-        //     p_next: ptr::null(),
-        //     primitive_restart_enable: vk::FALSE,
-        //     topology: vk::PrimitiveTopology::TRIANGLE_LIST,
-        // };
-
-        let viewports = [vk::Viewport {
-            x: 0.0,
-            y: 0.0,
-            width: swapchain_extent.width as f32,
-            height: swapchain_extent.height as f32,
-            min_depth: 0.0,
-            max_depth: 1.0,
-        }];
-
-        let scissors = [vk::Rect2D {
-            offset: vk::Offset2D { x: 0, y: 0 },
-            extent: swapchain_extent,
-        }];
-
-        let viewport_state_create_info = vk::PipelineViewportStateCreateInfo {
-            s_type: vk::StructureType::PIPELINE_VIEWPORT_STATE_CREATE_INFO,
-            p_next: ptr::null(),
-            flags: vk::PipelineViewportStateCreateFlags::empty(),
-            scissor_count: scissors.len() as u32,
-            p_scissors: scissors.as_ptr(),
-            viewport_count: viewports.len() as u32,
-            p_viewports: viewports.as_ptr(),
-        };
-
-        let rasterization_statue_create_info = vk::PipelineRasterizationStateCreateInfo {
-            s_type: vk::StructureType::PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-            p_next: ptr::null(),
-            flags: vk::PipelineRasterizationStateCreateFlags::empty(),
-            depth_clamp_enable: vk::FALSE,
-            cull_mode: vk::CullModeFlags::BACK,
-            front_face: vk::FrontFace::COUNTER_CLOCKWISE,
-            line_width: 1.0,
-            polygon_mode: vk::PolygonMode::FILL,
-            rasterizer_discard_enable: vk::FALSE,
-            depth_bias_clamp: 0.0,
-            depth_bias_constant_factor: 0.0,
-            depth_bias_enable: vk::FALSE,
-            depth_bias_slope_factor: 0.0,
-        };
-
-        let multisample_state_create_info = vk::PipelineMultisampleStateCreateInfo {
-            s_type: vk::StructureType::PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
-            flags: vk::PipelineMultisampleStateCreateFlags::empty(),
-            p_next: ptr::null(),
-            rasterization_samples: vk::SampleCountFlags::TYPE_1,
-            sample_shading_enable: vk::FALSE,
-            min_sample_shading: 0.0,
-            p_sample_mask: ptr::null(),
-            alpha_to_one_enable: vk::FALSE,
-            alpha_to_coverage_enable: vk::FALSE,
-        };
-
-        let stencil_state = vk::StencilOpState {
-            fail_op: vk::StencilOp::KEEP,
-            pass_op: vk::StencilOp::KEEP,
-            depth_fail_op: vk::StencilOp::KEEP,
-            compare_op: vk::CompareOp::ALWAYS,
-            compare_mask: 0,
-            write_mask: 0,
-            reference: 0,
-        };
-
-        let depth_state_create_info = vk::PipelineDepthStencilStateCreateInfo {
-            s_type: vk::StructureType::PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
-            p_next: ptr::null(),
-            flags: vk::PipelineDepthStencilStateCreateFlags::empty(),
-            depth_test_enable: vk::TRUE,
-            depth_write_enable: vk::TRUE,
-            depth_compare_op: vk::CompareOp::LESS,
-            depth_bounds_test_enable: vk::FALSE,
-            stencil_test_enable: vk::FALSE,
-            front: stencil_state,
-            back: stencil_state,
-            max_depth_bounds: 1.0,
-            min_depth_bounds: 0.0,
-        };
-
-        let color_blend_attachment_states = [vk::PipelineColorBlendAttachmentState {
-            blend_enable: vk::FALSE,
-            color_write_mask: vk::ColorComponentFlags::RGBA,
-            src_color_blend_factor: vk::BlendFactor::ONE,
-            dst_color_blend_factor: vk::BlendFactor::ZERO,
-            color_blend_op: vk::BlendOp::ADD,
-            src_alpha_blend_factor: vk::BlendFactor::ONE,
-            dst_alpha_blend_factor: vk::BlendFactor::ZERO,
-            alpha_blend_op: vk::BlendOp::ADD,
-        }];
-
-        let color_blend_state = vk::PipelineColorBlendStateCreateInfo {
-            s_type: vk::StructureType::PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
-            p_next: ptr::null(),
-            flags: vk::PipelineColorBlendStateCreateFlags::empty(),
-            logic_op_enable: vk::FALSE,
-            logic_op: vk::LogicOp::COPY,
-            attachment_count: color_blend_attachment_states.len() as u32,
-            p_attachments: color_blend_attachment_states.as_ptr(),
-            blend_constants: [0.0, 0.0, 0.0, 0.0],
-        };
-
-        let set_layouts = [ubo_set_layout];
-
-        let pipeline_layout_create_info = vk::PipelineLayoutCreateInfo {
-            s_type: vk::StructureType::PIPELINE_LAYOUT_CREATE_INFO,
-            p_next: ptr::null(),
-            flags: vk::PipelineLayoutCreateFlags::empty(),
-            set_layout_count: set_layouts.len() as u32,
-            p_set_layouts: set_layouts.as_ptr(),
-            push_constant_range_count: 0,
-            p_push_constant_ranges: ptr::null(),
-        };
-
-        let pipeline_layout = unsafe {
-            device
-                .create_pipeline_layout(&pipeline_layout_create_info, None)
-                .expect("Failed to create pipeline layout!")
-        };
-
-        let graphic_pipeline_create_infos = [vk::GraphicsPipelineCreateInfo {
-            s_type: vk::StructureType::GRAPHICS_PIPELINE_CREATE_INFO,
-            p_next: ptr::null(),
-            flags: vk::PipelineCreateFlags::empty(),
-            stage_count: shader_stages.len() as u32,
-            p_stages: shader_stages.as_ptr(),
-            p_vertex_input_state: ptr::null(),
-            p_input_assembly_state: ptr::null(),
-            p_tessellation_state: ptr::null(),
-            p_viewport_state: &viewport_state_create_info,
-            p_rasterization_state: &rasterization_statue_create_info,
-            p_multisample_state: &multisample_state_create_info,
-            p_depth_stencil_state: &depth_state_create_info,
-            p_color_blend_state: &color_blend_state,
-            p_dynamic_state: ptr::null(),
-            layout: pipeline_layout,
-            render_pass,
-            subpass: 0,
-            base_pipeline_handle: vk::Pipeline::null(),
-            base_pipeline_index: -1,
-        }];
-
-        let graphics_pipelines = unsafe {
-            device
-                .create_graphics_pipelines(
-                    vk::PipelineCache::null(),
-                    &graphic_pipeline_create_infos,
-                    None,
-                )
-                .expect("Failed to create Graphics Pipeline!.")
-        };
-
-        unsafe {
-            device.destroy_shader_module(mesh_shader_module, None);
-            device.destroy_shader_module(frag_shader_module, None);
-        }
-
-        (graphics_pipelines[0], pipeline_layout)
     }
 }
 
@@ -1167,20 +830,19 @@ impl VulkanApp for VulkanApp26 {
             self.swapchain_format,
             &self.swapchain_images,
         );
-        self.render_pass = VulkanApp26::create_render_pass(
+        self.render_pass = create_render_pass(
             &self.instance,
             &self.device,
             self.physical_device,
             self.swapchain_format,
         );
-        let (graphics_pipeline, pipeline_layout) = VulkanApp26::create_graphics_pipeline(
-            &self.device,
+        let graphics_pipeline = create_graphics_pipeline(
+            self.device.clone(),
             self.render_pass,
             swapchain_stuff.swapchain_extent,
             self.ubo_layout,
         );
         self.graphics_pipeline = graphics_pipeline;
-        self.pipeline_layout = pipeline_layout;
 
         let depth_resources = VulkanApp26::create_depth_resources(
             &self.instance,
@@ -1206,13 +868,13 @@ impl VulkanApp for VulkanApp26 {
             &self.ms,
             &self.device,
             self.command_pool,
-            self.graphics_pipeline,
+            self.graphics_pipeline.pipeline(),
             &self.swapchain_framebuffers,
             self.render_pass,
             self.swapchain_extent,
             &self.vertex_buffer,
             &self.index_buffer,
-            self.pipeline_layout,
+            self.graphics_pipeline.layout(),
             &self.descriptor_sets,
         );
     }
@@ -1228,9 +890,7 @@ impl VulkanApp for VulkanApp26 {
             for &framebuffer in self.swapchain_framebuffers.iter() {
                 self.device.destroy_framebuffer(framebuffer, None);
             }
-            self.device.destroy_pipeline(self.graphics_pipeline, None);
-            self.device
-                .destroy_pipeline_layout(self.pipeline_layout, None);
+
             self.device.destroy_render_pass(self.render_pass, None);
             for &image_view in self.swapchain_imageviews.iter() {
                 self.device.destroy_image_view(image_view, None);

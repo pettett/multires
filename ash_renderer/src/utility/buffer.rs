@@ -8,6 +8,7 @@ use super::{
 };
 
 pub struct Buffer {
+    // exists to allow drop
     device: ash::Device,
     buffer: vk::Buffer,
     memory: vk::DeviceMemory,

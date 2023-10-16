@@ -57,8 +57,7 @@ pub struct SyncObjects {
 #[derive(Clone, Debug, Copy)]
 pub struct UniformBufferObject {
     pub model: Mat4,
-    pub view: Mat4,
-    pub proj: Mat4,
+    pub view_proj: Mat4,
 }
 
 #[repr(C)]

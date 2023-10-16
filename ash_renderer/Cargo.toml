@@ -20,9 +20,9 @@ ash = { version = "0.37", default-features = false, features = [
 	"debug",
 ] }
 ash-window = "0.12"
-raw-window-handle = "0.5"
-memoffset = "0.5.1"
-num = "0.2.0"
+raw-window-handle = "0.6"
+memoffset = "0.9"
+num = "0.4"
 tobj = "0.1.10"
 image = "0.22"
 shaderc = "0.8"
