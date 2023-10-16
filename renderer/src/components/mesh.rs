@@ -5,7 +5,6 @@ use std::{
 
 use bevy_ecs::component::Component;
 use common::asset::Asset;
-use gltf::mesh::util::ReadIndices;
 use wgpu::util::DeviceExt;
 
 use crate::core::{BufferGroup, Instance, Renderer};
@@ -44,64 +43,31 @@ impl Mesh {
             Some("Partition Buffer"),
         );
 
-        let (document, buffers, images) =
-            gltf::import(asset.name).expect("Torus import should work");
-
-        let mesh = document.meshes().next().unwrap();
-        let prim = mesh.primitives().next().unwrap();
-
-        let reader = prim.reader(|buffer| Some(&buffers[buffer.index()]));
-
-        let iter = reader.read_positions().unwrap();
-        let verts: Vec<[f32; 3]> = iter.collect();
-
         let vertex_buffer =
             instance
                 .device()
                 .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("Vertex Buffer"),
-                    contents: bytemuck::cast_slice(&verts[..]),
+                    contents: bytemuck::cast_slice(&asset.verts[..]),
                     usage: wgpu::BufferUsages::VERTEX,
                 });
 
-        let (index_buffer, index_format, num_indices) = match reader.read_indices() {
-            Some(ReadIndices::U16(iter)) => {
-                let indicies: Vec<u16> = iter.collect();
+        let index_buffer =
+            instance
+                .device()
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("U32 Index Buffer"),
+                    contents: bytemuck::cast_slice(&asset.indices[..]),
+                    usage: wgpu::BufferUsages::INDEX,
+                });
+        let index_format = wgpu::IndexFormat::Uint32;
+        let num_indices = asset.indices.len() as u32;
 
-                (
-                    instance
-                        .device()
-                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("U16 Index Buffer"),
-                            contents: bytemuck::cast_slice(&indicies[..]),
-                            usage: wgpu::BufferUsages::INDEX,
-                        }),
-                    wgpu::IndexFormat::Uint16,
-                    indicies.len(),
-                )
-            }
-            Some(ReadIndices::U32(iter)) => {
-                let indicies: Vec<u32> = iter.collect();
-
-                (
-                    instance
-                        .device()
-                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("U32 Index Buffer"),
-                            contents: bytemuck::cast_slice(&indicies[..]),
-                            usage: wgpu::BufferUsages::INDEX,
-                        }),
-                    wgpu::IndexFormat::Uint32,
-                    indicies.len(),
-                )
-            }
-            _ => panic!("No indices"),
-        };
         // Update the value stored in this mesh
         Mesh {
             vertex_buffer,
             index_buffer,
-            num_indices: num_indices as u32,
+            num_indices: num_indices,
             partitions,
             index_format,
         }

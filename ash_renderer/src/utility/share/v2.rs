@@ -2,10 +2,7 @@ use ash::vk;
 
 use std::ptr;
 
-use crate::{
-    utility::{buffer::Buffer, image::Image},
-    VertexV3,
-};
+use crate::utility::{buffer::Buffer, image::Image};
 
 use super::*;
 
@@ -47,7 +44,8 @@ pub fn create_descriptor_sets(
     descriptor_pool: vk::DescriptorPool,
     descriptor_set_layout: vk::DescriptorSetLayout,
     uniform_buffers: &Vec<Buffer>,
-    vert_buffers: &Buffer,
+    vert_buffer: &Buffer,
+    index_buffer: &Buffer,
     texture: &Image,
     swapchain_images_size: usize,
 ) -> Vec<vk::DescriptorSet> {
@@ -78,9 +76,14 @@ pub fn create_descriptor_sets(
         }];
 
         let vertex_buffer_infos = [vk::DescriptorBufferInfo {
-            buffer: vert_buffers.buffer(),
+            buffer: vert_buffer.buffer(),
             offset: 0,
-            range: ::std::mem::size_of::<VertexV3>() as u64 * 8,
+            range: vert_buffer.size(),
+        }];
+        let index_buffer_infos = [vk::DescriptorBufferInfo {
+            buffer: index_buffer.buffer(),
+            offset: 0,
+            range: index_buffer.size(),
         }];
 
         let descriptor_image_infos = [vk::DescriptorImageInfo {
@@ -108,12 +111,25 @@ pub fn create_descriptor_sets(
                 s_type: vk::StructureType::WRITE_DESCRIPTOR_SET,
                 p_next: ptr::null(),
                 dst_set: descritptor_set,
-                dst_binding: 2,
+                dst_binding: 4,
                 dst_array_element: 0,
                 descriptor_count: 1,
                 descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
                 p_image_info: ptr::null(),
                 p_buffer_info: vertex_buffer_infos.as_ptr(),
+                p_texel_buffer_view: ptr::null(),
+            },
+            vk::WriteDescriptorSet {
+                // transform uniform
+                s_type: vk::StructureType::WRITE_DESCRIPTOR_SET,
+                p_next: ptr::null(),
+                dst_set: descritptor_set,
+                dst_binding: 3,
+                dst_array_element: 0,
+                descriptor_count: 1,
+                descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
+                p_image_info: ptr::null(),
+                p_buffer_info: index_buffer_infos.as_ptr(),
                 p_texel_buffer_view: ptr::null(),
             },
             vk::WriteDescriptorSet {
@@ -151,7 +167,15 @@ pub fn create_descriptor_set_layout(device: &ash::Device) -> vk::DescriptorSetLa
         },
         vk::DescriptorSetLayoutBinding {
             // verts buffer
-            binding: 2,
+            binding: 4,
+            descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
+            descriptor_count: 1,
+            stage_flags: vk::ShaderStageFlags::MESH_EXT,
+            p_immutable_samplers: ptr::null(),
+        },
+        vk::DescriptorSetLayoutBinding {
+            // verts buffer
+            binding: 3,
             descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
             descriptor_count: 1,
             stage_flags: vk::ShaderStageFlags::MESH_EXT,

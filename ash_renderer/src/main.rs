@@ -1,7 +1,7 @@
 mod utility;
 
 use crate::utility::{
-    buffer::{create_index_buffer, create_uniform_buffers, create_vertex_buffer},
+    buffer::{create_storage_buffer, create_uniform_buffers},
     // the mod define some fixed functions that have been learned before.
     constants::*,
     debug::*,
@@ -15,6 +15,7 @@ use crate::utility::{
 
 use ash::{extensions::ext::MeshShader, vk};
 use bevy_ecs::{entity::Entity, event::Events, schedule::Schedule, world::World};
+use common::{asset::Asset, MultiResMesh};
 use common_renderer::components::{
     camera::Camera,
     camera_controller::{
@@ -35,90 +36,6 @@ use std::ptr;
 // Constants
 const WINDOW_TITLE: &'static str = "26.Depth Buffering";
 const TEXTURE_PATH: &'static str = "../../../assets/vulkan.jpg";
-
-#[repr(C)]
-#[derive(Debug, Clone, Copy)]
-pub struct VertexV3 {
-    pub pos: [f32; 3],
-    pub color: [f32; 3],
-    pub tex_coord: [f32; 2],
-}
-impl VertexV3 {
-    pub fn get_binding_descriptions() -> [vk::VertexInputBindingDescription; 1] {
-        [vk::VertexInputBindingDescription {
-            binding: 0,
-            stride: std::mem::size_of::<Self>() as u32,
-            input_rate: vk::VertexInputRate::VERTEX,
-        }]
-    }
-
-    pub fn get_attribute_descriptions() -> [vk::VertexInputAttributeDescription; 3] {
-        [
-            vk::VertexInputAttributeDescription {
-                binding: 0,
-                location: 0,
-                format: vk::Format::R32G32B32_SFLOAT,
-                offset: offset_of!(Self, pos) as u32,
-            },
-            vk::VertexInputAttributeDescription {
-                binding: 0,
-                location: 1,
-                format: vk::Format::R32G32B32_SFLOAT,
-                offset: offset_of!(Self, color) as u32,
-            },
-            vk::VertexInputAttributeDescription {
-                binding: 0,
-                location: 2,
-                format: vk::Format::R32G32_SFLOAT,
-                offset: offset_of!(Self, tex_coord) as u32,
-            },
-        ]
-    }
-}
-pub const RECT_TEX_COORD_VERTICES_DATA: [VertexV3; 8] = [
-    VertexV3 {
-        pos: [-0.75, -0.75, 0.0],
-        color: [1.0, 0.0, 0.0],
-        tex_coord: [0.0, 0.0],
-    },
-    VertexV3 {
-        pos: [0.75, -0.75, 0.0],
-        color: [0.0, 1.0, 0.0],
-        tex_coord: [1.0, 0.0],
-    },
-    VertexV3 {
-        pos: [0.75, 0.75, 0.0],
-        color: [0.0, 0.0, 1.0],
-        tex_coord: [1.0, 1.0],
-    },
-    VertexV3 {
-        pos: [-0.75, 0.75, 0.0],
-        color: [1.0, 1.0, 1.0],
-        tex_coord: [0.0, 1.0],
-    },
-    VertexV3 {
-        pos: [-0.75, -0.75, -0.75],
-        color: [1.0, 0.0, 0.0],
-        tex_coord: [0.0, 0.0],
-    },
-    VertexV3 {
-        pos: [0.75, -0.75, -0.75],
-        color: [0.0, 1.0, 0.0],
-        tex_coord: [1.0, 0.0],
-    },
-    VertexV3 {
-        pos: [0.75, 0.75, -0.75],
-        color: [0.0, 0.0, 1.0],
-        tex_coord: [1.0, 1.0],
-    },
-    VertexV3 {
-        pos: [-0.75, 0.75, -0.75],
-        color: [1.0, 1.0, 1.0],
-        tex_coord: [0.0, 1.0],
-    },
-];
-
-pub const RECT_TEX_COORD_INDICES_DATA: [u32; 12] = [0, 1, 2, 2, 3, 0, 4, 5, 6, 6, 7, 4];
 
 pub struct VulkanApp26 {
     window: winit::window::Window,
@@ -291,20 +208,25 @@ impl VulkanApp26 {
         .create_texture_image_view(1);
 
         println!("Loading verts");
-        let vertex_buffer = create_vertex_buffer(
+
+        let data = MultiResMesh::load().unwrap();
+
+        println!("V: {:?} I: {:?}", data.verts, data.indices);
+
+        let vertex_buffer = create_storage_buffer(
             &device,
             &physical_device_memory_properties,
             command_pool,
             graphics_queue,
-            &RECT_TEX_COORD_VERTICES_DATA,
+            &data.verts,
         );
 
-        let index_buffer = create_index_buffer(
+        let index_buffer = create_storage_buffer(
             &device,
             &physical_device_memory_properties,
             command_pool,
             graphics_queue,
-            &RECT_TEX_COORD_INDICES_DATA,
+            &data.indices,
         );
         let uniform_buffers = create_uniform_buffers(
             &device,
@@ -321,6 +243,7 @@ impl VulkanApp26 {
             ubo_layout,
             &uniform_buffers,
             &vertex_buffer,
+            &index_buffer,
             &texture_image,
             swapchain_stuff.swapchain_images.len(),
         );

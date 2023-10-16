@@ -677,41 +677,6 @@ pub fn find_supported_format(
     panic!("Failed to find supported format!")
 }
 
-pub fn load_model(model_path: &Path) -> (Vec<VertexV3>, Vec<u32>) {
-    let model_obj = tobj::load_obj(model_path).expect("Failed to load model object!");
-
-    let mut vertices = vec![];
-    let mut indices = vec![];
-
-    let (models, _) = model_obj;
-    for m in models.iter() {
-        let mesh = &m.mesh;
-
-        if mesh.texcoords.len() == 0 {
-            panic!("Missing texture coordinate for the model.")
-        }
-
-        let total_vertices_count = mesh.positions.len() / 3;
-        for i in 0..total_vertices_count {
-            let vertex = VertexV3 {
-                pos: [
-                    mesh.positions[i * 3],
-                    mesh.positions[i * 3 + 1],
-                    mesh.positions[i * 3 + 2],
-                    1.0,
-                ],
-                color: [1.0, 1.0, 1.0, 1.0],
-                tex_coord: [mesh.texcoords[i * 2], mesh.texcoords[i * 2 + 1]],
-            };
-            vertices.push(vertex);
-        }
-
-        indices = mesh.indices.clone();
-    }
-
-    (vertices, indices)
-}
-
 pub fn check_mipmap_support(
     instance: &ash::Instance,
     physcial_device: vk::PhysicalDevice,

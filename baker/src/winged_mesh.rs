@@ -1,5 +1,6 @@
 extern crate gltf;
 
+use glam::Vec3;
 use metis::{
     idx_t, real_t, rstatus_et_METIS_ERROR_INPUT, rstatus_et_METIS_ERROR_MEMORY,
     rstatus_et_METIS_OK, METIS_PartGraphKway, METIS_PartGraphRecursive, METIS_SetDefaultOptions,
@@ -124,7 +125,9 @@ impl WingedMesh {
         }
     }
 
-    pub fn from_gltf(path: impl AsRef<std::path::Path>) -> gltf::Result<Self> {
+    pub fn from_gltf(
+        path: impl AsRef<std::path::Path>,
+    ) -> gltf::Result<(Self, Vec<[f32; 3]>, Vec<u32>)> {
         let (doc, buffers, _) = gltf::import(path)?;
 
         let mesh = doc.meshes().next().unwrap();
@@ -133,23 +136,23 @@ impl WingedMesh {
 
         let iter = reader.read_positions().unwrap();
         let verts: Vec<[f32; 3]> = iter.collect();
-
-        let indices: Vec<usize> = match reader.read_indices() {
+        //.map(|v| Vec3::from_array(v))
+        let indices: Vec<u32> = match reader.read_indices() {
             Some(ReadIndices::U16(iter)) => iter.map(|i| i as _).collect(),
-            Some(ReadIndices::U32(iter)) => iter.map(|i| i as _).collect(),
+            Some(ReadIndices::U32(iter)) => iter.collect(),
             _ => panic!("Unsupported index size"),
         };
         let mut mesh = WingedMesh::new(indices.len() / 3, verts.len());
 
         for i in 0..mesh.faces.len() {
-            let a = indices[i * 3];
-            let b = indices[i * 3 + 1];
-            let c = indices[i * 3 + 2];
+            let a = indices[i * 3] as usize;
+            let b = indices[i * 3 + 1] as usize;
+            let c = indices[i * 3 + 2] as usize;
 
             mesh.add_tri(FaceID(i), VertID(a), VertID(b), VertID(c));
         }
 
-        Ok(mesh)
+        Ok((mesh, verts, indices))
     }
 
     fn find_edge(&self, a: VertID, b: VertID) -> Option<EdgeID> {

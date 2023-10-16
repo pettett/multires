@@ -222,6 +222,7 @@ name = "baker"
 version = "0.1.0"
 dependencies = [
  "common",
+ "glam",
  "gltf",
  "metis",
  "petgraph",
@@ -594,6 +595,7 @@ name = "common"
 version = "0.1.0"
 dependencies = [
  "bincode",
+ "glam",
  "serde",
 ]
 
@@ -1000,6 +1002,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b5418c17512bdf42730f9032c74e1ae39afc408745ebb2acf72fbc4691c17945"
 dependencies = [
  "bytemuck",
+ "serde",
 ]
 
 [[package]]
@@ -2053,7 +2056,6 @@ dependencies = [
  "common_renderer",
  "env_logger",
  "glam",
- "gltf",
  "log",
  "pollster",
  "wgpu",
