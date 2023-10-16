@@ -1,6 +1,7 @@
 mod utility;
 
 use crate::utility::{
+    buffer::{create_index_buffer, create_uniform_buffers, create_vertex_buffer},
     // the mod define some fixed functions that have been learned before.
     constants::*,
     debug::*,
@@ -147,14 +148,11 @@ struct VulkanApp26 {
     texture_sampler: vk::Sampler,
     texture_image_memory: vk::DeviceMemory,
 
-    vertex_buffer: vk::Buffer,
-    vertex_buffer_memory: vk::DeviceMemory,
-    index_buffer: vk::Buffer,
-    index_buffer_memory: vk::DeviceMemory,
+    vertex_buffer: utility::buffer::Buffer,
+    index_buffer: utility::buffer::Buffer,
 
     uniform_transform: UniformBufferObject,
-    uniform_buffers: Vec<vk::Buffer>,
-    uniform_buffers_memory: Vec<vk::DeviceMemory>,
+    uniform_buffers: Vec<utility::buffer::Buffer>,
 
     descriptor_pool: vk::DescriptorPool,
     descriptor_sets: Vec<vk::DescriptorSet>,
@@ -271,7 +269,7 @@ impl VulkanApp26 {
         let texture_sampler = share::v1::create_texture_sampler(&device);
 
         println!("Loading verts");
-        let (vertex_buffer, vertex_buffer_memory) = share::v1::create_vertex_buffer(
+        let vertex_buffer = create_vertex_buffer(
             &device,
             &physical_device_memory_properties,
             command_pool,
@@ -279,14 +277,14 @@ impl VulkanApp26 {
             &RECT_TEX_COORD_VERTICES_DATA,
         );
 
-        let (index_buffer, index_buffer_memory) = share::v1::create_index_buffer(
+        let index_buffer = create_index_buffer(
             &device,
             &physical_device_memory_properties,
             command_pool,
             graphics_queue,
             &RECT_TEX_COORD_INDICES_DATA,
         );
-        let (uniform_buffers, uniform_buffers_memory) = share::v1::create_uniform_buffers(
+        let uniform_buffers = create_uniform_buffers(
             &device,
             &physical_device_memory_properties,
             swapchain_stuff.swapchain_images.len(),
@@ -300,7 +298,7 @@ impl VulkanApp26 {
             descriptor_pool,
             ubo_layout,
             &uniform_buffers,
-            vertex_buffer,
+            &vertex_buffer,
             texture_image_view,
             texture_sampler,
             swapchain_stuff.swapchain_images.len(),
@@ -316,8 +314,8 @@ impl VulkanApp26 {
             &swapchain_framebuffers,
             render_pass,
             swapchain_stuff.swapchain_extent,
-            vertex_buffer,
-            index_buffer,
+            &vertex_buffer,
+            &index_buffer,
             pipeline_layout,
             &descriptor_sets,
         );
@@ -369,9 +367,7 @@ impl VulkanApp26 {
             texture_image_memory,
 
             vertex_buffer,
-            vertex_buffer_memory,
             index_buffer,
-            index_buffer_memory,
 
             uniform_transform: UniformBufferObject {
                 model: Mat4::from_rotation_z(1.5),
@@ -395,7 +391,6 @@ impl VulkanApp26 {
                 },
             },
             uniform_buffers,
-            uniform_buffers_memory,
 
             descriptor_pool,
             descriptor_sets,
@@ -863,8 +858,8 @@ impl VulkanApp26 {
         framebuffers: &Vec<vk::Framebuffer>,
         render_pass: vk::RenderPass,
         surface_extent: vk::Extent2D,
-        vertex_buffer: vk::Buffer,
-        index_buffer: vk::Buffer,
+        vertex_buffer: &utility::buffer::Buffer,
+        index_buffer: &utility::buffer::Buffer,
         pipeline_layout: vk::PipelineLayout,
         descriptor_sets: &Vec<vk::DescriptorSet>,
     ) -> Vec<vk::CommandBuffer> {
@@ -987,7 +982,7 @@ impl VulkanApp26 {
             let data_ptr =
                 self.device
                     .map_memory(
-                        self.uniform_buffers_memory[current_image],
+                        self.uniform_buffers[current_image].memory(),
                         0,
                         buffer_size,
                         vk::MemoryMapFlags::empty(),
@@ -997,7 +992,7 @@ impl VulkanApp26 {
             data_ptr.copy_from_nonoverlapping(ubos.as_ptr(), ubos.len());
 
             self.device
-                .unmap_memory(self.uniform_buffers_memory[current_image]);
+                .unmap_memory(self.uniform_buffers[current_image].memory());
         }
     }
 }
@@ -1017,18 +1012,6 @@ impl Drop for VulkanApp26 {
 
             self.device
                 .destroy_descriptor_pool(self.descriptor_pool, None);
-
-            for i in 0..self.uniform_buffers.len() {
-                self.device.destroy_buffer(self.uniform_buffers[i], None);
-                self.device
-                    .free_memory(self.uniform_buffers_memory[i], None);
-            }
-
-            self.device.destroy_buffer(self.index_buffer, None);
-            self.device.free_memory(self.index_buffer_memory, None);
-
-            self.device.destroy_buffer(self.vertex_buffer, None);
-            self.device.free_memory(self.vertex_buffer_memory, None);
 
             self.device.destroy_sampler(self.texture_sampler, None);
             self.device
@@ -1227,8 +1210,8 @@ impl VulkanApp for VulkanApp26 {
             &self.swapchain_framebuffers,
             self.render_pass,
             self.swapchain_extent,
-            self.vertex_buffer,
-            self.index_buffer,
+            &self.vertex_buffer,
+            &self.index_buffer,
             self.pipeline_layout,
             &self.descriptor_sets,
         );

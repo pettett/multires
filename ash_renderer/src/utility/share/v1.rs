@@ -7,6 +7,8 @@ use std::ffi::CString;
 use std::path::{self, Path};
 use std::{fs, ptr};
 
+use crate::utility::buffer::create_buffer;
+
 use super::*;
 
 pub fn create_render_pass(device: &ash::Device, surface_format: vk::Format) -> vk::RenderPass {
@@ -212,120 +214,6 @@ pub fn create_sync_objects(device: &ash::Device, max_frame_in_flight: usize) -> 
     sync_objects
 }
 
-pub fn create_vertex_buffer<T>(
-    device: &ash::Device,
-    device_memory_properties: &vk::PhysicalDeviceMemoryProperties,
-    command_pool: vk::CommandPool,
-    submit_queue: vk::Queue,
-    data: &[T],
-) -> (vk::Buffer, vk::DeviceMemory) {
-    let buffer_size = ::std::mem::size_of_val(data) as vk::DeviceSize;
-
-    let (staging_buffer, staging_buffer_memory) = create_buffer(
-        device,
-        buffer_size,
-        vk::BufferUsageFlags::TRANSFER_SRC,
-        vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-        &device_memory_properties,
-    );
-
-    unsafe {
-        let data_ptr = device
-            .map_memory(
-                staging_buffer_memory,
-                0,
-                buffer_size,
-                vk::MemoryMapFlags::empty(),
-            )
-            .expect("Failed to Map Memory") as *mut T;
-
-        data_ptr.copy_from_nonoverlapping(data.as_ptr(), data.len());
-
-        device.unmap_memory(staging_buffer_memory);
-    }
-    //THIS is not actually a vertex buffer, but a storage buffer that can be accessed from the mesh shader
-    let (vertex_buffer, vertex_buffer_memory) = create_buffer(
-        device,
-        buffer_size,
-        vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::STORAGE_BUFFER,
-        vk::MemoryPropertyFlags::DEVICE_LOCAL,
-        &device_memory_properties,
-    );
-
-    copy_buffer(
-        device,
-        submit_queue,
-        command_pool,
-        staging_buffer,
-        vertex_buffer,
-        buffer_size,
-    );
-
-    unsafe {
-        device.destroy_buffer(staging_buffer, None);
-        device.free_memory(staging_buffer_memory, None);
-    }
-
-    (vertex_buffer, vertex_buffer_memory)
-}
-
-pub fn create_index_buffer(
-    device: &ash::Device,
-    device_memory_properties: &vk::PhysicalDeviceMemoryProperties,
-    command_pool: vk::CommandPool,
-    submit_queue: vk::Queue,
-    data: &[u32],
-) -> (vk::Buffer, vk::DeviceMemory) {
-    let buffer_size = ::std::mem::size_of_val(data) as vk::DeviceSize;
-
-    let (staging_buffer, staging_buffer_memory) = create_buffer(
-        device,
-        buffer_size,
-        vk::BufferUsageFlags::TRANSFER_SRC,
-        vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-        &device_memory_properties,
-    );
-
-    unsafe {
-        let data_ptr = device
-            .map_memory(
-                staging_buffer_memory,
-                0,
-                buffer_size,
-                vk::MemoryMapFlags::empty(),
-            )
-            .expect("Failed to Map Memory") as *mut u32;
-
-        data_ptr.copy_from_nonoverlapping(data.as_ptr(), data.len());
-
-        device.unmap_memory(staging_buffer_memory);
-    }
-
-    let (index_buffer, index_buffer_memory) = create_buffer(
-        device,
-        buffer_size,
-        vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::INDEX_BUFFER,
-        vk::MemoryPropertyFlags::DEVICE_LOCAL,
-        &device_memory_properties,
-    );
-
-    copy_buffer(
-        device,
-        submit_queue,
-        command_pool,
-        staging_buffer,
-        index_buffer,
-        buffer_size,
-    );
-
-    unsafe {
-        device.destroy_buffer(staging_buffer, None);
-        device.free_memory(staging_buffer_memory, None);
-    }
-
-    (index_buffer, index_buffer_memory)
-}
-
 pub fn create_descriptor_pool(
     device: &ash::Device,
     swapchain_images_size: usize,
@@ -427,31 +315,6 @@ pub fn create_descriptor_set_layout(device: &ash::Device) -> vk::DescriptorSetLa
             .create_descriptor_set_layout(&ubo_layout_create_info, None)
             .expect("Failed to create Descriptor Set Layout!")
     }
-}
-
-pub fn create_uniform_buffers(
-    device: &ash::Device,
-    device_memory_properties: &vk::PhysicalDeviceMemoryProperties,
-    swapchain_image_count: usize,
-) -> (Vec<vk::Buffer>, Vec<vk::DeviceMemory>) {
-    let buffer_size = ::std::mem::size_of::<UniformBufferObject>();
-
-    let mut uniform_buffers = vec![];
-    let mut uniform_buffers_memory = vec![];
-
-    for _ in 0..swapchain_image_count {
-        let (uniform_buffer, uniform_buffer_memory) = create_buffer(
-            device,
-            buffer_size as u64,
-            vk::BufferUsageFlags::UNIFORM_BUFFER,
-            vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-            device_memory_properties,
-        );
-        uniform_buffers.push(uniform_buffer);
-        uniform_buffers_memory.push(uniform_buffer_memory);
-    }
-
-    (uniform_buffers, uniform_buffers_memory)
 }
 
 pub fn create_image(
@@ -727,8 +590,8 @@ pub fn create_texture_image(
         panic!("Failed to load texture image!")
     }
 
-    let (staging_buffer, staging_buffer_memory) = create_buffer(
-        device,
+    let staging_buffer = create_buffer(
+        device.clone(),
         image_size,
         vk::BufferUsageFlags::TRANSFER_SRC,
         vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
@@ -738,7 +601,7 @@ pub fn create_texture_image(
     unsafe {
         let data_ptr = device
             .map_memory(
-                staging_buffer_memory,
+                staging_buffer.memory(),
                 0,
                 image_size,
                 vk::MemoryMapFlags::empty(),
@@ -747,7 +610,7 @@ pub fn create_texture_image(
 
         data_ptr.copy_from_nonoverlapping(image_data.as_ptr(), image_data.len());
 
-        device.unmap_memory(staging_buffer_memory);
+        device.unmap_memory(staging_buffer.memory());
     }
 
     let (texture_image, texture_image_memory) = create_image(
@@ -778,7 +641,7 @@ pub fn create_texture_image(
         device,
         command_pool,
         submit_queue,
-        staging_buffer,
+        staging_buffer.buffer(),
         texture_image,
         image_width,
         image_height,
@@ -794,11 +657,6 @@ pub fn create_texture_image(
         vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
         1,
     );
-
-    unsafe {
-        device.destroy_buffer(staging_buffer, None);
-        device.free_memory(staging_buffer_memory, None);
-    }
 
     (texture_image, texture_image_memory)
 }

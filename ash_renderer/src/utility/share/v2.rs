@@ -2,7 +2,7 @@ use ash::vk;
 
 use std::ptr;
 
-use crate::VertexV3;
+use crate::{utility::buffer::Buffer, VertexV3};
 
 use super::*;
 
@@ -43,8 +43,8 @@ pub fn create_descriptor_sets(
     device: &ash::Device,
     descriptor_pool: vk::DescriptorPool,
     descriptor_set_layout: vk::DescriptorSetLayout,
-    uniform_buffers: &Vec<vk::Buffer>,
-    vert_buffers: vk::Buffer,
+    uniform_buffers: &Vec<Buffer>,
+    vert_buffers: &Buffer,
     texture_image_view: vk::ImageView,
     texture_sampler: vk::Sampler,
     swapchain_images_size: usize,
@@ -70,13 +70,13 @@ pub fn create_descriptor_sets(
 
     for (i, &descritptor_set) in descriptor_sets.iter().enumerate() {
         let descriptor_buffer_infos = [vk::DescriptorBufferInfo {
-            buffer: uniform_buffers[i],
+            buffer: uniform_buffers[i].buffer(),
             offset: 0,
             range: ::std::mem::size_of::<UniformBufferObject>() as u64,
         }];
 
         let vertex_buffer_infos = [vk::DescriptorBufferInfo {
-            buffer: vert_buffers,
+            buffer: vert_buffers.buffer(),
             offset: 0,
             range: ::std::mem::size_of::<VertexV3>() as u64 * 8,
         }];

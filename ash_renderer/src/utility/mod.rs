@@ -1,6 +1,7 @@
 //! The utility mod define some fixed function using in this tutorial.
 //! Help to simplify the code.
 
+pub mod buffer;
 pub mod constants;
 pub mod debug;
 pub mod fps_limiter;
