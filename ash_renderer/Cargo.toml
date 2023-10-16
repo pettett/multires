@@ -1,5 +1,5 @@
 [package]
-name = "vk_renderer"
+name = "ash_renderer"
 version.workspace = true
 edition.workspace = true
 
@@ -15,10 +15,21 @@ pollster = "0.3"
 bevy_ecs = "0.11"
 common = { path = "../common" }
 common_renderer = { path = "../common_renderer" }
-ash_renderer = { path = "../ash_renderer" }
-vulkano = "0.33"
-vulkano-win = "0.33"
-vulkano-shaders = "0.33"
+ash = { version = "0.37", default-features = false, features = [
+	"linked",
+	"debug",
+] }
+ash-window = "0.12"
+raw-window-handle = "0.5"
+memoffset = "0.5.1"
+num = "0.2.0"
+tobj = "0.1.10"
+image = "0.22"
+
 
 [profile.dev]
 opt-level = 1
+
+
+[target.'cfg(target_os = "windows")'.dependencies]
+winapi = { version = "0.3.5", features = ["windef", "libloaderapi"] }

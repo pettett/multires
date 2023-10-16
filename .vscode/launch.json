@@ -44,6 +44,24 @@
 		{
 			"type": "lldb",
 			"request": "launch",
+			"name": "Debug executable 'ash_renderer'",
+			"cargo": {
+				"args": [
+					"build",
+					"--bin=ash_renderer",
+					"--package=ash_renderer"
+				],
+				"filter": {
+					"name": "ash_renderer",
+					"kind": "bin"
+				}
+			},
+			"args": [],
+			"cwd": "${workspaceFolder}"
+		},
+		{
+			"type": "lldb",
+			"request": "launch",
 			"name": "Debug executable 'vk_renderer'",
 			"cargo": {
 				"args": [

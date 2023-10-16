@@ -32,7 +32,7 @@ use vulkano::swapchain::{
     AcquireError, Surface, Swapchain, SwapchainCreateInfo, SwapchainPresentInfo,
 };
 use vulkano::sync::GpuFuture;
-use vulkano::{sync, VulkanLibrary};
+use vulkano::{sync, VulkanLibrary, VulkanObject};
 use vulkano_win::VkSurfaceBuild;
 use winit::dpi::PhysicalSize;
 use winit::window::{Window, WindowBuilder};
@@ -97,6 +97,17 @@ impl Renderer {
     /// Creating some of the wgpu types requires async code
     /// https://sotrh.github.io/learn-wgpu/beginner/tutorial2-surface/#state-new
     pub async fn new(event_loop: &winit::event_loop::EventLoop<()>) -> Self {
+        // let entry = unsafe { ash::Entry::load().unwrap() };
+        // let app_info = ash::vk::ApplicationInfo {
+        //     api_version: ash::vk::make_api_version(0, 1, 0, 0),
+        //     ..Default::default()
+        // };
+        // let create_info = ash::vk::InstanceCreateInfo {
+        //     p_application_info: &app_info,
+        //     ..Default::default()
+        // };
+        // let instance = unsafe { entry.create_instance(&create_info, None).unwrap() };
+
         let library = VulkanLibrary::new().expect("no local Vulkan library/DLL");
         let required_extensions = vulkano_win::required_extensions(&library);
 
