@@ -2,7 +2,10 @@ use ash::vk;
 
 use std::ptr;
 
-use crate::{utility::buffer::Buffer, VertexV3};
+use crate::{
+    utility::{buffer::Buffer, image::Image},
+    VertexV3,
+};
 
 use super::*;
 
@@ -45,8 +48,7 @@ pub fn create_descriptor_sets(
     descriptor_set_layout: vk::DescriptorSetLayout,
     uniform_buffers: &Vec<Buffer>,
     vert_buffers: &Buffer,
-    texture_image_view: vk::ImageView,
-    texture_sampler: vk::Sampler,
+    texture: &Image,
     swapchain_images_size: usize,
 ) -> Vec<vk::DescriptorSet> {
     let mut layouts: Vec<vk::DescriptorSetLayout> = vec![];
@@ -82,8 +84,8 @@ pub fn create_descriptor_sets(
         }];
 
         let descriptor_image_infos = [vk::DescriptorImageInfo {
-            sampler: texture_sampler,
-            image_view: texture_image_view,
+            sampler: texture.sampler(),
+            image_view: texture.image_view(),
             image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
         }];
 

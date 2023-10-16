@@ -5,6 +5,7 @@ use crate::utility::{
     // the mod define some fixed functions that have been learned before.
     constants::*,
     debug::*,
+    image::Image,
     pipeline::create_graphics_pipeline,
     render_pass::create_render_pass,
     share,
@@ -141,14 +142,8 @@ struct VulkanApp26 {
     ubo_layout: vk::DescriptorSetLayout,
     graphics_pipeline: Pipeline,
 
-    depth_image: vk::Image,
-    depth_image_view: vk::ImageView,
-    depth_image_memory: vk::DeviceMemory,
-
-    texture_image: vk::Image,
-    texture_image_view: vk::ImageView,
-    texture_sampler: vk::Sampler,
-    texture_image_memory: vk::DeviceMemory,
+    depth_image: Image,
+    texture_image: Image,
 
     vertex_buffer: utility::buffer::Buffer,
     index_buffer: utility::buffer::Buffer,
@@ -222,7 +217,7 @@ impl VulkanApp26 {
             &surface_stuff,
             &queue_family,
         );
-        let swapchain_imageviews = share::v1::create_image_views(
+        let swapchain_imageviews = Image::create_image_views(
             &device,
             swapchain_stuff.swapchain_format,
             &swapchain_stuff.swapchain_images,
@@ -242,33 +237,33 @@ impl VulkanApp26 {
         );
         let command_pool = share::v1::create_command_pool(&device, &queue_family);
 
-        let (depth_image, depth_image_view, depth_image_memory) =
-            VulkanApp26::create_depth_resources(
-                &instance,
-                &device,
-                physical_device,
-                command_pool,
-                graphics_queue,
-                swapchain_stuff.swapchain_extent,
-                &physical_device_memory_properties,
-            );
+        let depth_image = VulkanApp26::create_depth_resources(
+            &instance,
+            device.clone(),
+            physical_device,
+            command_pool,
+            graphics_queue,
+            swapchain_stuff.swapchain_extent,
+            &physical_device_memory_properties,
+        );
         let swapchain_framebuffers = VulkanApp26::create_framebuffers(
             &device,
             render_pass,
             &swapchain_imageviews,
-            depth_image_view,
+            depth_image.image_view(),
             swapchain_stuff.swapchain_extent,
         );
+
         println!("Loading texture");
-        let (texture_image, texture_image_memory) = share::v1::create_texture_image(
-            &device,
+        let texture_image = Image::create_texture_image(
+            device.clone(),
             command_pool,
             graphics_queue,
             &physical_device_memory_properties,
             &Path::new(TEXTURE_PATH),
-        );
-        let texture_image_view = share::v1::create_texture_image_view(&device, texture_image, 1);
-        let texture_sampler = share::v1::create_texture_sampler(&device);
+        )
+        .create_texture_sampler()
+        .create_texture_image_view(1);
 
         println!("Loading verts");
         let vertex_buffer = create_vertex_buffer(
@@ -301,8 +296,7 @@ impl VulkanApp26 {
             ubo_layout,
             &uniform_buffers,
             &vertex_buffer,
-            texture_image_view,
-            texture_sampler,
+            &texture_image,
             swapchain_stuff.swapchain_images.len(),
         );
 
@@ -361,13 +355,8 @@ impl VulkanApp26 {
             graphics_pipeline,
 
             depth_image,
-            depth_image_view,
-            depth_image_memory,
 
             texture_image,
-            texture_image_view,
-            texture_sampler,
-            texture_image_memory,
 
             vertex_buffer,
             index_buffer,
@@ -397,15 +386,15 @@ impl VulkanApp26 {
 
     fn create_depth_resources(
         instance: &ash::Instance,
-        device: &ash::Device,
+        device: ash::Device,
         physical_device: vk::PhysicalDevice,
         _command_pool: vk::CommandPool,
         _submit_queue: vk::Queue,
         swapchain_extent: vk::Extent2D,
         device_memory_properties: &vk::PhysicalDeviceMemoryProperties,
-    ) -> (vk::Image, vk::ImageView, vk::DeviceMemory) {
+    ) -> Image {
         let depth_format = VulkanApp26::find_depth_format(instance, physical_device);
-        let (depth_image, depth_image_memory) = share::v1::create_image(
+        Image::create_image(
             device,
             swapchain_extent.width,
             swapchain_extent.height,
@@ -416,16 +405,8 @@ impl VulkanApp26 {
             vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
             vk::MemoryPropertyFlags::DEVICE_LOCAL,
             device_memory_properties,
-        );
-        let depth_image_view = share::v1::create_image_view(
-            device,
-            depth_image,
-            depth_format,
-            vk::ImageAspectFlags::DEPTH,
-            1,
-        );
-
-        (depth_image, depth_image_view, depth_image_memory)
+        )
+        .create_image_view(depth_format, vk::ImageAspectFlags::DEPTH, 1)
     }
 
     fn find_depth_format(
@@ -676,13 +657,6 @@ impl Drop for VulkanApp26 {
             self.device
                 .destroy_descriptor_pool(self.descriptor_pool, None);
 
-            self.device.destroy_sampler(self.texture_sampler, None);
-            self.device
-                .destroy_image_view(self.texture_image_view, None);
-
-            self.device.destroy_image(self.texture_image, None);
-            self.device.free_memory(self.texture_image_memory, None);
-
             self.device
                 .destroy_descriptor_set_layout(self.ubo_layout, None);
 
@@ -825,11 +799,8 @@ impl VulkanApp for VulkanApp26 {
         self.swapchain_format = swapchain_stuff.swapchain_format;
         self.swapchain_extent = swapchain_stuff.swapchain_extent;
 
-        self.swapchain_imageviews = share::v1::create_image_views(
-            &self.device,
-            self.swapchain_format,
-            &self.swapchain_images,
-        );
+        self.swapchain_imageviews =
+            Image::create_image_views(&self.device, self.swapchain_format, &self.swapchain_images);
         self.render_pass = create_render_pass(
             &self.instance,
             &self.device,
@@ -844,24 +815,21 @@ impl VulkanApp for VulkanApp26 {
         );
         self.graphics_pipeline = graphics_pipeline;
 
-        let depth_resources = VulkanApp26::create_depth_resources(
+        self.depth_image = VulkanApp26::create_depth_resources(
             &self.instance,
-            &self.device,
+            self.device.clone(),
             self.physical_device,
             self.command_pool,
             self.graphics_queue,
             self.swapchain_extent,
             &self.memory_properties,
         );
-        self.depth_image = depth_resources.0;
-        self.depth_image_view = depth_resources.1;
-        self.depth_image_memory = depth_resources.2;
 
         self.swapchain_framebuffers = VulkanApp26::create_framebuffers(
             &self.device,
             self.render_pass,
             &self.swapchain_imageviews,
-            self.depth_image_view,
+            self.depth_image.image_view(),
             self.swapchain_extent,
         );
         self.command_buffers = VulkanApp26::create_command_buffers(
@@ -881,10 +849,6 @@ impl VulkanApp for VulkanApp26 {
 
     fn cleanup_swapchain(&self) {
         unsafe {
-            self.device.destroy_image_view(self.depth_image_view, None);
-            self.device.destroy_image(self.depth_image, None);
-            self.device.free_memory(self.depth_image_memory, None);
-
             self.device
                 .free_command_buffers(self.command_pool, &self.command_buffers);
             for &framebuffer in self.swapchain_framebuffers.iter() {
