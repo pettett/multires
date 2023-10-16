@@ -49,7 +49,7 @@ void main() {
 	
 	gl_PrimitiveTriangleIndicesEXT[0] = uvec3(0,1,2);
 	gl_PrimitiveTriangleIndicesEXT[1] = uvec3(2, 0, 3);
-	gl_PrimitiveTriangleIndicesEXT[2] = uvec3( 4,  6, 5);
+	gl_PrimitiveTriangleIndicesEXT[2] = uvec3( 4, 0,  6);
 	gl_PrimitiveTriangleIndicesEXT[3] = uvec3(6,  4, 7);
 
 }

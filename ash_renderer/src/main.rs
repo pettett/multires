@@ -14,11 +14,19 @@ use crate::utility::{
 };
 
 use ash::{extensions::ext::MeshShader, vk};
-use common_renderer::components::{camera::Camera, transform::Transform};
+use bevy_ecs::{entity::Entity, event::Events, schedule::Schedule, world::World};
+use common_renderer::components::{
+    camera::Camera,
+    camera_controller::{
+        camera_handle_input, update_camera, CameraController, KeyIn, MouseIn, MouseMv,
+    },
+    transform::Transform,
+};
 use glam::{Mat4, Quat, Vec3, Vec3A};
 use memoffset::offset_of;
 use shaderc::CompilationArtifact;
 use utility::pipeline::Pipeline;
+use winit::event::WindowEvent;
 
 use std::ffi::CString;
 use std::path::Path;
@@ -112,9 +120,11 @@ pub const RECT_TEX_COORD_VERTICES_DATA: [VertexV3; 8] = [
 
 pub const RECT_TEX_COORD_INDICES_DATA: [u32; 12] = [0, 1, 2, 2, 3, 0, 4, 5, 6, 6, 7, 4];
 
-struct VulkanApp26 {
+pub struct VulkanApp26 {
     window: winit::window::Window,
-
+    world: bevy_ecs::world::World,
+    schedule: bevy_ecs::schedule::Schedule,
+    camera: Entity,
     // vulkan stuff
     instance: ash::Instance,
     surface_loader: ash::extensions::khr::Surface,
@@ -168,6 +178,21 @@ struct VulkanApp26 {
 }
 
 impl VulkanApp26 {
+    pub fn input(&mut self, event: &WindowEvent) -> bool {
+        match event {
+            WindowEvent::MouseInput { state, button, .. } => self
+                .world
+                .send_event(MouseIn(state.clone(), button.clone())),
+            WindowEvent::KeyboardInput { input, .. } => self.world.send_event(KeyIn(input.clone())),
+            WindowEvent::CursorMoved { position, .. } => {
+                self.world.send_event(MouseMv(position.clone()));
+            }
+            _ => (),
+        }
+
+        false
+    }
+
     pub fn new(event_loop: &winit::event_loop::EventLoop<()>) -> VulkanApp26 {
         println!("initing window");
         let window =
@@ -320,12 +345,32 @@ impl VulkanApp26 {
         println!("Generated App");
 
         let cam = Camera::new(1.0);
-        let transform = Transform::new(Vec3A::ZERO, Quat::IDENTITY);
+        let transform = Transform::new(Vec3A::new(0.0, -0.2, 0.0), Quat::IDENTITY);
+
+        let mut world = World::new();
+
+        world.insert_resource(Events::<MouseIn>::default());
+        world.insert_resource(Events::<MouseMv>::default());
+        world.insert_resource(Events::<KeyIn>::default());
+
+        let camera = world
+            .spawn((
+                CameraController::new(0.005),
+                Camera::new(1.0),
+                Transform::new(Vec3A::ZERO, Quat::IDENTITY),
+            ))
+            .id();
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems((camera_handle_input, update_camera));
 
         // cleanup(); the 'drop' function will take care of it.
         VulkanApp26 {
             // winit stuff
             window,
+            world,
+            schedule,
+            camera,
 
             // vulkan stuff
             instance,
@@ -618,6 +663,13 @@ impl VulkanApp26 {
     }
 
     fn update_uniform_buffer(&mut self, current_image: usize, _delta_time: f32) {
+        let cam = self.world.entity(self.camera);
+
+        self.uniform_transform.view_proj = cam
+            .get::<Camera>()
+            .unwrap()
+            .build_view_projection_matrix(cam.get().unwrap());
+
         let ubos = [self.uniform_transform.clone()];
 
         let buffer_size = (std::mem::size_of::<UniformBufferObject>() * ubos.len()) as u64;
