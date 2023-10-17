@@ -152,6 +152,9 @@ dependencies = [
  "raw-window-handle 0.6.0",
  "shaderc",
  "tobj",
+ "vulkano",
+ "vulkano-shaders",
+ "vulkano-win",
  "winapi",
  "winit",
 ]

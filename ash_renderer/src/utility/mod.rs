@@ -4,6 +4,7 @@
 pub mod buffer;
 pub mod constants;
 pub mod debug;
+pub mod device;
 pub mod fps_limiter;
 pub mod image;
 pub mod pipeline;

@@ -1,17 +1,17 @@
-use std::{cmp::max, path::Path, ptr};
+use std::{cmp::max, path::Path, ptr, sync::Arc};
 
 use ash::vk;
 
 use super::{
     buffer::create_buffer,
+    device::Device,
     share::{
-        begin_single_time_command, copy_buffer_to_image, end_single_time_command,
-        find_depth_format, find_memory_type,
+        begin_single_time_command, end_single_time_command, find_depth_format, find_memory_type,
     },
 };
 
 pub struct Image {
-    device: ash::Device,
+    device: Arc<Device>,
     image: vk::Image,
     image_memory: vk::DeviceMemory,
     image_view: Option<vk::ImageView>,
@@ -22,20 +22,20 @@ impl Drop for Image {
     fn drop(&mut self) {
         unsafe {
             if let Some(sampler) = self.sampler {
-                self.device.destroy_sampler(sampler, None);
+                self.device.device.destroy_sampler(sampler, None);
             }
             if let Some(image_view) = self.image_view {
-                self.device.destroy_image_view(image_view, None);
+                self.device.device.destroy_image_view(image_view, None);
             }
-            self.device.destroy_image(self.image, None);
-            self.device.free_memory(self.image_memory, None);
+            self.device.device.destroy_image(self.image, None);
+            self.device.device.free_memory(self.image_memory, None);
         }
     }
 }
 
 impl Image {
     pub fn create_image(
-        device: ash::Device,
+        device: Arc<Device>,
         width: u32,
         height: u32,
         mip_levels: u32,
@@ -70,11 +70,13 @@ impl Image {
 
         let image = unsafe {
             device
+                .device
                 .create_image(&image_create_info, None)
                 .expect("Failed to create Texture Image!")
         };
 
-        let image_memory_requirement = unsafe { device.get_image_memory_requirements(image) };
+        let image_memory_requirement =
+            unsafe { device.device.get_image_memory_requirements(image) };
         let memory_allocate_info = vk::MemoryAllocateInfo {
             s_type: vk::StructureType::MEMORY_ALLOCATE_INFO,
             p_next: ptr::null(),
@@ -88,12 +90,14 @@ impl Image {
 
         let image_memory = unsafe {
             device
+                .device
                 .allocate_memory(&memory_allocate_info, None)
                 .expect("Failed to allocate Texture Image memory!")
         };
 
         unsafe {
             device
+                .device
                 .bind_image_memory(image, image_memory, 0)
                 .expect("Failed to bind Image Memmory!");
         }
@@ -108,7 +112,7 @@ impl Image {
     }
 
     pub fn create_texture_image(
-        device: ash::Device,
+        device: Arc<Device>,
         command_pool: vk::CommandPool,
         submit_queue: vk::Queue,
         device_memory_properties: &vk::PhysicalDeviceMemoryProperties,
@@ -147,6 +151,7 @@ impl Image {
 
         unsafe {
             let data_ptr = device
+                .device
                 .map_memory(
                     staging_buffer.memory(),
                     0,
@@ -157,7 +162,7 @@ impl Image {
 
             data_ptr.copy_from_nonoverlapping(image_data.as_ptr(), image_data.len());
 
-            device.unmap_memory(staging_buffer.memory());
+            device.device.unmap_memory(staging_buffer.memory());
         }
 
         let texture_image = Self::create_image(
@@ -233,6 +238,7 @@ impl Image {
         unsafe {
             self.sampler = Some(
                 self.device
+                    .device
                     .create_sampler(&sampler_create_info, None)
                     .expect("Failed to create Sampler!"),
             );
@@ -249,7 +255,7 @@ impl Image {
     }
 
     pub fn transition_image_layout(
-        device: &ash::Device,
+        device: &Device,
         command_pool: vk::CommandPool,
         submit_queue: vk::Queue,
         image: &Image,
@@ -311,7 +317,7 @@ impl Image {
         }];
 
         unsafe {
-            device.cmd_pipeline_barrier(
+            device.device.cmd_pipeline_barrier(
                 command_buffer,
                 source_stage,
                 destination_stage,
@@ -327,7 +333,7 @@ impl Image {
 
     pub fn create_depth_resources(
         instance: &ash::Instance,
-        device: ash::Device,
+        device: Arc<Device>,
         physical_device: vk::PhysicalDevice,
         _command_pool: vk::CommandPool,
         _submit_queue: vk::Queue,
@@ -352,7 +358,7 @@ impl Image {
     }
 
     pub fn generate_mipmaps(
-        device: &ash::Device,
+        device: &Device,
         command_pool: vk::CommandPool,
         submit_queue: vk::Queue,
         image: vk::Image,
@@ -392,7 +398,7 @@ impl Image {
             image_barrier.dst_access_mask = vk::AccessFlags::TRANSFER_READ;
 
             unsafe {
-                device.cmd_pipeline_barrier(
+                device.device.cmd_pipeline_barrier(
                     command_buffer,
                     vk::PipelineStageFlags::TRANSFER,
                     vk::PipelineStageFlags::TRANSFER,
@@ -435,7 +441,7 @@ impl Image {
             }];
 
             unsafe {
-                device.cmd_blit_image(
+                device.device.cmd_blit_image(
                     command_buffer,
                     image,
                     vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
@@ -452,7 +458,7 @@ impl Image {
             image_barrier.dst_access_mask = vk::AccessFlags::SHADER_READ;
 
             unsafe {
-                device.cmd_pipeline_barrier(
+                device.device.cmd_pipeline_barrier(
                     command_buffer,
                     vk::PipelineStageFlags::TRANSFER,
                     vk::PipelineStageFlags::FRAGMENT_SHADER,
@@ -474,7 +480,7 @@ impl Image {
         image_barrier.dst_access_mask = vk::AccessFlags::SHADER_READ;
 
         unsafe {
-            device.cmd_pipeline_barrier(
+            device.device.cmd_pipeline_barrier(
                 command_buffer,
                 vk::PipelineStageFlags::TRANSFER,
                 vk::PipelineStageFlags::FRAGMENT_SHADER,
@@ -497,7 +503,7 @@ impl Image {
     }
 
     pub fn create_image_views(
-        device: &ash::Device,
+        device: &Device,
         surface_format: vk::Format,
         images: &Vec<vk::Image>,
     ) -> Vec<vk::ImageView> {
@@ -518,7 +524,7 @@ impl Image {
     }
 
     fn create_raw_image_view(
-        device: &ash::Device,
+        device: &Device,
         image: vk::Image,
         format: vk::Format,
         aspect_flags: vk::ImageAspectFlags,
@@ -548,6 +554,7 @@ impl Image {
 
         unsafe {
             device
+                .device
                 .create_image_view(&imageview_create_info, None)
                 .expect("Failed to create Image View!")
         }
@@ -574,4 +581,46 @@ impl Image {
     pub fn image(&self) -> vk::Image {
         self.image
     }
+}
+
+pub fn copy_buffer_to_image(
+    device: &Device,
+    command_pool: vk::CommandPool,
+    submit_queue: vk::Queue,
+    buffer: vk::Buffer,
+    image: vk::Image,
+    width: u32,
+    height: u32,
+) {
+    let command_buffer = begin_single_time_command(device, command_pool);
+
+    let buffer_image_regions = [vk::BufferImageCopy {
+        image_subresource: vk::ImageSubresourceLayers {
+            aspect_mask: vk::ImageAspectFlags::COLOR,
+            mip_level: 0,
+            base_array_layer: 0,
+            layer_count: 1,
+        },
+        image_extent: vk::Extent3D {
+            width,
+            height,
+            depth: 1,
+        },
+        buffer_offset: 0,
+        buffer_image_height: 0,
+        buffer_row_length: 0,
+        image_offset: vk::Offset3D { x: 0, y: 0, z: 0 },
+    }];
+
+    unsafe {
+        device.device.cmd_copy_buffer_to_image(
+            command_buffer,
+            buffer,
+            image,
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+            &buffer_image_regions,
+        );
+    }
+
+    end_single_time_command(device, command_pool, submit_queue, command_buffer);
 }

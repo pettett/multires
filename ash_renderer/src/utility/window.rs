@@ -49,7 +49,7 @@ impl ProgramProc {
 
                     match event {
                         WindowEvent::CloseRequested => {
-                            vulkan_app.wait_device_idle();
+                            vulkan_app.device.wait_device_idle();
                             *control_flow = ControlFlow::Exit
                         }
                         WindowEvent::KeyboardInput { input, .. } => match input {
@@ -59,14 +59,14 @@ impl ProgramProc {
                                 ..
                             } => match (virtual_keycode, state) {
                                 (Some(VirtualKeyCode::Escape), ElementState::Pressed) => {
-                                    vulkan_app.wait_device_idle();
+                                    vulkan_app.device.wait_device_idle();
                                     *control_flow = ControlFlow::Exit
                                 }
                                 _ => {}
                             },
                         },
                         WindowEvent::Resized(_new_size) => {
-                            vulkan_app.wait_device_idle();
+                            vulkan_app.device.wait_device_idle();
                             vulkan_app.resize_framebuffer();
                         }
                         _ => {}
@@ -88,7 +88,7 @@ impl ProgramProc {
                     tick_counter.tick_frame();
                 }
                 Event::LoopDestroyed => {
-                    vulkan_app.wait_device_idle();
+                    vulkan_app.device.wait_device_idle();
                 }
                 _ => (),
             })

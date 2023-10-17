@@ -1,15 +1,16 @@
-use std::ptr;
+use std::{ptr, sync::Arc};
 
 use ash::vk;
 
 use super::{
+    device::Device,
     share::{begin_single_time_command, end_single_time_command, find_memory_type},
     structures::UniformBufferObject,
 };
 
 pub struct Buffer {
     // exists to allow drop
-    device: ash::Device,
+    device: Arc<Device>,
     buffer: vk::Buffer,
     memory: vk::DeviceMemory,
     size: vk::DeviceSize,
@@ -31,13 +32,13 @@ impl Buffer {
 impl Drop for Buffer {
     fn drop(&mut self) {
         unsafe {
-            self.device.destroy_buffer(self.buffer, None);
-            self.device.free_memory(self.memory, None);
+            self.device.device.destroy_buffer(self.buffer, None);
+            self.device.device.free_memory(self.memory, None);
         }
     }
 }
 pub fn create_buffer(
-    device: ash::Device,
+    device: Arc<Device>,
     size: vk::DeviceSize,
     usage: vk::BufferUsageFlags,
     required_memory_properties: vk::MemoryPropertyFlags,
@@ -56,11 +57,12 @@ pub fn create_buffer(
 
     let buffer = unsafe {
         device
+            .device
             .create_buffer(&buffer_create_info, None)
             .expect("Failed to create Vertex Buffer")
     };
 
-    let mem_requirements = unsafe { device.get_buffer_memory_requirements(buffer) };
+    let mem_requirements = unsafe { device.device.get_buffer_memory_requirements(buffer) };
     let memory_type = find_memory_type(
         mem_requirements.memory_type_bits,
         required_memory_properties,
@@ -76,11 +78,13 @@ pub fn create_buffer(
 
     let memory = unsafe {
         device
+            .device
             .allocate_memory(&allocate_info, None)
             .expect("Failed to allocate vertex buffer memory!")
     };
     unsafe {
         device
+            .device
             .bind_buffer_memory(buffer, memory, 0)
             .expect("Failed to bind Buffer");
     }
@@ -94,7 +98,7 @@ pub fn create_buffer(
 }
 
 pub fn copy_buffer(
-    device: &ash::Device,
+    device: &Device,
     submit_queue: vk::Queue,
     command_pool: vk::CommandPool,
     src: &Buffer,
@@ -110,14 +114,16 @@ pub fn copy_buffer(
     }];
 
     unsafe {
-        device.cmd_copy_buffer(command_buffer, src.buffer, dst.buffer, &copy_regions);
+        device
+            .device
+            .cmd_copy_buffer(command_buffer, src.buffer, dst.buffer, &copy_regions);
     }
 
     end_single_time_command(device, command_pool, submit_queue, command_buffer);
 }
 
 pub fn create_storage_buffer<T: bytemuck::Pod>(
-    device: &ash::Device,
+    device: Arc<Device>,
     device_memory_properties: &vk::PhysicalDeviceMemoryProperties,
     command_pool: vk::CommandPool,
     submit_queue: vk::Queue,
@@ -135,6 +141,7 @@ pub fn create_storage_buffer<T: bytemuck::Pod>(
 
     unsafe {
         let data_ptr = device
+            .device
             .map_memory(
                 staging_buffer.memory,
                 0,
@@ -145,7 +152,7 @@ pub fn create_storage_buffer<T: bytemuck::Pod>(
 
         data_ptr.copy_from_nonoverlapping(data.as_ptr(), data.len());
 
-        device.unmap_memory(staging_buffer.memory);
+        device.device.unmap_memory(staging_buffer.memory);
     }
     //THIS is not actually a vertex buffer, but a storage buffer that can be accessed from the mesh shader
     let storage_buffer = create_buffer(
@@ -171,7 +178,7 @@ pub fn create_storage_buffer<T: bytemuck::Pod>(
 }
 
 pub fn create_uniform_buffers(
-    device: &ash::Device,
+    device: Arc<Device>,
     device_memory_properties: &vk::PhysicalDeviceMemoryProperties,
     swapchain_image_count: usize,
 ) -> Vec<crate::utility::buffer::Buffer> {

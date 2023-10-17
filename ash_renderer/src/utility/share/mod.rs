@@ -19,6 +19,8 @@ use crate::utility::debug;
 use crate::utility::platforms;
 use crate::utility::structures::*;
 
+use super::device::Device;
+
 pub fn create_instance(
     entry: &ash::Entry,
     window_title: &str,
@@ -170,87 +172,6 @@ pub fn is_physical_device_suitable(
         && is_device_extension_supported
         && is_swapchain_supported
         && is_support_sampler_anisotropy;
-}
-
-pub fn create_logical_device(
-    instance: &ash::Instance,
-    physical_device: vk::PhysicalDevice,
-    validation: &super::debug::ValidationInfo,
-    device_extensions: &DeviceExtension,
-    surface_stuff: &SurfaceStuff,
-) -> (ash::Device, QueueFamilyIndices) {
-    let indices = find_queue_family(instance, physical_device, surface_stuff);
-
-    use std::collections::HashSet;
-    let mut unique_queue_families = HashSet::new();
-    unique_queue_families.insert(indices.graphics_family.unwrap());
-    unique_queue_families.insert(indices.present_family.unwrap());
-
-    let queue_priorities = [1.0_f32];
-    let mut queue_create_infos = vec![];
-    for &queue_family in unique_queue_families.iter() {
-        let queue_create_info = vk::DeviceQueueCreateInfo {
-            s_type: vk::StructureType::DEVICE_QUEUE_CREATE_INFO,
-            p_next: ptr::null(),
-            flags: vk::DeviceQueueCreateFlags::empty(),
-            queue_family_index: queue_family,
-            p_queue_priorities: queue_priorities.as_ptr(),
-            queue_count: queue_priorities.len() as u32,
-        };
-        queue_create_infos.push(queue_create_info);
-    }
-
-    let physical_device_features = vk::PhysicalDeviceFeatures {
-        sampler_anisotropy: vk::TRUE, // enable anisotropy device feature from Chapter-24.
-        ..Default::default()
-    };
-
-    let requred_validation_layer_raw_names: Vec<CString> = validation
-        .required_validation_layers
-        .iter()
-        .map(|layer_name| CString::new(*layer_name).unwrap())
-        .collect();
-    let enable_layer_names: Vec<*const c_char> = requred_validation_layer_raw_names
-        .iter()
-        .map(|layer_name| layer_name.as_ptr())
-        .collect();
-
-    let enable_extension_names = device_extensions.get_extensions_raw_names();
-
-    let mesh_shader = Box::new(
-        PhysicalDeviceMeshShaderFeaturesEXT::builder()
-            .mesh_shader(true)
-            .build(),
-    );
-
-    let mut man4 = Box::new(
-        PhysicalDeviceMaintenance4Features::builder()
-            .maintenance4(true)
-            .build(),
-    );
-
-    man4.p_next = Box::into_raw(mesh_shader).cast();
-
-    let device_create_info = vk::DeviceCreateInfo {
-        s_type: vk::StructureType::DEVICE_CREATE_INFO,
-        p_next: Box::into_raw(man4).cast(),
-        flags: vk::DeviceCreateFlags::empty(),
-        queue_create_info_count: queue_create_infos.len() as u32,
-        p_queue_create_infos: queue_create_infos.as_ptr(),
-
-        enabled_extension_count: enable_extension_names.len() as u32,
-        pp_enabled_extension_names: enable_extension_names.as_ptr(),
-        p_enabled_features: &physical_device_features,
-        ..Default::default()
-    };
-
-    let device: ash::Device = unsafe {
-        instance
-            .create_device(physical_device, &device_create_info, None)
-            .expect("Failed to create logical Device!")
-    };
-
-    (device, indices)
 }
 
 pub fn find_queue_family(
@@ -505,7 +426,7 @@ pub fn create_shader_module(device: &ash::Device, code: Vec<u8>) -> vk::ShaderMo
 }
 
 pub fn begin_single_time_command(
-    device: &ash::Device,
+    device: &Device,
     command_pool: vk::CommandPool,
 ) -> vk::CommandBuffer {
     let command_buffer_allocate_info = vk::CommandBufferAllocateInfo {
@@ -518,6 +439,7 @@ pub fn begin_single_time_command(
 
     let command_buffer = unsafe {
         device
+            .device
             .allocate_command_buffers(&command_buffer_allocate_info)
             .expect("Failed to allocate Command Buffers!")
     }[0];
@@ -531,6 +453,7 @@ pub fn begin_single_time_command(
 
     unsafe {
         device
+            .device
             .begin_command_buffer(command_buffer, &command_buffer_begin_info)
             .expect("Failed to begin recording Command Buffer at beginning!");
     }
@@ -539,13 +462,14 @@ pub fn begin_single_time_command(
 }
 
 pub fn end_single_time_command(
-    device: &ash::Device,
+    device: &Device,
     command_pool: vk::CommandPool,
     submit_queue: vk::Queue,
     command_buffer: vk::CommandBuffer,
 ) {
     unsafe {
         device
+            .device
             .end_command_buffer(command_buffer)
             .expect("Failed to record Command Buffer at Ending!");
     }
@@ -566,12 +490,16 @@ pub fn end_single_time_command(
 
     unsafe {
         device
+            .device
             .queue_submit(submit_queue, &sumbit_infos, vk::Fence::null())
             .expect("Failed to Queue Submit!");
         device
+            .device
             .queue_wait_idle(submit_queue)
             .expect("Failed to wait Queue idle!");
-        device.free_command_buffers(command_pool, &buffers_to_submit);
+        device
+            .device
+            .free_command_buffers(command_pool, &buffers_to_submit);
     }
 }
 
@@ -592,48 +520,6 @@ pub fn find_memory_type(
 
 pub fn has_stencil_component(format: vk::Format) -> bool {
     format == vk::Format::D32_SFLOAT_S8_UINT || format == vk::Format::D24_UNORM_S8_UINT
-}
-
-pub fn copy_buffer_to_image(
-    device: &ash::Device,
-    command_pool: vk::CommandPool,
-    submit_queue: vk::Queue,
-    buffer: vk::Buffer,
-    image: vk::Image,
-    width: u32,
-    height: u32,
-) {
-    let command_buffer = begin_single_time_command(device, command_pool);
-
-    let buffer_image_regions = [vk::BufferImageCopy {
-        image_subresource: vk::ImageSubresourceLayers {
-            aspect_mask: vk::ImageAspectFlags::COLOR,
-            mip_level: 0,
-            base_array_layer: 0,
-            layer_count: 1,
-        },
-        image_extent: vk::Extent3D {
-            width,
-            height,
-            depth: 1,
-        },
-        buffer_offset: 0,
-        buffer_image_height: 0,
-        buffer_row_length: 0,
-        image_offset: vk::Offset3D { x: 0, y: 0, z: 0 },
-    }];
-
-    unsafe {
-        device.cmd_copy_buffer_to_image(
-            command_buffer,
-            buffer,
-            image,
-            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-            &buffer_image_regions,
-        );
-    }
-
-    end_single_time_command(device, command_pool, submit_queue, command_buffer);
 }
 
 pub fn find_depth_format(

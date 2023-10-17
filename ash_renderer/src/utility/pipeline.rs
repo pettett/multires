@@ -1,11 +1,11 @@
-use std::{ffi::CString, ptr};
+use std::{ffi::CString, ptr, sync::Arc};
 
 use ash::vk;
 
-use super::share;
+use super::{device::Device, share};
 
 pub struct Pipeline {
-    device: ash::Device,
+    device: Arc<Device>,
     pipeline: vk::Pipeline,
     layout: vk::PipelineLayout,
 }
@@ -22,24 +22,26 @@ impl Pipeline {
 impl Drop for Pipeline {
     fn drop(&mut self) {
         unsafe {
-            self.device.destroy_pipeline(self.pipeline, None);
-            self.device.destroy_pipeline_layout(self.layout, None);
+            self.device.device.destroy_pipeline(self.pipeline, None);
+            self.device
+                .device
+                .destroy_pipeline_layout(self.layout, None);
         }
     }
 }
 
 pub fn create_graphics_pipeline(
-    device: ash::Device,
+    device: Arc<Device>,
     render_pass: vk::RenderPass,
     swapchain_extent: vk::Extent2D,
     ubo_set_layout: vk::DescriptorSetLayout,
 ) -> Pipeline {
     let mesh_shader_module = share::create_shader_module(
-        &device,
+        &device.device,
         include_bytes!("../../shaders/spv/mesh-shader.mesh").to_vec(),
     );
     let frag_shader_module = share::create_shader_module(
-        &device,
+        &device.device,
         include_bytes!("../../shaders/spv/mesh-shader.frag").to_vec(),
     );
 
@@ -201,6 +203,7 @@ pub fn create_graphics_pipeline(
 
     let pipeline_layout = unsafe {
         device
+            .device
             .create_pipeline_layout(&pipeline_layout_create_info, None)
             .expect("Failed to create pipeline layout!")
     };
@@ -229,6 +232,7 @@ pub fn create_graphics_pipeline(
 
     let graphics_pipelines = unsafe {
         device
+            .device
             .create_graphics_pipelines(
                 vk::PipelineCache::null(),
                 &graphic_pipeline_create_infos,
@@ -238,8 +242,12 @@ pub fn create_graphics_pipeline(
     };
 
     unsafe {
-        device.destroy_shader_module(mesh_shader_module, None);
-        device.destroy_shader_module(frag_shader_module, None);
+        device
+            .device
+            .destroy_shader_module(mesh_shader_module, None);
+        device
+            .device
+            .destroy_shader_module(frag_shader_module, None);
     }
 
     Pipeline {
