@@ -23,13 +23,10 @@ use common_renderer::components::{
     },
     transform::Transform,
 };
-use glam::{Mat4, Quat, Vec3, Vec3A};
-use memoffset::offset_of;
-use shaderc::CompilationArtifact;
+use glam::{Mat4, Quat, Vec3A};
 use utility::pipeline::Pipeline;
 use winit::event::WindowEvent;
 
-use std::ffi::CString;
 use std::path::Path;
 use std::ptr;
 

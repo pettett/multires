@@ -34,33 +34,14 @@ pub fn create_graphics_pipeline(
     swapchain_extent: vk::Extent2D,
     ubo_set_layout: vk::DescriptorSetLayout,
 ) -> Pipeline {
-    let mut compiler = shaderc::Compiler::new().unwrap();
-    let mut options = shaderc::CompileOptions::new().unwrap();
-    options.set_target_spirv(shaderc::SpirvVersion::V1_6);
-    options.add_macro_definition("EP", Some("main"));
-
-    let mesh_mesh = compiler
-        .compile_into_spirv(
-            include_str!("../../shaders/src/mesh-shader.mesh"),
-            shaderc::ShaderKind::Mesh,
-            "mesh-shader.mesh",
-            "main",
-            Some(&options),
-        )
-        .unwrap();
-
-    let mesh_frag = compiler
-        .compile_into_spirv(
-            include_str!("../../shaders/src/mesh-shader.frag"),
-            shaderc::ShaderKind::Fragment,
-            "mesh-shader.frag",
-            "main",
-            Some(&options),
-        )
-        .unwrap();
-
-    let mesh_shader_module = share::create_shader_module(&device, mesh_mesh.as_binary_u8().into());
-    let frag_shader_module = share::create_shader_module(&device, mesh_frag.as_binary_u8().into());
+    let mesh_shader_module = share::create_shader_module(
+        &device,
+        include_bytes!("../../shaders/spv/mesh-shader.mesh").to_vec(),
+    );
+    let frag_shader_module = share::create_shader_module(
+        &device,
+        include_bytes!("../../shaders/spv/mesh-shader.frag").to_vec(),
+    );
 
     let main_function_name = CString::new("main").unwrap(); // the beginning function name in shader code.
 

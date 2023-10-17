@@ -21,4 +21,4 @@ bytemuck = { version = "1.12", features = ["derive"] }
 env_logger = "0.10"
 log = "0.4"
 gltf = "1.3"
-petgraph.workspace = true
+petgraph = "0.6"

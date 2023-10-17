@@ -25,8 +25,9 @@ memoffset = "0.9"
 num = "0.4"
 tobj = "0.1.10"
 image = "0.22"
-shaderc = "0.8"
 
+[build-dependencies]
+shaderc = "0.8"
 
 [profile.dev]
 opt-level = 1
