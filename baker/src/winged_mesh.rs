@@ -12,10 +12,20 @@ use gltf::mesh::util::ReadIndices;
 
 #[derive(Default, Hash, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct VertID(usize);
-#[derive(Default, Hash, Debug, Clone, Copy, PartialEq, Eq)]
-pub struct FaceID(usize);
+impl Into<usize> for VertID {
+    fn into(self) -> usize {
+        self.0
+    }
+}
 #[derive(Default, Hash, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EdgeID(usize);
+impl Into<usize> for EdgeID {
+    fn into(self) -> usize {
+        self.0
+    }
+}
+#[derive(Default, Hash, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FaceID(usize);
 
 impl Into<usize> for FaceID {
     fn into(self) -> usize {

@@ -1,24 +1,38 @@
-use std::{fs, io::Write};
+use std::{
+    fs,
+    io::{BufReader, Write},
+};
+
+use bincode::{config, de, enc};
 #[derive(Debug)]
 pub enum ErrorKind {
-    Bincode(Box<bincode::ErrorKind>),
+    EncodeError(bincode::error::EncodeError),
+    DecodeError(bincode::error::DecodeError),
     Io(std::io::Error),
 }
 
-impl From<Box<bincode::ErrorKind>> for ErrorKind {
-    fn from(value: Box<bincode::ErrorKind>) -> Self {
-        ErrorKind::Bincode(value)
+impl From<bincode::error::EncodeError> for ErrorKind {
+    fn from(value: bincode::error::EncodeError) -> Self {
+        ErrorKind::EncodeError(value)
     }
 }
+impl From<bincode::error::DecodeError> for ErrorKind {
+    fn from(value: bincode::error::DecodeError) -> Self {
+        ErrorKind::DecodeError(value)
+    }
+}
+
 impl From<std::io::Error> for ErrorKind {
     fn from(value: std::io::Error) -> Self {
         ErrorKind::Io(value)
     }
 }
 
-pub trait Asset: Sized + serde::Serialize + serde::de::DeserializeOwned {
-    fn save(&self) -> Result<(), Box<bincode::ErrorKind>> {
-        let data = bincode::serialize(self)?;
+pub trait Asset: Sized + enc::Encode + de::Decode {
+    fn save(&self) -> Result<(), ErrorKind> {
+        let config = config::standard();
+
+        let data = bincode::encode_to_vec(self, config)?;
 
         let mut file = fs::File::create("asset.bin")?;
         file.write_all(&data[..])?;
@@ -26,8 +40,11 @@ pub trait Asset: Sized + serde::Serialize + serde::de::DeserializeOwned {
         Ok(())
     }
     fn load() -> Result<Self, ErrorKind> {
-        let mut file = fs::File::open("asset.bin")?;
+        let config = config::standard();
 
-        Ok(bincode::deserialize_from(&mut file)?)
+        let mut file = fs::File::open("asset.bin")?;
+        let mut buf = BufReader::new(file);
+
+        Ok(bincode::decode_from_reader(&mut buf, config)?)
     }
 }

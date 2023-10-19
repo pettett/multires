@@ -20,6 +20,14 @@ struct Index{
 		// vec2 tc;
 	} ;
 
+struct Meshlet
+{
+	uint32_t vertices[64];
+	uint32_t indices[126];
+	uint32_t vertex_count;
+	uint32_t index_count;
+};
+
 // std430 is **really** important
 
 layout(std430, binding = 4) readonly buffer InputBufferV{
@@ -28,7 +36,8 @@ layout(std430, binding = 4) readonly buffer InputBufferV{
 
 
 layout(std430, binding = 3) readonly buffer InputBufferI{
-    Index indices[];
+	uint32_t meshlets_count;
+    Meshlet meshlets[];
 } indicies;
 
 
