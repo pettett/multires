@@ -1,3 +1,4 @@
+use std::ptr;
 use std::sync::Arc;
 
 use crate::components::camera_uniform::CameraUniform;
@@ -10,6 +11,8 @@ use vulkano::buffer::{Buffer, BufferCreateInfo, BufferUsage, Subbuffer};
 use vulkano::command_buffer::allocator::{
     StandardCommandBufferAllocator, StandardCommandBufferAllocatorCreateInfo,
 };
+use vulkano::command_buffer::synced::SyncCommandBufferBuilder;
+use vulkano::command_buffer::sys::{CommandBufferBeginInfo, UnsafeCommandBufferBuilder};
 use vulkano::command_buffer::{
     AutoCommandBufferBuilder, CommandBufferUsage, RenderPassBeginInfo, SubpassContents,
 };
@@ -38,6 +41,7 @@ use winit::dpi::PhysicalSize;
 use winit::window::{Window, WindowBuilder};
 
 use super::app::ScreenEvent;
+use super::mesh_pipeline::{create_graphics_pipeline, MeshPipeline};
 use super::Instance;
 #[derive(Resource)]
 pub struct Renderer {
@@ -49,6 +53,7 @@ pub struct Renderer {
     pub camera_descriptor_set: Arc<PersistentDescriptorSet>,
 
     render_pipeline: Arc<GraphicsPipeline>,
+    mesh_pipeline: Arc<MeshPipeline>,
     render_pass: Arc<RenderPass>,
     swapchain: Arc<Swapchain>,
     images: Vec<Arc<SwapchainImage>>, // size = 24 (0x18), align = 0x8
@@ -303,6 +308,10 @@ impl Renderer {
             device.clone(),
             StandardCommandBufferAllocatorCreateInfo::default(),
         );
+
+        let mesh_pipeline =
+            create_graphics_pipeline(device.clone(), &render_pass, swapchain.image_extent());
+
         Self {
             window,
             depth_buffer,
@@ -318,6 +327,7 @@ impl Renderer {
             size,
             command_buffer_allocator,
             render_pipeline,
+            mesh_pipeline,
             render_pass,
             swapchain,
             images, //camera_buffer,
@@ -369,6 +379,7 @@ impl Renderer {
     }
 }
 
+/// Iterate through every mesh, setup their bindings, and draw them
 pub fn render(mut renderer: ResMut<Renderer>, meshes: Query<&Mesh>, camera: Query<&CameraUniform>) {
     let (image_i, suboptimal, acquire_future) =
         match vulkano::swapchain::acquire_next_image(renderer.swapchain.clone(), None) {
@@ -410,18 +421,76 @@ pub fn render(mut renderer: ResMut<Renderer>, meshes: Query<&Mesh>, camera: Quer
             },
             SubpassContents::Inline,
         )
-        .unwrap()
-        .bind_pipeline_graphics(renderer.render_pipeline.clone());
+        .unwrap();
+    let cmd = builder.build().unwrap();
 
-    for mesh in meshes.iter() {
-        mesh.render_pass(&renderer, &mut builder);
+    // builder.end_render_pass().unwrap();
+
+    unsafe {
+        // device.cmd_begin_render_pass(
+        //     command_buffer,
+        //     &render_pass_begin_info,
+        //     vk::SubpassContents::INLINE,
+        // );
+
+        (renderer.device().fns().v1_0.cmd_bind_pipeline)(
+            cmd.handle(),
+            ash::vk::PipelineBindPoint::GRAPHICS,
+            renderer.mesh_pipeline.pipeline(),
+        );
+
+        //let vertex_buffers = [vertex_buffer];
+        //let offsets = [0_u64];
+        // let descriptor_sets_to_bind = [renderer.mesh_pipeline.ubo_set_layout()];
+
+        //device.cmd_bind_vertex_buffers(command_buffer, 0, &vertex_buffers, &offsets);
+        //device.cmd_bind_index_buffer(
+        //    command_buffer,
+        //    index_buffer,
+        //    0,
+        //    vk::IndexType::UINT32,
+        //);
+        // (renderer.device().fns().v1_0.cmd_bind_descriptor_sets)(
+        //     cmd.handle(),
+        //     ash::vk::PipelineBindPoint::GRAPHICS,
+        //     renderer.mesh_pipeline.layout(),
+        //     0,
+        //     1,
+        //     &descriptor_sets_to_bind,
+        //     0,
+        //     ptr::null(),
+        // );
+
+        // (renderer
+        //     .device()
+        //     .fns()
+        //     .ext_mesh_shader
+        //     .cmd_draw_mesh_tasks_ext)(cmd.handle(), 1, 1, 1);
+
+        // for mesh in meshes.iter() {
+        //     mesh.render_pass(&renderer, &cmd.handle());
+        // }
+
+        // device.cmd_draw_indexed(
+        //     command_buffer,
+        //     RECT_TEX_COORD_INDICES_DATA.len() as u32,
+        //     1,
+        //     0,
+        //     0,
+        //     0,
+        // );
+
+        (renderer.device().fns().v1_0.cmd_end_render_pass)(cmd.handle());
+        (renderer.device().fns().v1_0.end_command_buffer)(cmd.handle())
+            .result()
+            .expect("Failed to record Command Buffer at Ending!");
     }
 
-    builder.end_render_pass().unwrap();
+    // TODO: make pipeline, find how to bind descriptors, draw mesh
 
     let execution = sync::now(renderer.device())
         .join(acquire_future)
-        .then_execute(renderer.queue(), builder.build().unwrap())
+        .then_execute(renderer.queue(), cmd)
         .unwrap()
         .then_swapchain_present(
             renderer.queue(),

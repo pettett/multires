@@ -2494,6 +2494,7 @@ dependencies = [
 name = "vk_renderer"
 version = "0.1.0"
 dependencies = [
+ "ash",
  "ash_renderer",
  "bevy_ecs",
  "bytemuck",

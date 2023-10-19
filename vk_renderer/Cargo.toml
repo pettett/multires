@@ -19,6 +19,7 @@ ash_renderer = { path = "../ash_renderer" }
 vulkano = "0.33"
 vulkano-win = "0.33"
 vulkano-shaders = "0.33"
+ash = "0.37"
 
 [profile.dev]
 opt-level = 1

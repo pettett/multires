@@ -25,7 +25,7 @@ pub struct Mesh {
     //puffin_ui : puffin_imgui::ProfilerUi,
 }
 impl Mesh {
-    pub fn render_pass<L>(&self, state: &Renderer, render_pass: &mut AutoCommandBufferBuilder<L>) {
+    pub fn render_pass(&self, state: &Renderer, render_pass: &ash::vk::CommandBuffer) {
         // 1.
 
         //render_pass.set_pipeline(state.render_pipeline());
@@ -33,17 +33,17 @@ impl Mesh {
         //render_pass.set_bind_group(0, state.camera_buffer().bind_group(), &[]);
         //render_pass.set_bind_group(1, self.partitions.bind_group(), &[]);
 
-        render_pass
-            .bind_descriptor_sets(
-                vulkano::pipeline::PipelineBindPoint::Graphics,
-                state.render_pipeline().layout().clone(),
-                0,
-                vec![state.camera_descriptor_set.clone(), self.partitions.clone()],
-            )
-            .bind_vertex_buffers(0, self.vertex_buffer.clone())
-            .bind_index_buffer(self.index_buffer.clone())
-            .draw_indexed(self.num_indices, 1, 0, 0, 0)
-            .unwrap();
+        // render_pass
+        //     .bind_descriptor_sets(
+        //         vulkano::pipeline::PipelineBindPoint::Graphics,
+        //         state.render_pipeline().layout().clone(),
+        //         0,
+        //         vec![state.camera_descriptor_set.clone(), self.partitions.clone()],
+        //     )
+        //     .bind_vertex_buffers(0, self.vertex_buffer.clone())
+        //     .bind_index_buffer(self.index_buffer.clone())
+        //     .draw_indexed(self.num_indices, 1, 0, 0, 0)
+        //     .unwrap();
     }
 
     pub fn load_mesh(instance: Arc<Instance>) -> Self {

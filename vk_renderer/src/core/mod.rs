@@ -1,6 +1,7 @@
 mod app;
 mod buffer;
 mod instance;
+pub mod mesh_pipeline;
 mod renderer;
 mod texture;
 

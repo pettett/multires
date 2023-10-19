@@ -10,7 +10,7 @@ use std::{
 };
 
 fn main() -> gltf::Result<()> {
-    let mesh_name = "../assets/cube.glb";
+    let mesh_name = "../assets/torus.glb";
 
     println!("Loading from gltf!");
     let (mesh, verts, indices) = winged_mesh::WingedMesh::from_gltf(mesh_name)?;
@@ -24,39 +24,36 @@ fn main() -> gltf::Result<()> {
         minimize_subgraph_degree: Some(true),
         ..Default::default()
     };
-    // let clusters = mesh
-    //     .partition(&config, 1 + mesh.faces().len() as u32 / 128)
-    //     .unwrap();
+    let clusters = mesh
+        .partition(&config, 1 + mesh.faces().len() as u32 / 128)
+        .unwrap();
 
-    // println!("time: {}ms", t1.elapsed().as_millis());
+    println!("time: {}ms", t1.elapsed().as_millis());
 
-    // println!("Generating the partition connections Graph!");
-    // let mut graph = petgraph::Graph::<i32, i32>::new();
+    println!("Generating the partition connections Graph!");
+    let mut graph = petgraph::Graph::<i32, i32>::new();
 
-    // let parts: HashSet<_> = clusters.iter().collect();
-    // let nodes: HashMap<_, _> = parts
-    //     .iter()
-    //     .map(|i| {
-    //         let n = graph.add_node(1);
-    //         (n.index() as i32, n)
-    //     })
-    //     .collect();
+    let parts: HashSet<_> = clusters.iter().collect();
+    let nodes: HashMap<_, _> = parts
+        .iter()
+        .map(|i| {
+            let n = graph.add_node(1);
+            (n.index() as i32, n)
+        })
+        .collect();
 
-    // for (i, face) in mesh.faces().iter().enumerate() {
-    //     for e in mesh.iter_edge(face.edge.unwrap()) {
-    //         if let Some(twin) = mesh[e].twin {
-    //             let idx: usize = mesh[twin].face.into();
+    for (i, face) in mesh.faces().iter().enumerate() {
+        for e in mesh.iter_edge(face.edge.unwrap()) {
+            if let Some(twin) = mesh[e].twin {
+                let idx: usize = mesh[twin].face.into();
 
-    //             graph.update_edge(nodes[&clusters[i]], nodes[&clusters[idx]], 1);
-    //         }
-    //     }
-    // }
+                graph.update_edge(nodes[&clusters[i]], nodes[&clusters[idx]], 1);
+            }
+        }
+    }
 
-    // println!("Partitioning the partition!");
-    // let clusters2 = config.partition_from_graph(5, &graph).unwrap();
-
-    let clusters = vec![];
-    let clusters2 = vec![];
+    println!("Partitioning the partition!");
+    let clusters2 = config.partition_from_graph(5, &graph).unwrap();
 
     MultiResMesh {
         name: mesh_name.to_owned(),
