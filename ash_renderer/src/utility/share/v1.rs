@@ -10,24 +10,6 @@ use crate::utility::image::Image;
 
 use super::*;
 
-pub fn create_command_pool(
-    device: &ash::Device,
-    queue_families: &QueueFamilyIndices,
-) -> vk::CommandPool {
-    let command_pool_create_info = vk::CommandPoolCreateInfo {
-        s_type: vk::StructureType::COMMAND_POOL_CREATE_INFO,
-        p_next: ptr::null(),
-        flags: vk::CommandPoolCreateFlags::empty(),
-        queue_family_index: queue_families.graphics_family.unwrap(),
-    };
-
-    unsafe {
-        device
-            .create_command_pool(&command_pool_create_info, None)
-            .expect("Failed to create Command Pool!")
-    }
-}
-
 pub fn create_sync_objects(device: &ash::Device, max_frame_in_flight: usize) -> SyncObjects {
     let mut sync_objects = SyncObjects {
         image_available_semaphores: vec![],

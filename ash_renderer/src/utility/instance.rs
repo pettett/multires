@@ -12,7 +12,8 @@ use crate::utility::{
 };
 
 pub struct Instance {
-    pub instance: ash::Instance,
+    pub handle: ash::Instance,
+    pub fn_surface: ash::extensions::khr::Surface,
 }
 impl Instance {
     pub fn new(
@@ -85,14 +86,19 @@ impl Instance {
                 .expect("Failed to create instance!")
         };
 
-        Arc::new(Self { instance })
+        let fn_surface = ash::extensions::khr::Surface::new(entry, &instance);
+
+        Arc::new(Self {
+            handle: instance,
+            fn_surface,
+        })
     }
 }
 
 impl Drop for Instance {
     fn drop(&mut self) {
         unsafe {
-            self.instance.destroy_instance(None);
+            self.handle.destroy_instance(None);
         }
     }
 }

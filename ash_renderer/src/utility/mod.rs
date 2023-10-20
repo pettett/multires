@@ -14,5 +14,7 @@ pub mod pools;
 pub mod render_pass;
 pub mod share;
 pub mod structures;
+pub mod surface;
+pub mod swapchain;
 pub mod tools;
 pub mod window;

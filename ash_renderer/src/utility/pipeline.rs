@@ -22,9 +22,9 @@ impl Pipeline {
 impl Drop for Pipeline {
     fn drop(&mut self) {
         unsafe {
-            self.device.device.destroy_pipeline(self.pipeline, None);
+            self.device.handle.destroy_pipeline(self.pipeline, None);
             self.device
-                .device
+                .handle
                 .destroy_pipeline_layout(self.layout, None);
         }
     }
@@ -37,11 +37,11 @@ pub fn create_graphics_pipeline(
     ubo_set_layout: vk::DescriptorSetLayout,
 ) -> Pipeline {
     let mesh_shader_module = share::create_shader_module(
-        &device.device,
+        &device.handle,
         include_bytes!("../../shaders/spv/mesh-shader.mesh").to_vec(),
     );
     let frag_shader_module = share::create_shader_module(
-        &device.device,
+        &device.handle,
         include_bytes!("../../shaders/spv/mesh-shader.frag").to_vec(),
     );
 
@@ -203,7 +203,7 @@ pub fn create_graphics_pipeline(
 
     let pipeline_layout = unsafe {
         device
-            .device
+            .handle
             .create_pipeline_layout(&pipeline_layout_create_info, None)
             .expect("Failed to create pipeline layout!")
     };
@@ -232,7 +232,7 @@ pub fn create_graphics_pipeline(
 
     let graphics_pipelines = unsafe {
         device
-            .device
+            .handle
             .create_graphics_pipelines(
                 vk::PipelineCache::null(),
                 &graphic_pipeline_create_infos,
@@ -243,10 +243,10 @@ pub fn create_graphics_pipeline(
 
     unsafe {
         device
-            .device
+            .handle
             .destroy_shader_module(mesh_shader_module, None);
         device
-            .device
+            .handle
             .destroy_shader_module(frag_shader_module, None);
     }
 

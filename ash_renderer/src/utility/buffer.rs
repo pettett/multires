@@ -30,8 +30,8 @@ impl Buffer {
 impl Drop for Buffer {
     fn drop(&mut self) {
         unsafe {
-            self.device.device.destroy_buffer(self.buffer, None);
-            self.device.device.free_memory(self.memory, None);
+            self.device.handle.destroy_buffer(self.buffer, None);
+            self.device.handle.free_memory(self.memory, None);
         }
     }
 }
@@ -55,12 +55,12 @@ pub fn create_buffer(
 
     let buffer = unsafe {
         device
-            .device
+            .handle
             .create_buffer(&buffer_create_info, None)
             .expect("Failed to create Vertex Buffer")
     };
 
-    let mem_requirements = unsafe { device.device.get_buffer_memory_requirements(buffer) };
+    let mem_requirements = unsafe { device.handle.get_buffer_memory_requirements(buffer) };
     let memory_type = find_memory_type(
         mem_requirements.memory_type_bits,
         required_memory_properties,
@@ -76,13 +76,13 @@ pub fn create_buffer(
 
     let memory = unsafe {
         device
-            .device
+            .handle
             .allocate_memory(&allocate_info, None)
             .expect("Failed to allocate vertex buffer memory!")
     };
     unsafe {
         device
-            .device
+            .handle
             .bind_buffer_memory(buffer, memory, 0)
             .expect("Failed to bind Buffer");
     }
@@ -113,7 +113,7 @@ pub fn copy_buffer(
 
     unsafe {
         device
-            .device
+            .handle
             .cmd_copy_buffer(command_buffer.cmd, src.buffer, dst.buffer, &copy_regions);
     }
 }
@@ -137,7 +137,7 @@ pub fn create_storage_buffer<T: bytemuck::Pod>(
 
     unsafe {
         let data_ptr = device
-            .device
+            .handle
             .map_memory(
                 staging_buffer.memory,
                 0,
@@ -148,7 +148,7 @@ pub fn create_storage_buffer<T: bytemuck::Pod>(
 
         data_ptr.copy_from_nonoverlapping(data.as_ptr(), data.len());
 
-        device.device.unmap_memory(staging_buffer.memory);
+        device.handle.unmap_memory(staging_buffer.memory);
     }
     //THIS is not actually a vertex buffer, but a storage buffer that can be accessed from the mesh shader
     let storage_buffer = create_buffer(

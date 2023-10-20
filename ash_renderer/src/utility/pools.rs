@@ -9,12 +9,12 @@ pub struct DescriptorPool {
     pub pool: vk::DescriptorPool,
 }
 impl DescriptorPool {
-    pub fn new(device: Arc<Device>, swapchain_images_size: usize) -> Arc<DescriptorPool> {
+    pub fn new(device: Arc<Device>, swapchain_images_size: u32) -> Arc<DescriptorPool> {
         let pool_sizes = [
             vk::DescriptorPoolSize {
                 // transform descriptor pool
                 ty: vk::DescriptorType::UNIFORM_BUFFER,
-                descriptor_count: swapchain_images_size as u32,
+                descriptor_count: swapchain_images_size,
             },
             vk::DescriptorPoolSize {
                 // SSBO pool
@@ -24,7 +24,7 @@ impl DescriptorPool {
             vk::DescriptorPoolSize {
                 // sampler descriptor pool
                 ty: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-                descriptor_count: swapchain_images_size as u32,
+                descriptor_count: swapchain_images_size,
             },
         ];
 
@@ -39,7 +39,7 @@ impl DescriptorPool {
 
         let pool = unsafe {
             device
-                .device
+                .handle
                 .create_descriptor_pool(&descriptor_pool_create_info, None)
                 .expect("Failed to create Descriptor Pool!")
         };
@@ -51,7 +51,7 @@ impl DescriptorPool {
 impl Drop for DescriptorPool {
     fn drop(&mut self) {
         unsafe {
-            self.device.device.destroy_descriptor_pool(self.pool, None);
+            self.device.handle.destroy_descriptor_pool(self.pool, None);
         }
     }
 }
@@ -72,7 +72,7 @@ impl Drop for SingleTimeCommandBuffer {
         unsafe {
             self.pool
                 .device
-                .device
+                .handle
                 .end_command_buffer(self.cmd)
                 .expect("Failed to record Command Buffer at Ending!");
         }
@@ -94,17 +94,17 @@ impl Drop for SingleTimeCommandBuffer {
         unsafe {
             self.pool
                 .device
-                .device
+                .handle
                 .queue_submit(self.submit_queue, &sumbit_infos, vk::Fence::null())
                 .expect("Failed to Queue Submit!");
             self.pool
                 .device
-                .device
+                .handle
                 .queue_wait_idle(self.submit_queue)
                 .expect("Failed to wait Queue idle!");
             self.pool
                 .device
-                .device
+                .handle
                 .free_command_buffers(self.pool.pool, &buffers_to_submit);
         }
     }
@@ -121,7 +121,7 @@ impl CommandPool {
 
         let pool = unsafe {
             device
-                .device
+                .handle
                 .create_command_pool(&command_pool_create_info, None)
                 .expect("Failed to create Command Pool!")
         };
@@ -143,7 +143,7 @@ impl CommandPool {
 
         let command_buffer = unsafe {
             self.device
-                .device
+                .handle
                 .allocate_command_buffers(&command_buffer_allocate_info)
                 .expect("Failed to allocate Command Buffers!")
         }[0];
@@ -157,7 +157,7 @@ impl CommandPool {
 
         unsafe {
             self.device
-                .device
+                .handle
                 .begin_command_buffer(command_buffer, &command_buffer_begin_info)
                 .expect("Failed to begin recording Command Buffer at beginning!")
         };
@@ -174,7 +174,7 @@ impl Drop for CommandPool {
     fn drop(&mut self) {
         //TODO: Command buffers will be freed when the pool is dropped, so any buffers created from this pool must be invalidated
         unsafe {
-            self.device.device.destroy_command_pool(self.pool, None);
+            self.device.handle.destroy_command_pool(self.pool, None);
         }
     }
 }

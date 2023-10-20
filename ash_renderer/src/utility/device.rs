@@ -7,27 +7,28 @@ use crate::utility::share::find_queue_family;
 
 use super::{
     instance::Instance,
-    structures::{DeviceExtension, QueueFamilyIndices, SurfaceStuff},
+    structures::{DeviceExtension, QueueFamilyIndices},
+    surface::Surface,
 };
 
 pub struct Device {
     physical_device: vk::PhysicalDevice,
     instance: Arc<Instance>,
-    fn_mesh_shader: ash::extensions::ext::MeshShader,
-    fn_swapchain: ash::extensions::khr::Swapchain,
-    pub device: ash::Device,
+    pub fn_mesh_shader: ash::extensions::ext::MeshShader,
+    pub fn_swapchain: ash::extensions::khr::Swapchain,
+    pub handle: ash::Device,
 }
 impl Drop for Device {
     fn drop(&mut self) {
         unsafe {
-            self.device.destroy_device(None);
+            self.handle.destroy_device(None);
         }
     }
 }
 impl Device {
     pub fn wait_device_idle(&self) {
         unsafe {
-            self.device
+            self.handle
                 .device_wait_idle()
                 .expect("Failed to wait device idle!")
         };
@@ -38,9 +39,9 @@ impl Device {
         physical_device: vk::PhysicalDevice,
         validation: &super::debug::ValidationInfo,
         device_extensions: &DeviceExtension,
-        surface_stuff: &SurfaceStuff,
+        surface: &Surface,
     ) -> (Arc<Self>, QueueFamilyIndices) {
-        let indices = find_queue_family(&instance.instance, physical_device, surface_stuff);
+        let indices = find_queue_family(&instance, physical_device, surface);
 
         use std::collections::HashSet;
         let mut unique_queue_families = HashSet::new();
@@ -107,13 +108,13 @@ impl Device {
 
         let device: ash::Device = unsafe {
             instance
-                .instance
+                .handle
                 .create_device(physical_device, &device_create_info, None)
                 .expect("Failed to create logical Device!")
         };
 
-        let fn_mesh_shader = ash::extensions::ext::MeshShader::new(&instance.instance, &device);
-        let fn_swapchain = ash::extensions::khr::Swapchain::new(&instance.instance, &device);
+        let fn_mesh_shader = ash::extensions::ext::MeshShader::new(&instance.handle, &device);
+        let fn_swapchain = ash::extensions::khr::Swapchain::new(&instance.handle, &device);
 
         (
             Arc::new(Self {
@@ -121,7 +122,7 @@ impl Device {
                 physical_device,
                 fn_mesh_shader,
                 fn_swapchain,
-                device,
+                handle: device,
             }),
             indices,
         )
