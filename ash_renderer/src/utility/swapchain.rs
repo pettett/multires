@@ -57,6 +57,9 @@ impl Swapchain {
             } else {
                 (vk::SharingMode::EXCLUSIVE, 0, vec![])
             };
+        let old_swapchain = old_swapchain
+            .map(|s| s.swapchain)
+            .unwrap_or(vk::SwapchainKHR::null());
 
         let swapchain_create_info = vk::SwapchainCreateInfoKHR {
             s_type: vk::StructureType::SWAPCHAIN_CREATE_INFO_KHR,
@@ -75,12 +78,9 @@ impl Swapchain {
             composite_alpha: vk::CompositeAlphaFlagsKHR::OPAQUE,
             present_mode,
             clipped: vk::TRUE,
-            old_swapchain: old_swapchain
-                .map(|s| s.swapchain)
-                .unwrap_or(vk::SwapchainKHR::null()),
+            old_swapchain,
             image_array_layers: 1,
         };
-
         let swapchain = unsafe {
             device
                 .fn_swapchain
@@ -94,6 +94,13 @@ impl Swapchain {
                 .get_swapchain_images(swapchain)
                 .expect("Failed to get Swapchain Images.")
         };
+
+        // TODO: We should really only destroy this when we are 'finished' using it, whenever that is
+        if old_swapchain != vk::SwapchainKHR::null() {
+            unsafe {
+                device.fn_swapchain.destroy_swapchain(old_swapchain, None);
+            };
+        }
 
         Swapchain {
             surface,
