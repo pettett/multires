@@ -1,6 +1,6 @@
 use std::{ptr, sync::Arc};
 
-use ash::vk;
+use ash::{vk, RawPtr};
 
 use super::{device::Device, instance::Instance, structures::QueueFamilyIndices, surface::Surface};
 pub struct SwapChainSupportDetail {
@@ -29,6 +29,7 @@ impl Swapchain {
         window: &winit::window::Window,
         surface: Arc<Surface>,
         queue_family: &QueueFamilyIndices,
+        old_swapchain: Option<&Swapchain>,
     ) -> Swapchain {
         let swapchain_support = query_swapchain_support(physical_device, &surface);
 
@@ -74,7 +75,9 @@ impl Swapchain {
             composite_alpha: vk::CompositeAlphaFlagsKHR::OPAQUE,
             present_mode,
             clipped: vk::TRUE,
-            old_swapchain: vk::SwapchainKHR::null(),
+            old_swapchain: old_swapchain
+                .map(|s| s.swapchain)
+                .unwrap_or(vk::SwapchainKHR::null()),
             image_array_layers: 1,
         };
 

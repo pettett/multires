@@ -167,6 +167,7 @@ impl VulkanApp26 {
             &window,
             surface.clone(),
             &queue_family,
+            None, // This is the first swapchain
         );
         let swapchain_imageviews =
             Image::create_image_views(&device, swapchain.format, &swapchain.images);
@@ -730,6 +731,7 @@ impl VulkanApp26 {
             &self.window,
             self.surface.clone(),
             &self.queue_family,
+            Some(&self.swapchain),
         );
 
         self.swapchain_imageviews =
@@ -797,9 +799,6 @@ impl VulkanApp26 {
             for &image_view in self.swapchain_imageviews.iter() {
                 self.device.handle.destroy_image_view(image_view, None);
             }
-            self.device
-                .fn_swapchain
-                .destroy_swapchain(self.swapchain.swapchain, None);
         }
     }
 
