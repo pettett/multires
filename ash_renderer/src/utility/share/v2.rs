@@ -2,46 +2,13 @@ use ash::vk;
 
 use std::ptr;
 
-use crate::utility::{buffer::Buffer, image::Image};
+use crate::utility::{buffer::Buffer, image::Image, pools::DescriptorPool};
 
 use super::*;
 
-pub fn create_descriptor_pool(
-    device: &ash::Device,
-    swapchain_images_size: usize,
-) -> vk::DescriptorPool {
-    let pool_sizes = [
-        vk::DescriptorPoolSize {
-            // transform descriptor pool
-            ty: vk::DescriptorType::UNIFORM_BUFFER,
-            descriptor_count: swapchain_images_size as u32,
-        },
-        vk::DescriptorPoolSize {
-            // sampler descriptor pool
-            ty: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-            descriptor_count: swapchain_images_size as u32,
-        },
-    ];
-
-    let descriptor_pool_create_info = vk::DescriptorPoolCreateInfo {
-        s_type: vk::StructureType::DESCRIPTOR_POOL_CREATE_INFO,
-        p_next: ptr::null(),
-        flags: vk::DescriptorPoolCreateFlags::empty(),
-        max_sets: swapchain_images_size as u32,
-        pool_size_count: pool_sizes.len() as u32,
-        p_pool_sizes: pool_sizes.as_ptr(),
-    };
-
-    unsafe {
-        device
-            .create_descriptor_pool(&descriptor_pool_create_info, None)
-            .expect("Failed to create Descriptor Pool!")
-    }
-}
-
 pub fn create_descriptor_sets(
     device: &ash::Device,
-    descriptor_pool: vk::DescriptorPool,
+    descriptor_pool: &DescriptorPool,
     descriptor_set_layout: vk::DescriptorSetLayout,
     uniform_buffers: &Vec<Buffer>,
     vert_buffer: &Buffer,
@@ -57,7 +24,7 @@ pub fn create_descriptor_sets(
     let descriptor_set_allocate_info = vk::DescriptorSetAllocateInfo {
         s_type: vk::StructureType::DESCRIPTOR_SET_ALLOCATE_INFO,
         p_next: ptr::null(),
-        descriptor_pool,
+        descriptor_pool: descriptor_pool.pool,
         descriptor_set_count: swapchain_images_size as u32,
         p_set_layouts: layouts.as_ptr(),
     };

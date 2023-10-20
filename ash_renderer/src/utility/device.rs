@@ -1,9 +1,6 @@
 use std::{ffi::CString, ptr, sync::Arc};
 
-use ash::{
-    extensions::ext::MeshShader,
-    vk::{self, PhysicalDeviceMaintenance4Features, PhysicalDeviceMeshShaderFeaturesEXT},
-};
+use ash::vk::{self, PhysicalDeviceMaintenance4Features, PhysicalDeviceMeshShaderFeaturesEXT};
 use winapi::ctypes::c_char;
 
 use crate::utility::share::find_queue_family;
@@ -16,7 +13,8 @@ use super::{
 pub struct Device {
     physical_device: vk::PhysicalDevice,
     instance: Arc<Instance>,
-    ms: MeshShader,
+    fn_mesh_shader: ash::extensions::ext::MeshShader,
+    fn_swapchain: ash::extensions::khr::Swapchain,
     pub device: ash::Device,
 }
 impl Drop for Device {
@@ -114,13 +112,15 @@ impl Device {
                 .expect("Failed to create logical Device!")
         };
 
-        let ms = MeshShader::new(&instance.instance, &device);
+        let fn_mesh_shader = ash::extensions::ext::MeshShader::new(&instance.instance, &device);
+        let fn_swapchain = ash::extensions::khr::Swapchain::new(&instance.instance, &device);
 
         (
             Arc::new(Self {
                 instance,
                 physical_device,
-                ms,
+                fn_mesh_shader,
+                fn_swapchain,
                 device,
             }),
             indices,

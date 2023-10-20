@@ -8,6 +8,7 @@ use crate::utility::{
     image::Image,
     instance::Instance,
     pipeline::create_graphics_pipeline,
+    pools::DescriptorPool,
     render_pass::create_render_pass,
     share,
     structures::*,
@@ -76,8 +77,8 @@ pub struct VulkanApp26 {
     uniform_transform: UniformBufferObject,
     uniform_buffers: Vec<utility::buffer::Buffer>,
 
-    descriptor_pool: vk::DescriptorPool,
-    command_pool: utility::pools::CommandPool,
+    descriptor_pool: Arc<DescriptorPool>,
+    command_pool: Arc<utility::pools::CommandPool>,
 
     descriptor_sets: Vec<vk::DescriptorSet>,
 
@@ -218,7 +219,7 @@ impl VulkanApp26 {
         println!("Loading texture");
         let texture_image = Image::create_texture_image(
             device.clone(),
-            command_pool.pool,
+            command_pool.clone(),
             graphics_queue,
             &physical_device_memory_properties,
             &Path::new(TEXTURE_PATH),
@@ -235,7 +236,7 @@ impl VulkanApp26 {
         let vertex_buffer = create_storage_buffer(
             device.clone(),
             &physical_device_memory_properties,
-            command_pool.pool,
+            command_pool.clone(),
             graphics_queue,
             &data.verts,
         );
@@ -243,7 +244,7 @@ impl VulkanApp26 {
         let index_buffer = create_storage_buffer(
             device.clone(),
             &physical_device_memory_properties,
-            command_pool.pool,
+            command_pool.clone(),
             graphics_queue,
             &data.meshlets,
         );
@@ -254,13 +255,12 @@ impl VulkanApp26 {
         );
 
         println!("Loading descriptors");
-        let descriptor_pool = share::v2::create_descriptor_pool(
-            &device.device,
-            swapchain_stuff.swapchain_images.len(),
-        );
+        let descriptor_pool =
+            DescriptorPool::new(device.clone(), swapchain_stuff.swapchain_images.len());
+
         let descriptor_sets = share::v2::create_descriptor_sets(
             &device.device,
-            descriptor_pool,
+            &descriptor_pool,
             ubo_layout,
             &uniform_buffers,
             &vertex_buffer,
@@ -860,10 +860,6 @@ impl Drop for VulkanApp26 {
             }
 
             self.cleanup_swapchain();
-
-            self.device
-                .device
-                .destroy_descriptor_pool(self.descriptor_pool, None);
 
             self.device
                 .device

@@ -5,9 +5,8 @@ use ash::vk;
 use super::{
     buffer::create_buffer,
     device::Device,
-    share::{
-        begin_single_time_command, end_single_time_command, find_depth_format, find_memory_type,
-    },
+    pools::CommandPool,
+    share::{find_depth_format, find_memory_type},
 };
 
 pub struct Image {
@@ -113,7 +112,7 @@ impl Image {
 
     pub fn create_texture_image(
         device: Arc<Device>,
-        command_pool: vk::CommandPool,
+        command_pool: Arc<CommandPool>,
         submit_queue: vk::Queue,
         device_memory_properties: &vk::PhysicalDeviceMemoryProperties,
         image_path: &Path,
@@ -180,7 +179,7 @@ impl Image {
 
         Self::transition_image_layout(
             &device,
-            command_pool,
+            command_pool.clone(),
             submit_queue,
             &texture_image,
             vk::Format::R8G8B8A8_SRGB,
@@ -191,7 +190,7 @@ impl Image {
 
         copy_buffer_to_image(
             &device,
-            command_pool,
+            command_pool.clone(),
             submit_queue,
             staging_buffer.buffer(),
             texture_image.image(),
@@ -256,7 +255,7 @@ impl Image {
 
     pub fn transition_image_layout(
         device: &Device,
-        command_pool: vk::CommandPool,
+        command_pool: Arc<CommandPool>,
         submit_queue: vk::Queue,
         image: &Image,
         _format: vk::Format,
@@ -264,7 +263,7 @@ impl Image {
         new_layout: vk::ImageLayout,
         mip_levels: u32,
     ) {
-        let command_buffer = begin_single_time_command(device, command_pool);
+        let command_buffer = command_pool.begin_single_time_command(submit_queue);
 
         let src_access_mask;
         let dst_access_mask;
@@ -318,7 +317,7 @@ impl Image {
 
         unsafe {
             device.device.cmd_pipeline_barrier(
-                command_buffer,
+                command_buffer.cmd,
                 source_stage,
                 destination_stage,
                 vk::DependencyFlags::empty(),
@@ -327,8 +326,6 @@ impl Image {
                 &image_barriers,
             );
         }
-
-        end_single_time_command(device, command_pool, submit_queue, command_buffer);
     }
 
     pub fn create_depth_resources(
@@ -359,14 +356,14 @@ impl Image {
 
     pub fn generate_mipmaps(
         device: &Device,
-        command_pool: vk::CommandPool,
+        command_pool: Arc<CommandPool>,
         submit_queue: vk::Queue,
         image: vk::Image,
         tex_width: u32,
         tex_height: u32,
         mip_levels: u32,
     ) {
-        let command_buffer = begin_single_time_command(device, command_pool);
+        let command_buffer = command_pool.begin_single_time_command(submit_queue);
 
         let mut image_barrier = vk::ImageMemoryBarrier {
             s_type: vk::StructureType::IMAGE_MEMORY_BARRIER,
@@ -399,7 +396,7 @@ impl Image {
 
             unsafe {
                 device.device.cmd_pipeline_barrier(
-                    command_buffer,
+                    command_buffer.cmd,
                     vk::PipelineStageFlags::TRANSFER,
                     vk::PipelineStageFlags::TRANSFER,
                     vk::DependencyFlags::empty(),
@@ -442,7 +439,7 @@ impl Image {
 
             unsafe {
                 device.device.cmd_blit_image(
-                    command_buffer,
+                    command_buffer.cmd,
                     image,
                     vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
                     image,
@@ -459,7 +456,7 @@ impl Image {
 
             unsafe {
                 device.device.cmd_pipeline_barrier(
-                    command_buffer,
+                    command_buffer.cmd,
                     vk::PipelineStageFlags::TRANSFER,
                     vk::PipelineStageFlags::FRAGMENT_SHADER,
                     vk::DependencyFlags::empty(),
@@ -481,7 +478,7 @@ impl Image {
 
         unsafe {
             device.device.cmd_pipeline_barrier(
-                command_buffer,
+                command_buffer.cmd,
                 vk::PipelineStageFlags::TRANSFER,
                 vk::PipelineStageFlags::FRAGMENT_SHADER,
                 vk::DependencyFlags::empty(),
@@ -490,8 +487,6 @@ impl Image {
                 &[image_barrier.clone()],
             );
         }
-
-        end_single_time_command(device, command_pool, submit_queue, command_buffer);
     }
 
     pub fn sampler(&self) -> vk::Sampler {
@@ -585,14 +580,14 @@ impl Image {
 
 pub fn copy_buffer_to_image(
     device: &Device,
-    command_pool: vk::CommandPool,
+    command_pool: Arc<CommandPool>,
     submit_queue: vk::Queue,
     buffer: vk::Buffer,
     image: vk::Image,
     width: u32,
     height: u32,
 ) {
-    let command_buffer = begin_single_time_command(device, command_pool);
+    let command_buffer = command_pool.begin_single_time_command(submit_queue);
 
     let buffer_image_regions = [vk::BufferImageCopy {
         image_subresource: vk::ImageSubresourceLayers {
@@ -614,13 +609,11 @@ pub fn copy_buffer_to_image(
 
     unsafe {
         device.device.cmd_copy_buffer_to_image(
-            command_buffer,
+            command_buffer.cmd,
             buffer,
             image,
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
             &buffer_image_regions,
         );
     }
-
-    end_single_time_command(device, command_pool, submit_queue, command_buffer);
 }

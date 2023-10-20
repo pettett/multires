@@ -3,9 +3,7 @@ use std::{ptr, sync::Arc};
 use ash::vk;
 
 use super::{
-    device::Device,
-    share::{begin_single_time_command, end_single_time_command, find_memory_type},
-    structures::UniformBufferObject,
+    device::Device, pools::CommandPool, share::find_memory_type, structures::UniformBufferObject,
 };
 
 pub struct Buffer {
@@ -100,12 +98,12 @@ pub fn create_buffer(
 pub fn copy_buffer(
     device: &Device,
     submit_queue: vk::Queue,
-    command_pool: vk::CommandPool,
+    command_pool: Arc<CommandPool>,
     src: &Buffer,
     dst: &Buffer,
     size: vk::DeviceSize,
 ) {
-    let command_buffer = begin_single_time_command(device, command_pool);
+    let command_buffer = command_pool.begin_single_time_command(submit_queue);
 
     let copy_regions = [vk::BufferCopy {
         src_offset: 0,
@@ -116,16 +114,14 @@ pub fn copy_buffer(
     unsafe {
         device
             .device
-            .cmd_copy_buffer(command_buffer, src.buffer, dst.buffer, &copy_regions);
+            .cmd_copy_buffer(command_buffer.cmd, src.buffer, dst.buffer, &copy_regions);
     }
-
-    end_single_time_command(device, command_pool, submit_queue, command_buffer);
 }
 
 pub fn create_storage_buffer<T: bytemuck::Pod>(
     device: Arc<Device>,
     device_memory_properties: &vk::PhysicalDeviceMemoryProperties,
-    command_pool: vk::CommandPool,
+    command_pool: Arc<CommandPool>,
     submit_queue: vk::Queue,
     data: &[T],
 ) -> Buffer {
