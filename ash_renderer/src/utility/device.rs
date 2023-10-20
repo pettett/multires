@@ -1,4 +1,8 @@
-use std::{ffi::CString, ptr, sync::Arc};
+use std::{
+    ffi::{c_void, CString},
+    ptr,
+    sync::Arc,
+};
 
 use ash::vk::{self, PhysicalDeviceMaintenance4Features, PhysicalDeviceMeshShaderFeaturesEXT};
 use winapi::ctypes::c_char;
@@ -79,23 +83,20 @@ impl Device {
 
         let enable_extension_names = device_extensions.get_extensions_raw_names();
 
-        let mesh_shader = Box::new(
-            PhysicalDeviceMeshShaderFeaturesEXT::builder()
-                .mesh_shader(true)
-                .build(),
-        );
+        let mut mesh_shader = PhysicalDeviceMeshShaderFeaturesEXT::builder()
+            .mesh_shader(true)
+            .task_shader(true)
+            .build();
 
-        let mut man4 = Box::new(
-            PhysicalDeviceMaintenance4Features::builder()
-                .maintenance4(true)
-                .build(),
-        );
+        let mut man4 = PhysicalDeviceMaintenance4Features::builder()
+            .maintenance4(true)
+            .build();
 
-        man4.p_next = Box::into_raw(mesh_shader).cast();
+        man4.p_next = &mut mesh_shader as *mut _ as *mut c_void;
 
         let device_create_info = vk::DeviceCreateInfo {
             s_type: vk::StructureType::DEVICE_CREATE_INFO,
-            p_next: Box::into_raw(man4).cast(),
+            p_next: &man4 as *const _ as *const c_void,
             flags: vk::DeviceCreateFlags::empty(),
             queue_create_info_count: queue_create_infos.len() as u32,
             p_queue_create_infos: queue_create_infos.as_ptr(),

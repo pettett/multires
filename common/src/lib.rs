@@ -6,7 +6,7 @@ use glam::Vec3;
 #[derive(Debug, Copy, Clone, Decode, Encode)]
 pub struct Meshlet {
     pub vertices: [u32; 64],
-    pub indices: [u32; 126],
+    pub indices: [u32; 378], // 126 triangles => 378 indices
     pub vertex_count: u32,
     pub index_count: u32,
 }
@@ -18,7 +18,7 @@ impl Default for Meshlet {
     fn default() -> Meshlet {
         Meshlet {
             vertices: [0; 64],
-            indices: [0; 126],
+            indices: [0; 378],
             vertex_count: 0,
             index_count: 0,
         }

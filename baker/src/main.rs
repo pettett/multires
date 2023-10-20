@@ -25,7 +25,7 @@ fn main() -> gltf::Result<()> {
         ..Default::default()
     };
     let clusters = mesh
-        .partition(&config, 1 + mesh.faces().len() as u32 / 41)
+        .partition(&config, 1 + mesh.faces().len() as u32 / 90)
         .unwrap();
 
     println!("time: {}ms", t1.elapsed().as_millis());
@@ -71,7 +71,7 @@ fn main() -> gltf::Result<()> {
     let avg_verts = total_verts / meshlets.len() as u32;
     let max_verts = meshlets.iter().map(|m| m.vertex_count).max().unwrap();
 
-    println!("avg_indices: {avg_indices}/126 max_indices: {max_indices}/126 avg_verts: {avg_verts}/64 max_verts: {max_verts}/64");
+    println!("avg_indices: {avg_indices}/378 max_indices: {max_indices}/378 avg_verts: {avg_verts}/64 max_verts: {max_verts}/64");
 
     let nodes: HashMap<_, _> = parts
         .iter()

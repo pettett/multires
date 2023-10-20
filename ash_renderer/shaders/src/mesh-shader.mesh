@@ -23,7 +23,7 @@ struct Index{
 struct s_meshlet
 {
   uint vertices[64];
-  uint indices[126];
+  uint indices[378]; // 126 triangles => 378 indices
   uint vertex_count;
   uint index_count;
 };
@@ -47,6 +47,11 @@ layout(location=0) out Interpolants {
 	vec2  fragTexCoord;   
 } OUT[];
 
+struct MeshTaskPayload {
+    uint meshlet_index[2];
+};
+
+taskPayloadSharedEXT MeshTaskPayload payload;
 
 void vert(uint v, s_meshlet meshlet){
 	// gl_MeshVerticesEXT[v].gl_Position = ubo.view_proj * ubo.model * p;
@@ -56,10 +61,9 @@ void vert(uint v, s_meshlet meshlet){
     OUT[v].fragTexCoord =  vec2(1,1);
 }
 
-
 void main() {
-  	uint meshlet_index = gl_WorkGroupID.x;
-  	uint thread_id = gl_LocalInvocationID.x;
+  	uint thread_id = gl_WorkGroupID.x;
+  	uint meshlet_index = payload.meshlet_index[thread_id];
 
 	s_meshlet meshlet = indicies.meshlets[meshlet_index];
 	

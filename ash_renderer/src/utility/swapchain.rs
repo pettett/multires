@@ -13,14 +13,21 @@ pub struct Swapchain {
     device: Arc<Device>,
     // surface is the surface onto which the swapchain will present images. If the creation succeeds, the swapchain becomes associated with surface.
     surface: Arc<Surface>,
-    pub swapchain: vk::SwapchainKHR,
+    pub handle: vk::SwapchainKHR,
     pub images: Vec<vk::Image>,
     pub format: vk::Format,
     pub extent: vk::Extent2D,
 }
 
 impl Drop for Swapchain {
-    fn drop(&mut self) {}
+    fn drop(&mut self) {
+        // TODO: We should really only destroy this when we are 'finished' using it, whenever that is
+        unsafe {
+            self.device
+                .fn_swapchain
+                .destroy_swapchain(self.handle, None);
+        };
+    }
 }
 impl Swapchain {
     pub fn new(
@@ -57,8 +64,10 @@ impl Swapchain {
             } else {
                 (vk::SharingMode::EXCLUSIVE, 0, vec![])
             };
+
+        // Actual swapchain will be dropped when object lost, but this retires it now
         let old_swapchain = old_swapchain
-            .map(|s| s.swapchain)
+            .map(|s| s.handle)
             .unwrap_or(vk::SwapchainKHR::null());
 
         let swapchain_create_info = vk::SwapchainCreateInfoKHR {
@@ -95,17 +104,10 @@ impl Swapchain {
                 .expect("Failed to get Swapchain Images.")
         };
 
-        // TODO: We should really only destroy this when we are 'finished' using it, whenever that is
-        if old_swapchain != vk::SwapchainKHR::null() {
-            unsafe {
-                device.fn_swapchain.destroy_swapchain(old_swapchain, None);
-            };
-        }
-
         Swapchain {
             surface,
             device,
-            swapchain,
+            handle: swapchain,
             format: surface_format.format,
             extent,
             images,

@@ -86,7 +86,6 @@ pub struct VulkanApp26 {
 
     is_framebuffer_resized: bool,
 
-    ms: MeshShader,
     meshlet_count: u32,
 }
 
@@ -258,9 +257,8 @@ impl VulkanApp26 {
         println!("Loading command buffers");
 
         let command_buffers = VulkanApp26::create_command_buffers(
-            &ms,
             data.meshlets.len() as u32,
-            &device.handle,
+            &device,
             command_pool.pool,
             graphics_pipeline.pipeline(),
             &swapchain_framebuffers,
@@ -351,7 +349,6 @@ impl VulkanApp26 {
 
             is_framebuffer_resized: false,
 
-            ms,
             meshlet_count: data.meshlets.len() as u32,
         }
     }
@@ -467,9 +464,8 @@ impl VulkanApp26 {
 // Fix content -------------------------------------------------------------------------------
 impl VulkanApp26 {
     fn create_command_buffers(
-        ms: &MeshShader,
         meshlet_count: u32,
-        device: &ash::Device,
+        device: &Device,
         command_pool: vk::CommandPool,
         graphics_pipeline: vk::Pipeline,
         framebuffers: &Vec<vk::Framebuffer>,
@@ -490,6 +486,7 @@ impl VulkanApp26 {
 
         let command_buffers = unsafe {
             device
+                .handle
                 .allocate_command_buffers(&command_buffer_allocate_info)
                 .expect("Failed to allocate Command Buffers!")
         };
@@ -504,6 +501,7 @@ impl VulkanApp26 {
 
             unsafe {
                 device
+                    .handle
                     .begin_command_buffer(command_buffer, &command_buffer_begin_info)
                     .expect("Failed to begin recording Command Buffer at beginning!");
             }
@@ -538,12 +536,12 @@ impl VulkanApp26 {
             };
 
             unsafe {
-                device.cmd_begin_render_pass(
+                device.handle.cmd_begin_render_pass(
                     command_buffer,
                     &render_pass_begin_info,
                     vk::SubpassContents::INLINE,
                 );
-                device.cmd_bind_pipeline(
+                device.handle.cmd_bind_pipeline(
                     command_buffer,
                     vk::PipelineBindPoint::GRAPHICS,
                     graphics_pipeline,
@@ -560,7 +558,7 @@ impl VulkanApp26 {
                 //    0,
                 //    vk::IndexType::UINT32,
                 //);
-                device.cmd_bind_descriptor_sets(
+                device.handle.cmd_bind_descriptor_sets(
                     command_buffer,
                     vk::PipelineBindPoint::GRAPHICS,
                     pipeline_layout,
@@ -569,7 +567,9 @@ impl VulkanApp26 {
                     &[],
                 );
 
-                ms.cmd_draw_mesh_tasks(command_buffer, meshlet_count, 1, 1);
+                device
+                    .fn_mesh_shader
+                    .cmd_draw_mesh_tasks(command_buffer, meshlet_count / 2, 1, 1);
                 // device.cmd_draw_indexed(
                 //     command_buffer,
                 //     RECT_TEX_COORD_INDICES_DATA.len() as u32,
@@ -579,9 +579,10 @@ impl VulkanApp26 {
                 //     0,
                 // );
 
-                device.cmd_end_render_pass(command_buffer);
+                device.handle.cmd_end_render_pass(command_buffer);
 
                 device
+                    .handle
                     .end_command_buffer(command_buffer)
                     .expect("Failed to record Command Buffer at Ending!");
             }
@@ -634,7 +635,7 @@ impl VulkanApp26 {
 
         let (image_index, _is_sub_optimal) = unsafe {
             let result = self.device.fn_swapchain.acquire_next_image(
-                self.swapchain.swapchain,
+                self.swapchain.handle,
                 std::u64::MAX,
                 self.image_available_semaphores[self.current_frame],
                 vk::Fence::null(),
@@ -686,7 +687,7 @@ impl VulkanApp26 {
                 .expect("Failed to execute queue submit.");
         }
 
-        let swapchains = [self.swapchain.swapchain];
+        let swapchains = [self.swapchain.handle];
 
         let present_info = vk::PresentInfoKHR {
             s_type: vk::StructureType::PRESENT_INFO_KHR,
@@ -768,9 +769,8 @@ impl VulkanApp26 {
             self.swapchain.extent,
         );
         self.command_buffers = VulkanApp26::create_command_buffers(
-            &self.ms,
             self.meshlet_count,
-            &self.device.handle,
+            &self.device,
             self.command_pool.pool,
             self.graphics_pipeline.pipeline(),
             &self.swapchain_framebuffers,

@@ -12,7 +12,7 @@ fn main() {
     let mut options = shaderc::CompileOptions::new().unwrap();
     options.set_target_spirv(shaderc::SpirvVersion::V1_6);
     options.add_macro_definition("EP", Some("main"));
-
+    let mut success = true;
     for entry in entries {
         let entry = entry.unwrap();
         let path = entry.path();
@@ -27,6 +27,7 @@ fn main() {
             Some("vert") => shaderc::ShaderKind::Vertex,
             Some("frag") => shaderc::ShaderKind::Fragment,
             Some("mesh") => shaderc::ShaderKind::Mesh,
+            Some("task") => shaderc::ShaderKind::Task,
             x => {
                 println!("Cannot read shader {:?}", x);
                 continue;
@@ -35,25 +36,35 @@ fn main() {
 
         let name = entry.file_name().to_str().unwrap().to_owned();
 
-        let shader = compiler
-            .compile_into_spirv(
-                &fs::read_to_string(&path).unwrap(),
-                kind,
-                &name,
-                "main",
-                Some(&options),
-            )
-            .unwrap();
+        let shader = compiler.compile_into_spirv(
+            &fs::read_to_string(&path).unwrap(),
+            kind,
+            &name,
+            "main",
+            Some(&options),
+        );
 
-        let mut out_path = path.to_owned();
-        out_path.pop();
-        out_path.pop();
+        match shader {
+            Ok(shader) => {
+                let mut out_path = path.to_owned();
+                out_path.pop();
+                out_path.pop();
 
-        out_path.push("spv");
-        out_path.push(name);
+                out_path.push("spv");
+                out_path.push(name);
 
-        println!("{out_path:?}");
+                println!("{out_path:?}");
 
-        fs::write(out_path, shader.as_binary_u8()).unwrap();
+                fs::write(out_path, shader.as_binary_u8()).unwrap();
+            }
+            Err(e) => {
+                println!("ERROR: {e:#?}");
+                success = false
+            }
+        }
+    }
+
+    if !success {
+        panic!("Failed to compile all shaders, see logs above.");
     }
 }

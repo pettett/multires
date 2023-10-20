@@ -36,6 +36,10 @@ pub fn create_graphics_pipeline(
     swapchain_extent: vk::Extent2D,
     ubo_set_layout: vk::DescriptorSetLayout,
 ) -> Pipeline {
+    let task_shader_module = share::create_shader_module(
+        &device.handle,
+        include_bytes!("../../shaders/spv/mesh-shader.task").to_vec(),
+    );
     let mesh_shader_module = share::create_shader_module(
         &device.handle,
         include_bytes!("../../shaders/spv/mesh-shader.mesh").to_vec(),
@@ -48,6 +52,16 @@ pub fn create_graphics_pipeline(
     let main_function_name = CString::new("main").unwrap(); // the beginning function name in shader code.
 
     let shader_stages = [
+        vk::PipelineShaderStageCreateInfo {
+            // Vertex Shader
+            s_type: vk::StructureType::PIPELINE_SHADER_STAGE_CREATE_INFO,
+            p_next: ptr::null(),
+            flags: vk::PipelineShaderStageCreateFlags::empty(),
+            module: task_shader_module,
+            p_name: main_function_name.as_ptr(),
+            p_specialization_info: ptr::null(),
+            stage: vk::ShaderStageFlags::TASK_EXT,
+        },
         vk::PipelineShaderStageCreateInfo {
             // Vertex Shader
             s_type: vk::StructureType::PIPELINE_SHADER_STAGE_CREATE_INFO,
@@ -242,12 +256,16 @@ pub fn create_graphics_pipeline(
     };
 
     unsafe {
+        //TODO: destroy on drop
         device
             .handle
             .destroy_shader_module(mesh_shader_module, None);
         device
             .handle
             .destroy_shader_module(frag_shader_module, None);
+        device
+            .handle
+            .destroy_shader_module(task_shader_module, None);
     }
 
     Pipeline {
