@@ -6,6 +6,7 @@ use crate::utility::{
     constants::*,
     debug::*,
     image::Image,
+    instance::Instance,
     pipeline::create_graphics_pipeline,
     render_pass::create_render_pass,
     share,
@@ -40,7 +41,7 @@ pub struct VulkanApp26 {
     schedule: bevy_ecs::schedule::Schedule,
     camera: Entity,
     // vulkan stuff
-    instance: ash::Instance,
+    instance: Arc<Instance>,
     surface_loader: ash::extensions::khr::Surface,
     surface: vk::SurfaceKHR,
     debug_utils_loader: ash::extensions::ext::DebugUtils,
@@ -76,9 +77,10 @@ pub struct VulkanApp26 {
     uniform_buffers: Vec<utility::buffer::Buffer>,
 
     descriptor_pool: vk::DescriptorPool,
+    command_pool: utility::pools::CommandPool,
+
     descriptor_sets: Vec<vk::DescriptorSet>,
 
-    command_pool: vk::CommandPool,
     command_buffers: Vec<vk::CommandBuffer>,
 
     image_available_semaphores: Vec<vk::Semaphore>,
@@ -116,7 +118,7 @@ impl VulkanApp26 {
         // init vulkan stuff
         println!("initing vulkan");
         let entry = ash::Entry::linked();
-        let instance = share::create_instance(
+        let instance = Instance::new(
             &entry,
             WINDOW_TITLE,
             VALIDATION.is_enable,
@@ -124,23 +126,32 @@ impl VulkanApp26 {
         );
 
         println!("initing surface");
-        let surface_stuff =
-            share::create_surface(&entry, &instance, &window, WINDOW_WIDTH, WINDOW_HEIGHT);
+        let surface_stuff = share::create_surface(
+            &entry,
+            &instance.instance,
+            &window,
+            WINDOW_WIDTH,
+            WINDOW_HEIGHT,
+        );
         let (debug_utils_loader, debug_merssager) =
-            setup_debug_utils(VALIDATION.is_enable, &entry, &instance);
+            setup_debug_utils(VALIDATION.is_enable, &entry, &instance.instance);
         let physical_device =
-            share::pick_physical_device(&instance, &surface_stuff, &DEVICE_EXTENSIONS);
+            share::pick_physical_device(&instance.instance, &surface_stuff, &DEVICE_EXTENSIONS);
 
-        let physical_device_memory_properties =
-            unsafe { instance.get_physical_device_memory_properties(physical_device) };
+        let physical_device_memory_properties = unsafe {
+            instance
+                .instance
+                .get_physical_device_memory_properties(physical_device)
+        };
         let (device, queue_family) = Device::create_logical_device(
-            &instance,
+            instance.clone(),
             physical_device,
             &VALIDATION,
             &DEVICE_EXTENSIONS,
             &surface_stuff,
         );
-        let ms = MeshShader::new(&instance, &device.device);
+
+        let ms = MeshShader::new(&instance.instance, &device.device);
 
         println!("Loading queues");
         let graphics_queue = unsafe {
@@ -156,7 +167,7 @@ impl VulkanApp26 {
 
         println!("Loading swapchain");
         let swapchain_stuff = share::create_swapchain(
-            &instance,
+            &instance.instance,
             &device.device,
             physical_device,
             &window,
@@ -169,7 +180,7 @@ impl VulkanApp26 {
             &swapchain_stuff.swapchain_images,
         );
         let render_pass = create_render_pass(
-            &instance,
+            &instance.instance,
             &device.device,
             physical_device,
             swapchain_stuff.swapchain_format,
@@ -181,13 +192,17 @@ impl VulkanApp26 {
             swapchain_stuff.swapchain_extent,
             ubo_layout,
         );
-        let command_pool = share::v1::create_command_pool(&device.device, &queue_family);
+
+        let command_pool = crate::utility::pools::CommandPool::new(
+            device.clone(),
+            queue_family.graphics_family.unwrap(),
+        );
 
         let depth_image = VulkanApp26::create_depth_resources(
-            &instance,
+            &instance.instance,
             device.clone(),
             physical_device,
-            command_pool,
+            command_pool.pool,
             graphics_queue,
             swapchain_stuff.swapchain_extent,
             &physical_device_memory_properties,
@@ -203,7 +218,7 @@ impl VulkanApp26 {
         println!("Loading texture");
         let texture_image = Image::create_texture_image(
             device.clone(),
-            command_pool,
+            command_pool.pool,
             graphics_queue,
             &physical_device_memory_properties,
             &Path::new(TEXTURE_PATH),
@@ -220,7 +235,7 @@ impl VulkanApp26 {
         let vertex_buffer = create_storage_buffer(
             device.clone(),
             &physical_device_memory_properties,
-            command_pool,
+            command_pool.pool,
             graphics_queue,
             &data.verts,
         );
@@ -228,7 +243,7 @@ impl VulkanApp26 {
         let index_buffer = create_storage_buffer(
             device.clone(),
             &physical_device_memory_properties,
-            command_pool,
+            command_pool.pool,
             graphics_queue,
             &data.meshlets,
         );
@@ -260,7 +275,7 @@ impl VulkanApp26 {
             &ms,
             data.meshlets.len() as u32,
             &device.device,
-            command_pool,
+            command_pool.pool,
             graphics_pipeline.pipeline(),
             &swapchain_framebuffers,
             render_pass,
@@ -737,7 +752,7 @@ impl VulkanApp26 {
         self.cleanup_swapchain();
 
         let swapchain_stuff = share::create_swapchain(
-            &self.instance,
+            &self.instance.instance,
             &self.device.device,
             self.physical_device,
             &self.window,
@@ -753,7 +768,7 @@ impl VulkanApp26 {
         self.swapchain_imageviews =
             Image::create_image_views(&self.device, self.swapchain_format, &self.swapchain_images);
         self.render_pass = create_render_pass(
-            &self.instance,
+            &self.instance.instance,
             &self.device.device,
             self.physical_device,
             self.swapchain_format,
@@ -767,10 +782,10 @@ impl VulkanApp26 {
         self.graphics_pipeline = graphics_pipeline;
 
         self.depth_image = VulkanApp26::create_depth_resources(
-            &self.instance,
+            &self.instance.instance,
             self.device.clone(),
             self.physical_device,
-            self.command_pool,
+            self.command_pool.pool,
             self.graphics_queue,
             self.swapchain_extent,
             &self.memory_properties,
@@ -787,7 +802,7 @@ impl VulkanApp26 {
             &self.ms,
             self.meshlet_count,
             &self.device.device,
-            self.command_pool,
+            self.command_pool.pool,
             self.graphics_pipeline.pipeline(),
             &self.swapchain_framebuffers,
             self.render_pass,
@@ -803,7 +818,8 @@ impl VulkanApp26 {
         unsafe {
             self.device
                 .device
-                .free_command_buffers(self.command_pool, &self.command_buffers);
+                .free_command_buffers(self.command_pool.pool, &self.command_buffers);
+
             for &framebuffer in self.swapchain_framebuffers.iter() {
                 self.device.device.destroy_framebuffer(framebuffer, None);
             }
@@ -853,17 +869,12 @@ impl Drop for VulkanApp26 {
                 .device
                 .destroy_descriptor_set_layout(self.ubo_layout, None);
 
-            self.device
-                .device
-                .destroy_command_pool(self.command_pool, None);
-
             self.surface_loader.destroy_surface(self.surface, None);
 
             if VALIDATION.is_enable {
                 self.debug_utils_loader
                     .destroy_debug_utils_messenger(self.debug_merssager, None);
             }
-            self.instance.destroy_instance(None);
         }
     }
 }

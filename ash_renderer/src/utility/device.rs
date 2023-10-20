@@ -1,13 +1,22 @@
 use std::{ffi::CString, ptr, sync::Arc};
 
-use ash::vk::{self, PhysicalDeviceMaintenance4Features, PhysicalDeviceMeshShaderFeaturesEXT};
+use ash::{
+    extensions::ext::MeshShader,
+    vk::{self, PhysicalDeviceMaintenance4Features, PhysicalDeviceMeshShaderFeaturesEXT},
+};
 use winapi::ctypes::c_char;
 
 use crate::utility::share::find_queue_family;
 
-use super::structures::{DeviceExtension, QueueFamilyIndices, SurfaceStuff};
+use super::{
+    instance::Instance,
+    structures::{DeviceExtension, QueueFamilyIndices, SurfaceStuff},
+};
 
 pub struct Device {
+    physical_device: vk::PhysicalDevice,
+    instance: Arc<Instance>,
+    ms: MeshShader,
     pub device: ash::Device,
 }
 impl Drop for Device {
@@ -27,13 +36,13 @@ impl Device {
     }
 
     pub fn create_logical_device(
-        instance: &ash::Instance,
+        instance: Arc<Instance>,
         physical_device: vk::PhysicalDevice,
         validation: &super::debug::ValidationInfo,
         device_extensions: &DeviceExtension,
         surface_stuff: &SurfaceStuff,
     ) -> (Arc<Self>, QueueFamilyIndices) {
-        let indices = find_queue_family(instance, physical_device, surface_stuff);
+        let indices = find_queue_family(&instance.instance, physical_device, surface_stuff);
 
         use std::collections::HashSet;
         let mut unique_queue_families = HashSet::new();
@@ -100,10 +109,21 @@ impl Device {
 
         let device: ash::Device = unsafe {
             instance
+                .instance
                 .create_device(physical_device, &device_create_info, None)
                 .expect("Failed to create logical Device!")
         };
 
-        (Arc::new(Self { device }), indices)
+        let ms = MeshShader::new(&instance.instance, &device);
+
+        (
+            Arc::new(Self {
+                instance,
+                physical_device,
+                ms,
+                device,
+            }),
+            indices,
+        )
     }
 }
