@@ -89,6 +89,7 @@ pub struct VulkanApp26 {
     is_framebuffer_resized: bool,
 
     ms: MeshShader,
+    meshlet_count: u32,
 }
 
 impl VulkanApp26 {
@@ -214,7 +215,7 @@ impl VulkanApp26 {
 
         let data = MultiResMesh::load().unwrap();
 
-        println!("V: {:?} I: {:?}", data.verts, data.indices);
+        println!("V: {:?} I: {:?}", data.verts.len(), data.meshlets.len());
 
         let vertex_buffer = create_storage_buffer(
             device.clone(),
@@ -229,7 +230,7 @@ impl VulkanApp26 {
             &physical_device_memory_properties,
             command_pool,
             graphics_queue,
-            &data.indices,
+            &data.meshlets,
         );
         let uniform_buffers = create_uniform_buffers(
             device.clone(),
@@ -257,6 +258,7 @@ impl VulkanApp26 {
 
         let command_buffers = VulkanApp26::create_command_buffers(
             &ms,
+            data.meshlets.len() as u32,
             &device.device,
             command_pool,
             graphics_pipeline.pipeline(),
@@ -354,6 +356,7 @@ impl VulkanApp26 {
             is_framebuffer_resized: false,
 
             ms,
+            meshlet_count: data.meshlets.len() as u32,
         }
     }
 
@@ -469,6 +472,7 @@ impl VulkanApp26 {
 impl VulkanApp26 {
     fn create_command_buffers(
         ms: &MeshShader,
+        meshlet_count: u32,
         device: &ash::Device,
         command_pool: vk::CommandPool,
         graphics_pipeline: vk::Pipeline,
@@ -569,7 +573,7 @@ impl VulkanApp26 {
                     &[],
                 );
 
-                ms.cmd_draw_mesh_tasks(command_buffer, 1, 1, 1);
+                ms.cmd_draw_mesh_tasks(command_buffer, meshlet_count, 1, 1);
                 // device.cmd_draw_indexed(
                 //     command_buffer,
                 //     RECT_TEX_COORD_INDICES_DATA.len() as u32,
@@ -728,12 +732,8 @@ impl VulkanApp26 {
         };
         // ------------------------
 
-        unsafe {
-            self.device
-                .device
-                .device_wait_idle()
-                .expect("Failed to wait device idle!")
-        };
+        self.device.wait_device_idle();
+
         self.cleanup_swapchain();
 
         let swapchain_stuff = share::create_swapchain(
@@ -785,6 +785,7 @@ impl VulkanApp26 {
         );
         self.command_buffers = VulkanApp26::create_command_buffers(
             &self.ms,
+            self.meshlet_count,
             &self.device.device,
             self.command_pool,
             self.graphics_pipeline.pipeline(),

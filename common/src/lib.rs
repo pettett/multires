@@ -2,13 +2,17 @@ pub mod asset;
 use bincode::{config, Decode, Encode};
 use glam::Vec3;
 
-#[derive(Debug, Clone, Decode, Encode)]
+#[repr(C)]
+#[derive(Debug, Copy, Clone, Decode, Encode)]
 pub struct Meshlet {
     pub vertices: [u32; 64],
     pub indices: [u32; 126],
     pub vertex_count: u32,
     pub index_count: u32,
 }
+
+unsafe impl bytemuck::Zeroable for Meshlet {}
+unsafe impl bytemuck::Pod for Meshlet {}
 
 impl Default for Meshlet {
     fn default() -> Meshlet {

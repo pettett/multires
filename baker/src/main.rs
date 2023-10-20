@@ -47,17 +47,19 @@ fn main() -> gltf::Result<()> {
 
         for v in 0..3 {
             let vert = verts[v] as u32;
-            m.indices[m.index_count as usize + v] = vert;
 
             // If unique, add to list
-            let exists = (0..m.vertex_count as usize)
-                .find(|j| m.vertices[*j] == vert)
-                .is_some();
+            let idx = (0..m.vertex_count as usize).find(|j| m.vertices[*j] == vert);
 
-            if !exists {
-                m.vertices[m.vertex_count as usize] = vert;
+            let idx = if let Some(idx) = idx {
+                idx as u32
+            } else {
                 m.vertex_count += 1;
-            }
+                m.vertices[m.vertex_count as usize - 1] = vert;
+                m.vertex_count - 1
+            };
+
+            m.indices[m.index_count as usize + v] = idx;
         }
         m.index_count += 3;
     }
