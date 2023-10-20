@@ -19,6 +19,7 @@ struct Index{
 		// vec2 tc;
 	} ;
 
+// https://github.com/KhronosGroup/Vulkan-Samples/blob/26eb94f79f9c2377cbaa28db2fbd7dd6efb55ffe/framework/api_vulkan_sample.h#L89
 struct s_meshlet
 {
   uint vertices[64];
@@ -49,8 +50,9 @@ layout(location=0) out Interpolants {
 
 void vert(uint v, s_meshlet meshlet){
 	// gl_MeshVerticesEXT[v].gl_Position = ubo.view_proj * ubo.model * p;
-	gl_MeshVerticesEXT[v].gl_Position = ubo.view_proj * ubo.model * vec4(sourceData.verts[meshlet.vertices[v]].pos.xyz, 1);
-    OUT[v].fragColor = abs(sourceData.verts[v].pos.xyz);
+	uint vert_idx = meshlet.vertices[v];
+	gl_MeshVerticesEXT[v].gl_Position = ubo.view_proj * ubo.model * vec4(sourceData.verts[vert_idx].pos.xyz, 1);
+    OUT[v].fragColor = abs(sourceData.verts[vert_idx].pos.xyz);
     OUT[v].fragTexCoord =  vec2(1,1);
 }
 
