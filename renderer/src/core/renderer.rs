@@ -158,7 +158,7 @@ impl Renderer {
             vertex: wgpu::VertexState {
                 module: &shader,
                 entry_point: "vs_main", // 1.
-                buffers: &[<[f32; 3]>::desc()],
+                buffers: &[<[f32; 4]>::desc()],
             },
             fragment: Some(wgpu::FragmentState {
                 // 3.

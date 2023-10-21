@@ -10,3 +10,4 @@ metis = { path = "../metis" }
 common = { path = "../common" }
 petgraph.workspace = true
 glam.workspace = true
+idmap = "0.2"

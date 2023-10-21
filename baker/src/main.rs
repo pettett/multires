@@ -3,19 +3,23 @@ extern crate gltf;
 pub mod winged_mesh;
 use common::{asset::Asset, Meshlet, MultiResMesh};
 use metis::PartitioningConfig;
-use petgraph::data::Build;
 use std::{
     collections::{HashMap, HashSet},
     time,
 };
+use winged_mesh::{EdgeID, VertID};
+
+use crate::winged_mesh::{FaceID, WingedMesh};
 
 fn main() -> gltf::Result<()> {
-    let mesh_name = "../assets/torus.glb";
+    let mesh_name = "../assets/plane.glb";
 
     println!("Loading from gltf!");
     let (mesh, verts, indices) = winged_mesh::WingedMesh::from_gltf(mesh_name)?;
 
     println!("Loaded winged edge mesh from gltf!");
+
+    mesh.assert_valid();
 
     println!("Partitioning Graph!");
     let t1 = time::Instant::now();
@@ -25,7 +29,7 @@ fn main() -> gltf::Result<()> {
         ..Default::default()
     };
     let clusters = mesh
-        .partition(&config, 1 + mesh.faces().len() as u32 / 90)
+        .partition(&config, 1 + mesh.faces().len() as u32 / 70)
         .unwrap();
 
     println!("time: {}ms", t1.elapsed().as_millis());
@@ -39,10 +43,10 @@ fn main() -> gltf::Result<()> {
     let mut meshlets: Vec<_> = parts.iter().map(|_| (Meshlet::default())).collect();
 
     for i in 0..clusters.len() {
-        let verts: Vec<usize> = mesh
-            .iter_edge(mesh.faces()[i].edge.unwrap())
-            .map(|e| mesh[e].vert_origin.into())
-            .collect();
+        let Some(verts) = mesh.triangle_from_face(FaceID(i)) else {
+            continue;
+        };
+
         let m = meshlets.get_mut(clusters[i] as usize).unwrap();
 
         for v in 0..3 {
@@ -64,6 +68,25 @@ fn main() -> gltf::Result<()> {
         m.index_count += 3;
     }
 
+    // halve number of triangles in each meshlet
+
+    println!("Face count L0: {}", mesh.face_count());
+
+    let layer_1_mesh = reduce_mesh(&meshlets, &clusters, mesh.clone());
+    let mut layer_1_indices = Vec::new();
+    for i in 0..clusters.len() {
+        let Some(verts) = layer_1_mesh.triangle_from_face(FaceID(i)) else {
+            continue;
+        };
+        layer_1_indices.extend(verts);
+    }
+
+    for i in &layer_1_indices {
+        verts[*i as usize];
+    }
+
+    println!("Face count L0: {}", layer_1_mesh.face_count());
+
     let total_indices: u32 = meshlets.iter().map(|m| m.index_count).sum();
     let avg_indices = total_indices / meshlets.len() as u32;
     let max_indices = meshlets.iter().map(|m| m.index_count).max().unwrap();
@@ -82,7 +105,7 @@ fn main() -> gltf::Result<()> {
         .collect();
 
     for (i, face) in mesh.faces().iter().enumerate() {
-        for e in mesh.iter_edge(face.edge.unwrap()) {
+        for e in mesh.iter_edge_loop(face.as_ref().unwrap().edge.unwrap()) {
             if let Some(twin) = mesh[e].twin {
                 let idx: usize = mesh[twin].face.into();
 
@@ -100,10 +123,47 @@ fn main() -> gltf::Result<()> {
         clusters2,
         verts: verts.iter().map(|x| [x[0], x[1], x[2], 1.0]).collect(),
         indices,
+        layer_1_indices,
         meshlets,
     }
     .save()
     .unwrap();
 
     Ok(())
+}
+
+fn reduce_mesh(meshlets: &[Meshlet], partitions: &[i32], mut mesh: WingedMesh) -> WingedMesh {
+    //TODO: Bad code
+    for i in 0..mesh.edge_count() / 20 {
+        //for i in 0..p.vertex_count as usize {
+        //let e = mesh[].clone();
+
+        //    if let Some(e) = t.edge {
+        //let f = partitions[Into::<usize>::into(mesh[e].face)];
+
+        //let mut valid_face = true;
+
+        //for e in mesh.iter_edge_loop(e) {
+        //    if let Some(twin) = mesh[e].twin {
+        //        if partitions[Into::<usize>::into(mesh[twin].face)] != f {
+        //            valid_face = false;
+        //            break;
+        //        }
+        //    }
+        //}
+
+        //if valid_face {
+        // all faces are within the partition, we can safely collapse one of the edges
+
+        mesh.collapse_edge(EdgeID(i * 20));
+
+        // println!("Collapsed edge {e:?}");
+
+        //break;
+        //}
+        //    }
+        //}
+    }
+
+    mesh
 }

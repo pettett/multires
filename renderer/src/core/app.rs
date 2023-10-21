@@ -49,7 +49,7 @@ impl App {
 
         world.spawn(mesh);
         world.spawn((
-            CameraController::new(0.05),
+            CameraController::new(0.03),
             Camera::new(1.0),
             Transform::new(Vec3A::ZERO, Quat::IDENTITY),
             CameraUniform::new(),

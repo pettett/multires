@@ -13,7 +13,7 @@ var<storage, read> partitions: array<i32>;
 var<storage, read> partitions2: array<i32>;
 
 struct VertexInput {
-    @location(0) position: vec3<f32>, 
+    @location(0) position: vec4<f32>, 
 };
 
 
@@ -33,17 +33,17 @@ fn vs_main(
     model: VertexInput,
 ) -> VertexOutput {
     var out: VertexOutput; 
-    out.clip_position = camera.view_proj * vec4<f32>(model.position, 1.0);
+    out.clip_position = camera.view_proj * vec4<f32>(model.position.xyz, 1.0);
     return out;
 }
 // Fragment shader
 @fragment
 fn fs_main(in: VertexOutput, @builtin(primitive_index) primitive_index: u32) -> @location(0) vec4<f32> {
-	var part1 = partitions[primitive_index];
-	var part2 = partitions2[part1];
+	//var part1 = partitions[primitive_index];
+	//var part2 = partitions2[part1];
+	var p = i32(primitive_index);
+	var color1 = integer_to_rgb(&p);
+	//var color2 = integer_to_rgb(&part2);
 
-	var color1 = integer_to_rgb(&part1);
-	var color2 = integer_to_rgb(&part2);
-
-    return vec4<f32>(mix(color1, color2, 0.7), 1.0);
+    return vec4<f32>(color1, 1.0);
 }

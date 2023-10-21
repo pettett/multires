@@ -273,6 +273,10 @@ impl<'a> PartitioningConfig<'a> {
         mut adjacency_idx: Vec<i32>,
         mut adjacency_weight: Vec<i32>,
     ) -> Result<Vec<idx_t>, PartitioningError> {
+        if adjacency.len() == 0 {
+            return Err(PartitioningError::Other);
+        }
+
         let mut n = nodes as idx_t;
         let mut part = vec![0 as idx_t; nodes];
         let mut edge_cut = 0 as idx_t;

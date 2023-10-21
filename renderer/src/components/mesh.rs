@@ -57,11 +57,11 @@ impl Mesh {
                 .device()
                 .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("U32 Index Buffer"),
-                    contents: bytemuck::cast_slice(&asset.indices[..]),
+                    contents: bytemuck::cast_slice(&asset.layer_1_indices[..]),
                     usage: wgpu::BufferUsages::INDEX,
                 });
         let index_format = wgpu::IndexFormat::Uint32;
-        let num_indices = asset.indices.len() as u32;
+        let num_indices = asset.layer_1_indices.len() as u32;
 
         // Update the value stored in this mesh
         Mesh {

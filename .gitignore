@@ -1,5 +1,8 @@
 asset.bin 
 
+.vscode/
+.idea/
+
 # Generated shaders
 ash_renderer/shaders/spv/
 

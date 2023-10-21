@@ -32,6 +32,7 @@ pub struct MultiResMesh {
     pub clusters2: Vec<i32>,
     pub verts: Vec<[f32; 4]>,
     pub indices: Vec<u32>,
+    pub layer_1_indices: Vec<u32>,
     pub meshlets: Vec<Meshlet>,
 }
 

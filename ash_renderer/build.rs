@@ -53,7 +53,7 @@ fn main() {
                 out_path.push("spv");
                 out_path.push(name);
 
-                println!("{out_path:?}");
+                println!("{out_path:?} : {:#?}", shader.get_warning_messages());
 
                 fs::write(out_path, shader.as_binary_u8()).unwrap();
             }
