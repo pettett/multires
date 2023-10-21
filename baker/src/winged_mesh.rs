@@ -87,7 +87,7 @@ pub struct WingedMesh {
     faces: Vec<Option<Face>>,
     // partitions: Vec<i32>,
     edges: Vec<HalfEdge>,
-    edge_map: HashMap<(VertID, VertID), EdgeID>,
+    edge_map: HashMap<VertID, Vec<EdgeID>>,
 }
 
 impl std::ops::Index<VertID> for WingedMesh {
@@ -185,18 +185,10 @@ impl WingedMesh {
             })
             .collect()
     }
-    pub fn outgoing_edges(&self, vid: VertID) -> Vec<EdgeID> {
-        self.edges
-            .iter()
-            .enumerate()
-            .filter_map(|(i, e)| {
-                if e.valid && e.vert_origin == vid {
-                    Some(EdgeID(i))
-                } else {
-                    None
-                }
-            })
-            .collect()
+
+    pub fn outgoing_edges(&self, vid: VertID) -> &[EdgeID] {
+        const EMPTY: &[EdgeID] = &[];
+        self.edge_map.get(&vid).map(|v| &v[..]).unwrap_or(EMPTY)
     }
 
     pub fn assert_valid(&self) {
@@ -218,6 +210,19 @@ impl WingedMesh {
 
         for i in 0..self.verts.len() {
             self.assert_vertex_valid(i);
+        }
+
+        for (k, v) in &self.edge_map {
+            for e in v {
+                assert!(
+                    self.edges[e.0].valid,
+                    "Edge valid error - Edge map is invalidated"
+                );
+                assert!(
+                    self.edges[e.0].vert_origin == *k,
+                    "Source error - Edge map is invalidated"
+                );
+            }
         }
     }
     pub fn assert_vertex_valid(&self, i: usize) {
@@ -263,7 +268,7 @@ impl WingedMesh {
     /// 	B
     fn collapse_tri(&mut self, eid: EdgeID) {
         let tri = self.iter_edge_loop(eid).collect::<Vec<_>>();
-        println!("Collapsing triangle {tri:?}");
+        //println!("Collapsing triangle {tri:?}");
         let e = self[eid].clone();
         self[e.face] = None;
 
@@ -275,11 +280,28 @@ impl WingedMesh {
             self[t].twin = self[tri[2]].twin;
         }
         if let Some(t) = self[tri[2]].twin {
+            //TODO: helper function for moving origin
+
+            self.edge_map.entry(self[t].vert_origin).and_modify(|xs| {
+                let index = xs.iter().position(|x| *x == t).unwrap();
+                xs.remove(index);
+            });
+
             self[t].vert_origin = self[tri[1]].vert_origin;
+
+            self.edge_map.entry(self[t].vert_origin).and_modify(|xs| {
+                xs.push(t);
+            });
+
             self[t].twin = self[tri[1]].twin;
         }
 
         for e in &tri {
+            self.edge_map.entry(self[*e].vert_origin).and_modify(|xs| {
+                let index = xs.iter().position(|x| *x == *e).unwrap();
+                xs.remove(index);
+            });
+
             self[*e].valid = false;
         }
 
@@ -288,16 +310,16 @@ impl WingedMesh {
             // Make sure vertexes are not referencing this triangle
             let v = self.edges[tri[i].0].vert_origin;
 
-            // TODO: smarter
+            // TODO: smarter selection of verts that require updating
             if self[v].edge.is_some() {
                 self[v].edge = self.outgoing_edges(v).get(0).copied();
 
-                println!("Updating {v:?}");
+                //println!("Updating {v:?}");
 
                 self.assert_vertex_valid(v.0);
             }
         }
-        self.assert_valid();
+        //self.assert_valid();
     }
 
     /// Collapse an edge so it no longer exists, the source vertex is no longer referenced,
@@ -307,7 +329,9 @@ impl WingedMesh {
     ///   \	| /
     /// 	B
     pub fn collapse_edge(&mut self, eid: EdgeID) {
-        println!("Collapsing edge {eid:?}");
+        //    println!("Collapsing edge {eid:?}");
+
+        //self.assert_valid();
 
         assert!(self[eid].valid);
         let edge = self[eid].clone();
@@ -330,9 +354,14 @@ impl WingedMesh {
         self.verts[vb.0].edge = None;
 
         // Remove `vert_origin`
+        self.edge_map.remove(&vb);
+
+        let va_outgoing = self.edge_map.entry(va).or_default();
+
         // TODO: This is crude, better way to do it.
         // Main issue is a situation where triangles do not fan around the cake in both directions
         // This will collapse an edge to have dest and source in same position
+
         for i in 0..self.edges.len() {
             // Dont fix invalid edges
             // TODO: These shouldn't appear in the iterator
@@ -347,6 +376,7 @@ impl WingedMesh {
 
                 self.edges[i].vert_origin = va;
 
+                va_outgoing.push(EdgeID(i));
                 //self.edge_map.insert(
                 //    (other_edge.vert_origin, other_edge.vert_destination),
                 //    EdgeID(i),
@@ -354,7 +384,7 @@ impl WingedMesh {
             }
         }
 
-        self.assert_valid();
+        //self.assert_valid();
     }
 
     pub fn triangle_from_face(&self, face: FaceID) -> Option<[u32; 3]> {
@@ -401,7 +431,15 @@ impl WingedMesh {
     }
 
     fn find_edge(&self, a: VertID, b: VertID) -> Option<EdgeID> {
-        self.edge_map.get(&(a, b)).copied()
+        self.edge_map
+            .get(&a)
+            .map(|v| {
+                v.iter()
+                    .filter(|p| self[self[**p].edge_left_cw].vert_origin == b)
+                    .next()
+                    .copied()
+            })
+            .flatten()
     }
 
     pub fn iter_edge_loop(&self, e: EdgeID) -> EdgeIter {
@@ -428,7 +466,11 @@ impl WingedMesh {
             self.edges[te.0].twin = Some(EdgeID(self.edges.len()));
         }
 
-        self.edge_map.insert((orig, dest), EdgeID(self.edges.len()));
+        self.edge_map
+            .entry(orig)
+            .or_default()
+            .push(EdgeID(self.edges.len()));
+
         self.edges.push(e);
     }
 

@@ -12,7 +12,7 @@ use winged_mesh::{EdgeID, VertID};
 use crate::winged_mesh::{FaceID, WingedMesh};
 
 fn main() -> gltf::Result<()> {
-    let mesh_name = "../assets/plane.glb";
+    let mesh_name = "../assets/torus.glb";
 
     println!("Loading from gltf!");
     let (mesh, verts, indices) = winged_mesh::WingedMesh::from_gltf(mesh_name)?;
