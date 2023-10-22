@@ -138,33 +138,31 @@ fn main() -> gltf::Result<()> {
 
 fn reduce_mesh(meshlets: &[Meshlet], partitions: &[i32], mut mesh: WingedMesh) -> WingedMesh {
     //TODO: Bad code
-    for i in 0..mesh.edge_count() / 20 {
+    for i in mesh.iter_edges().step_by(20) {
         //for i in 0..p.vertex_count as usize {
         //let e = mesh[].clone();
 
         //    if let Some(e) = t.edge {
-        //let f = partitions[Into::<usize>::into(mesh[e].face)];
+        let f = mesh[mesh[i].face].as_ref().unwrap().part;
 
-        //let mut valid_face = true;
+        let mut valid_face = true;
 
-        //for e in mesh.iter_edge_loop(e) {
-        //    if let Some(twin) = mesh[e].twin {
-        //        if partitions[Into::<usize>::into(mesh[twin].face)] != f {
-        //            valid_face = false;
-        //            break;
-        //        }
-        //    }
-        //}
+        for e in mesh.outgoing_edges(mesh[i].vert_origin) {
+            if f != mesh[mesh[*e].face].as_ref().unwrap().part {
+                valid_face = false;
+                break;
+            }
+        }
 
-        //if valid_face {
-        // all faces are within the partition, we can safely collapse one of the edges
+        if valid_face {
+            // all faces are within the partition, we can safely collapse one of the edges
 
-        mesh.collapse_edge(EdgeID(i * 20));
+            mesh.collapse_edge(i);
 
-        // println!("Collapsed edge {e:?}");
+            // println!("Collapsed edge {e:?}");
 
-        //break;
-        //}
+            //break;
+        }
         //    }
         //}
     }

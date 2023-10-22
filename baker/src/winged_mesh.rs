@@ -82,6 +82,37 @@ impl<'a> Iterator for EdgeIter<'a> {
     }
 }
 
+pub struct AllEdgeIter {
+    edges: Vec<HalfEdge>,
+    current: Option<usize>,
+}
+impl Iterator for AllEdgeIter {
+    type Item = EdgeID;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let last = self.current;
+
+        if let Some(current) = &mut self.current {
+            loop {
+                *current += 1;
+
+                if *current >= self.edges.len() {
+                    self.current = None;
+                    break;
+                }
+
+                if !self.edges[*current].valid {
+                    continue;
+                } else {
+                    break;
+                }
+            }
+        }
+
+        last.map(|l| EdgeID(l))
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct WingedMesh {
     verts: Vec<Vertex>,
@@ -172,7 +203,12 @@ impl WingedMesh {
 
         c
     }
-
+    pub fn iter_edges(&self) -> AllEdgeIter {
+        AllEdgeIter {
+            edges: self.edges.clone(),
+            current: Some(0),
+        }
+    }
     pub fn incoming_edges(&self, vid: VertID) -> Vec<EdgeID> {
         self.edges
             .iter()
