@@ -57,6 +57,7 @@ pub struct Vertex {
 #[derive(Default, Debug, Clone)]
 pub struct Face {
     pub edge: Option<EdgeID>,
+    pub part: idx_t,
 }
 
 pub struct EdgeIter<'a> {
@@ -495,18 +496,46 @@ impl WingedMesh {
             self[c].edge = Some(iec);
         }
 
-        self[f] = Some(Face { edge: Some(iea) });
+        self[f] = Some(Face {
+            edge: Some(iea),
+            part: -1,
+        });
     }
 
     pub fn faces(&self) -> &[Option<Face>] {
         self.faces.as_ref()
     }
 
+    pub fn apply_partition(
+        &mut self,
+        config: &PartitioningConfig,
+        partitions: u32,
+    ) -> Result<(), PartitioningError> {
+        let part = self.partition(config, partitions)?;
+        let mut i = 0;
+        for f in self.faces.iter_mut() {
+            // Some faces will have already been removed
+            if let Some(f) = f {
+                f.part = part[i];
+                i += 1;
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn get_partition(&self) -> Vec<idx_t> {
+        self.faces()
+            .iter()
+            .filter_map(|f| f.as_ref().map(|f| f.part))
+            .collect()
+    }
+
     pub fn partition(
         &self,
         config: &PartitioningConfig,
         partitions: u32,
-    ) -> Result<Vec<idx_t>, PartitioningError> {
+    ) -> Result<(Vec<idx_t>), PartitioningError> {
         let mut adjacency = Vec::new(); // adjncy
         let mut adjacency_idx = Vec::new(); // xadj
 

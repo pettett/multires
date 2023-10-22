@@ -12,14 +12,12 @@ use winged_mesh::{EdgeID, VertID};
 use crate::winged_mesh::{FaceID, WingedMesh};
 
 fn main() -> gltf::Result<()> {
-    let mesh_name = "../assets/torus.glb";
+    let mesh_name = "../assets/plane.glb";
 
     println!("Loading from gltf!");
-    let (mesh, verts, indices) = winged_mesh::WingedMesh::from_gltf(mesh_name)?;
+    let (mut mesh, verts, indices) = winged_mesh::WingedMesh::from_gltf(mesh_name)?;
 
     println!("Loaded winged edge mesh from gltf!");
-
-    mesh.assert_valid();
 
     println!("Partitioning Graph!");
     let t1 = time::Instant::now();
@@ -28,9 +26,10 @@ fn main() -> gltf::Result<()> {
         minimize_subgraph_degree: Some(true),
         ..Default::default()
     };
-    let clusters = mesh
-        .partition(&config, 1 + mesh.faces().len() as u32 / 70)
+    mesh.apply_partition(&config, 1 + mesh.faces().len() as u32 / 70)
         .unwrap();
+
+    let clusters = mesh.get_partition();
 
     println!("time: {}ms", t1.elapsed().as_millis());
 
@@ -117,13 +116,18 @@ fn main() -> gltf::Result<()> {
     println!("Partitioning the partition!");
     let clusters2 = config.partition_from_graph(5, &graph).unwrap();
 
+    let clusters = layer_1_mesh.get_partition();
+
+    assert_eq!(clusters.len() * 3, layer_1_indices.len());
+
     MultiResMesh {
         name: mesh_name.to_owned(),
         clusters,
         clusters2,
         verts: verts.iter().map(|x| [x[0], x[1], x[2], 1.0]).collect(),
-        indices,
+        // layer_1_indices: indices.clone(),
         layer_1_indices,
+        indices,
         meshlets,
     }
     .save()

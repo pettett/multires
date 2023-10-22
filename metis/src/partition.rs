@@ -146,7 +146,7 @@ impl<'a> Default for PartitioningConfig<'a> {
             minimize_subgraph_degree: None,
             no_two_hop_matching: None,
             force_contiguous_partitions: None,
-            compress_graph: None,
+            compress_graph: Some(false),
             order_contiguous_components: None,
             p_factor: None,
             u_factor: None,

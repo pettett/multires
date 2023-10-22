@@ -39,11 +39,11 @@ fn vs_main(
 // Fragment shader
 @fragment
 fn fs_main(in: VertexOutput, @builtin(primitive_index) primitive_index: u32) -> @location(0) vec4<f32> {
-	//var part1 = partitions[primitive_index];
+	var part1 = partitions[primitive_index];
 	//var part2 = partitions2[part1];
 	var p = i32(primitive_index);
 	var color1 = integer_to_rgb(&p);
-	//var color2 = integer_to_rgb(&part2);
+	var color2 = integer_to_rgb(&part1);
 
-    return vec4<f32>(color1, 1.0);
+    return vec4<f32>(mix(color1, color2,0.7), 1.0);
 }
