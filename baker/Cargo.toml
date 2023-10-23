@@ -11,3 +11,4 @@ common = { path = "../common" }
 petgraph.workspace = true
 glam.workspace = true
 idmap = "0.2"
+rand = "0.8"

@@ -3,11 +3,12 @@ extern crate gltf;
 pub mod winged_mesh;
 use common::{asset::Asset, Meshlet, MultiResMesh};
 use metis::PartitioningConfig;
+use rand::Rng;
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{hash_map::RandomState, HashMap, HashSet},
     time,
 };
-use winged_mesh::{EdgeID, VertID};
+use winged_mesh::VertID;
 
 use crate::winged_mesh::{FaceID, WingedMesh};
 
@@ -71,7 +72,7 @@ fn main() -> gltf::Result<()> {
 
     println!("Face count L0: {}", mesh.face_count());
 
-    let layer_1_mesh = reduce_mesh(&meshlets, &clusters, mesh.clone());
+    let layer_1_mesh = reduce_mesh(&meshlets, mesh.clone());
     let mut layer_1_indices = Vec::new();
     for i in 0..clusters.len() {
         let Some(verts) = layer_1_mesh.triangle_from_face(FaceID(i)) else {
@@ -136,35 +137,54 @@ fn main() -> gltf::Result<()> {
     Ok(())
 }
 
-fn reduce_mesh(meshlets: &[Meshlet], partitions: &[i32], mut mesh: WingedMesh) -> WingedMesh {
-    //TODO: Bad code
-    for i in mesh.iter_edges().step_by(20) {
-        //for i in 0..p.vertex_count as usize {
-        //let e = mesh[].clone();
+fn reduce_mesh(meshlets: &[Meshlet], mut mesh: WingedMesh) -> WingedMesh {
+    let mut rng = rand::thread_rng();
 
-        //    if let Some(e) = t.edge {
-        let f = mesh[mesh[i].face].as_ref().unwrap().part;
+    for m in meshlets {
+        // reduce triangle count in meshlet by half
 
-        let mut valid_face = true;
+        let mut tris = m.index_count / 3;
+        let target = tris / 2;
 
-        for e in mesh.outgoing_edges(mesh[i].vert_origin) {
-            if f != mesh[mesh[*e].face].as_ref().unwrap().part {
-                valid_face = false;
-                break;
+        let mut vi = 0;
+
+        while tris > target && vi < m.vertex_count as usize {
+            // Pick a random edge in the mesh for now
+
+            let v = VertID(m.vertices[vi] as usize);
+            vi += rng.gen_range(0..m.vertex_count as usize);
+            vi %= m.vertex_count as usize;
+
+            println!("{tris}/ {target}, {v:?}");
+
+            let Some(i) = mesh[v].edge else {
+                continue;
+            };
+
+            let mut valid_face = mesh.vertex_has_complete_fan(v);
+
+            if valid_face {
+                let f = mesh[mesh[i].face].as_ref().unwrap().part;
+                for e in mesh.outgoing_edges(v) {
+                    if f != mesh[mesh[*e].face].as_ref().unwrap().part {
+                        valid_face = false;
+                        println!("Invalid face around partitions");
+                        break;
+                    }
+                }
+            }
+            if valid_face {
+                // all faces are within the partition, we can safely collapse one of the edges
+
+                mesh.collapse_edge(i);
+
+                tris -= 2;
+
+                // println!("Collapsed edge {e:?}");
+
+                //break;
             }
         }
-
-        if valid_face {
-            // all faces are within the partition, we can safely collapse one of the edges
-
-            mesh.collapse_edge(i);
-
-            // println!("Collapsed edge {e:?}");
-
-            //break;
-        }
-        //    }
-        //}
     }
 
     mesh

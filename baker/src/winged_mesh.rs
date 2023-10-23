@@ -26,7 +26,6 @@ impl Into<usize> for EdgeID {
 }
 #[derive(Default, Hash, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FaceID(pub usize);
-
 impl Into<usize> for FaceID {
     fn into(self) -> usize {
         self.0
@@ -376,12 +375,6 @@ impl WingedMesh {
         let vb = edge.vert_origin;
         let va = self.edges[edge.edge_left_cw.0].vert_origin;
 
-        // Design required - block collapsing edges on boundary for now.
-        if !self.vertex_has_complete_fan(vb) {
-            println!("Blocking collapse on edge");
-            return;
-        }
-
         self.collapse_tri(eid);
 
         if let Some(e0t) = edge.twin {
@@ -395,7 +388,6 @@ impl WingedMesh {
 
         let va_outgoing = self.edge_map.entry(va).or_default();
 
-        // TODO: This is crude, better way to do it.
         // Main issue is a situation where triangles do not fan around the cake in both directions
         // This will collapse an edge to have dest and source in same position
 
