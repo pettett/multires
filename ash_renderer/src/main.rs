@@ -8,10 +8,10 @@ use crate::utility::{
     image::Image,
     instance::Instance,
     pipeline::create_graphics_pipeline,
-    pools::DescriptorPool,
+    pools::{create_descriptor_set_layout, create_descriptor_sets, DescriptorPool},
     render_pass::create_render_pass,
-    share,
     structures::*,
+    sync::SyncObjects,
     window::{ProgramProc, VulkanApp},
 };
 
@@ -45,7 +45,7 @@ pub struct VulkanApp26 {
     instance: Arc<Instance>,
     surface: Arc<Surface>,
     debug_utils_loader: ash::extensions::ext::DebugUtils,
-    debug_merssager: vk::DebugUtilsMessengerEXT,
+    debug_messenger: vk::DebugUtilsMessengerEXT,
 
     physical_device: vk::PhysicalDevice,
     memory_properties: vk::PhysicalDeviceMemoryProperties,
@@ -79,9 +79,8 @@ pub struct VulkanApp26 {
 
     command_buffers: Vec<vk::CommandBuffer>,
 
-    image_available_semaphores: Vec<vk::Semaphore>,
-    render_finished_semaphores: Vec<vk::Semaphore>,
-    in_flight_fences: Vec<vk::Fence>,
+    sync_objects: SyncObjects,
+
     current_frame: usize,
 
     is_framebuffer_resized: bool,
@@ -130,7 +129,7 @@ impl VulkanApp26 {
         );
         let (debug_utils_loader, debug_merssager) =
             setup_debug_utils(VALIDATION.is_enable, &entry, &instance.handle);
-        let physical_device = share::pick_physical_device(&instance, &surface, &DEVICE_EXTENSIONS);
+        let physical_device = instance.pick_physical_device(&surface, &DEVICE_EXTENSIONS);
 
         let physical_device_memory_properties = unsafe {
             instance
@@ -176,7 +175,7 @@ impl VulkanApp26 {
             physical_device,
             swapchain.format,
         );
-        let ubo_layout = share::v2::create_descriptor_set_layout(&device.handle);
+        let ubo_layout = create_descriptor_set_layout(&device.handle);
         let graphics_pipeline =
             create_graphics_pipeline(device.clone(), render_pass, swapchain.extent, ubo_layout);
 
@@ -243,7 +242,7 @@ impl VulkanApp26 {
         println!("Loading descriptors");
         let descriptor_pool = DescriptorPool::new(device.clone(), swapchain.images.len() as u32);
 
-        let descriptor_sets = share::v2::create_descriptor_sets(
+        let descriptor_sets = create_descriptor_sets(
             &device.handle,
             &descriptor_pool,
             ubo_layout,
@@ -269,7 +268,7 @@ impl VulkanApp26 {
             graphics_pipeline.layout(),
             &descriptor_sets,
         );
-        let sync_ojbects = share::v1::create_sync_objects(&device.handle, MAX_FRAMES_IN_FLIGHT);
+        let sync_objects = SyncObjects::new(device.clone(), MAX_FRAMES_IN_FLIGHT);
 
         println!("Generated App");
 
@@ -305,7 +304,7 @@ impl VulkanApp26 {
             instance,
             surface,
             debug_utils_loader,
-            debug_merssager,
+            debug_messenger: debug_merssager,
 
             physical_device,
             memory_properties: physical_device_memory_properties,
@@ -342,9 +341,7 @@ impl VulkanApp26 {
             command_pool,
             command_buffers,
 
-            image_available_semaphores: sync_ojbects.image_available_semaphores,
-            render_finished_semaphores: sync_ojbects.render_finished_semaphores,
-            in_flight_fences: sync_ojbects.inflight_fences,
+            sync_objects,
             current_frame: 0,
 
             is_framebuffer_resized: false,
@@ -624,7 +621,7 @@ impl VulkanApp26 {
     }
 
     fn draw_frame(&mut self, delta_time: f32) {
-        let wait_fences = [self.in_flight_fences[self.current_frame]];
+        let wait_fences = [self.sync_objects.in_flight_fences[self.current_frame]];
 
         unsafe {
             self.device
@@ -637,7 +634,7 @@ impl VulkanApp26 {
             let result = self.device.fn_swapchain.acquire_next_image(
                 self.swapchain.handle,
                 std::u64::MAX,
-                self.image_available_semaphores[self.current_frame],
+                self.sync_objects.image_available_semaphores[self.current_frame],
                 vk::Fence::null(),
             );
 
@@ -655,9 +652,9 @@ impl VulkanApp26 {
 
         self.update_uniform_buffer(image_index as usize, delta_time);
 
-        let wait_semaphores = [self.image_available_semaphores[self.current_frame]];
+        let wait_semaphores = [self.sync_objects.image_available_semaphores[self.current_frame]];
         let wait_stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
-        let signal_semaphores = [self.render_finished_semaphores[self.current_frame]];
+        let signal_semaphores = [self.sync_objects.render_finished_semaphores[self.current_frame]];
 
         let submit_infos = [vk::SubmitInfo {
             s_type: vk::StructureType::SUBMIT_INFO,
@@ -682,7 +679,7 @@ impl VulkanApp26 {
                 .queue_submit(
                     self.graphics_queue,
                     &submit_infos,
-                    self.in_flight_fences[self.current_frame],
+                    self.sync_objects.in_flight_fences[self.current_frame],
                 )
                 .expect("Failed to execute queue submit.");
         }
@@ -796,6 +793,7 @@ impl VulkanApp26 {
             self.device
                 .handle
                 .destroy_render_pass(self.render_pass, None);
+
             for &image_view in self.swapchain_imageviews.iter() {
                 self.device.handle.destroy_image_view(image_view, None);
             }
@@ -814,18 +812,6 @@ impl VulkanApp26 {
 impl Drop for VulkanApp26 {
     fn drop(&mut self) {
         unsafe {
-            for i in 0..MAX_FRAMES_IN_FLIGHT {
-                self.device
-                    .handle
-                    .destroy_semaphore(self.image_available_semaphores[i], None);
-                self.device
-                    .handle
-                    .destroy_semaphore(self.render_finished_semaphores[i], None);
-                self.device
-                    .handle
-                    .destroy_fence(self.in_flight_fences[i], None);
-            }
-
             self.cleanup_swapchain();
 
             self.device
@@ -834,7 +820,7 @@ impl Drop for VulkanApp26 {
 
             if VALIDATION.is_enable {
                 self.debug_utils_loader
-                    .destroy_debug_utils_messenger(self.debug_merssager, None);
+                    .destroy_debug_utils_messenger(self.debug_messenger, None);
             }
         }
     }

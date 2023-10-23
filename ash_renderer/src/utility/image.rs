@@ -2,12 +2,7 @@ use std::{cmp::max, path::Path, ptr, sync::Arc};
 
 use ash::vk;
 
-use super::{
-    buffer::create_buffer,
-    device::Device,
-    pools::CommandPool,
-    share::{find_depth_format, find_memory_type},
-};
+use super::{buffer::create_buffer, device::Device, instance::Instance, pools::CommandPool};
 
 pub struct Image {
     device: Arc<Device>,
@@ -329,16 +324,14 @@ impl Image {
     }
 
     pub fn create_depth_resources(
-        instance: &ash::Instance,
+        instance: &Instance,
         device: Arc<Device>,
         physical_device: vk::PhysicalDevice,
-        _command_pool: vk::CommandPool,
-        _submit_queue: vk::Queue,
         swapchain_extent: vk::Extent2D,
         device_memory_properties: &vk::PhysicalDeviceMemoryProperties,
         msaa_samples: vk::SampleCountFlags,
     ) -> Self {
-        let depth_format = find_depth_format(instance, physical_device);
+        let depth_format = instance.find_depth_format(physical_device);
         Self::create_image(
             device,
             swapchain_extent.width,
@@ -616,4 +609,23 @@ pub fn copy_buffer_to_image(
             &buffer_image_regions,
         );
     }
+}
+
+pub fn find_memory_type(
+    type_filter: u32,
+    required_properties: vk::MemoryPropertyFlags,
+    mem_properties: &vk::PhysicalDeviceMemoryProperties,
+) -> u32 {
+    for (i, memory_type) in mem_properties.memory_types.iter().enumerate() {
+        if (type_filter & (1 << i)) > 0 && memory_type.property_flags.contains(required_properties)
+        {
+            return i as u32;
+        }
+    }
+
+    panic!("Failed to find suitable memory type!")
+}
+
+pub fn has_stencil_component(format: vk::Format) -> bool {
+    format == vk::Format::D32_SFLOAT_S8_UINT || format == vk::Format::D24_UNORM_S8_UINT
 }

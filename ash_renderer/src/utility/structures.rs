@@ -26,12 +26,6 @@ impl QueueFamilyIndices {
     }
 }
 
-pub struct SyncObjects {
-    pub image_available_semaphores: Vec<vk::Semaphore>,
-    pub render_finished_semaphores: Vec<vk::Semaphore>,
-    pub inflight_fences: Vec<vk::Fence>,
-}
-
 #[repr(C)]
 #[derive(Clone, Debug, Copy)]
 pub struct UniformBufferObject {

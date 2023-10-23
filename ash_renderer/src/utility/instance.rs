@@ -11,6 +11,12 @@ use crate::utility::{
     debug, platforms,
 };
 
+use super::{
+    structures::{DeviceExtension, QueueFamilyIndices},
+    surface::Surface,
+    swapchain::query_swapchain_support,
+};
+
 pub struct Instance {
     pub handle: ash::Instance,
     pub fn_surface: ash::extensions::khr::Surface,
@@ -92,6 +98,198 @@ impl Instance {
             handle: instance,
             fn_surface,
         })
+    }
+
+    pub fn find_depth_format(&self, physical_device: vk::PhysicalDevice) -> vk::Format {
+        self.find_supported_format(
+            physical_device,
+            &[
+                vk::Format::D32_SFLOAT,
+                vk::Format::D32_SFLOAT_S8_UINT,
+                vk::Format::D24_UNORM_S8_UINT,
+            ],
+            vk::ImageTiling::OPTIMAL,
+            vk::FormatFeatureFlags::DEPTH_STENCIL_ATTACHMENT,
+        )
+    }
+
+    pub fn find_supported_format(
+        &self,
+        physical_device: vk::PhysicalDevice,
+        candidate_formats: &[vk::Format],
+        tiling: vk::ImageTiling,
+        features: vk::FormatFeatureFlags,
+    ) -> vk::Format {
+        for &format in candidate_formats.iter() {
+            let format_properties = unsafe {
+                self.handle
+                    .get_physical_device_format_properties(physical_device, format)
+            };
+            if tiling == vk::ImageTiling::LINEAR
+                && format_properties.linear_tiling_features.contains(features)
+            {
+                return format.clone();
+            } else if tiling == vk::ImageTiling::OPTIMAL
+                && format_properties.optimal_tiling_features.contains(features)
+            {
+                return format.clone();
+            }
+        }
+
+        panic!("Failed to find supported format!")
+    }
+
+    pub fn check_mipmap_support(
+        &self,
+        physcial_device: vk::PhysicalDevice,
+        image_format: vk::Format,
+    ) {
+        let format_properties = unsafe {
+            self.handle
+                .get_physical_device_format_properties(physcial_device, image_format)
+        };
+
+        let is_sample_image_filter_linear_support = format_properties
+            .optimal_tiling_features
+            .contains(vk::FormatFeatureFlags::SAMPLED_IMAGE_FILTER_LINEAR);
+
+        if is_sample_image_filter_linear_support == false {
+            panic!("Texture Image format does not support linear blitting!")
+        }
+    }
+    pub fn pick_physical_device(
+        &self,
+        surface: &Surface,
+        required_device_extensions: &DeviceExtension,
+    ) -> vk::PhysicalDevice {
+        let physical_devices = unsafe {
+            self.handle
+                .enumerate_physical_devices()
+                .expect("Failed to enumerate Physical Devices!")
+        };
+
+        let result = physical_devices.iter().find(|physical_device| {
+            let is_suitable = self.is_physical_device_suitable(
+                **physical_device,
+                surface,
+                required_device_extensions,
+            );
+
+            // if is_suitable {
+            //     let device_properties = instance.get_physical_device_properties(**physical_device);
+            //     let device_name = super::tools::vk_to_string(&device_properties.device_name);
+            //     println!("Using GPU: {}", device_name);
+            // }
+
+            is_suitable
+        });
+
+        match result {
+            Some(p_physical_device) => *p_physical_device,
+            None => panic!("Failed to find a suitable GPU!"),
+        }
+    }
+
+    pub fn is_physical_device_suitable(
+        &self,
+        physical_device: vk::PhysicalDevice,
+        surface_stuff: &Surface,
+        required_device_extensions: &DeviceExtension,
+    ) -> bool {
+        let device_features = unsafe { self.handle.get_physical_device_features(physical_device) };
+
+        let indices = self.find_queue_family(physical_device, surface_stuff);
+
+        let is_queue_family_supported = indices.is_complete();
+        let is_device_extension_supported =
+            self.check_device_extension_support(physical_device, required_device_extensions);
+        let is_swapchain_supported = if is_device_extension_supported {
+            let swapchain_support = query_swapchain_support(physical_device, surface_stuff);
+            !swapchain_support.formats.is_empty() && !swapchain_support.present_modes.is_empty()
+        } else {
+            false
+        };
+        let is_support_sampler_anisotropy = device_features.sampler_anisotropy == 1;
+
+        return is_queue_family_supported
+            && is_device_extension_supported
+            && is_swapchain_supported
+            && is_support_sampler_anisotropy;
+    }
+
+    pub fn find_queue_family(
+        &self,
+        physical_device: vk::PhysicalDevice,
+        surface: &Surface,
+    ) -> QueueFamilyIndices {
+        let queue_families = unsafe {
+            self.handle
+                .get_physical_device_queue_family_properties(physical_device)
+        };
+
+        let mut queue_family_indices = QueueFamilyIndices::new();
+
+        let mut index = 0;
+        for queue_family in queue_families.iter() {
+            if queue_family.queue_count > 0
+                && queue_family.queue_flags.contains(vk::QueueFlags::GRAPHICS)
+            {
+                queue_family_indices.graphics_family = Some(index);
+            }
+
+            let is_present_support = unsafe {
+                self.fn_surface.get_physical_device_surface_support(
+                    physical_device,
+                    index as u32,
+                    surface.handle,
+                )
+            }
+            .unwrap();
+
+            if queue_family.queue_count > 0 && is_present_support {
+                queue_family_indices.present_family = Some(index);
+            }
+
+            if queue_family_indices.is_complete() {
+                break;
+            }
+
+            index += 1;
+        }
+
+        queue_family_indices
+    }
+
+    pub fn check_device_extension_support(
+        &self,
+        physical_device: vk::PhysicalDevice,
+        device_extensions: &DeviceExtension,
+    ) -> bool {
+        let available_extensions = unsafe {
+            self.handle
+                .enumerate_device_extension_properties(physical_device)
+                .expect("Failed to get device extension properties.")
+        };
+
+        let mut available_extension_names = vec![];
+
+        for extension in available_extensions.iter() {
+            let extension_name = super::tools::vk_to_string(&extension.extension_name);
+
+            available_extension_names.push(extension_name);
+        }
+
+        use std::collections::HashSet;
+        let mut required_extensions = HashSet::new();
+        for extension in device_extensions.names.iter() {
+            required_extensions.insert(extension.to_string());
+        }
+
+        for extension_name in available_extension_names.iter() {
+            required_extensions.remove(extension_name);
+        }
+
+        return required_extensions.is_empty();
     }
 }
 

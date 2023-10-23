@@ -3,7 +3,7 @@ use std::{ptr, sync::Arc};
 use ash::vk;
 
 use super::{
-    device::Device, pools::CommandPool, share::find_memory_type, structures::UniformBufferObject,
+    device::Device, image::find_memory_type, pools::CommandPool, structures::UniformBufferObject,
 };
 
 pub struct Buffer {

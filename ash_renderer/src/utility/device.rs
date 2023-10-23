@@ -7,8 +7,6 @@ use std::{
 use ash::vk::{self, PhysicalDeviceMaintenance4Features, PhysicalDeviceMeshShaderFeaturesEXT};
 use winapi::ctypes::c_char;
 
-use crate::utility::share::find_queue_family;
-
 use super::{
     instance::Instance,
     structures::{DeviceExtension, QueueFamilyIndices},
@@ -45,7 +43,7 @@ impl Device {
         device_extensions: &DeviceExtension,
         surface: &Surface,
     ) -> (Arc<Self>, QueueFamilyIndices) {
-        let indices = find_queue_family(&instance, physical_device, surface);
+        let indices = instance.find_queue_family(physical_device, surface);
 
         use std::collections::HashSet;
         let mut unique_queue_families = HashSet::new();

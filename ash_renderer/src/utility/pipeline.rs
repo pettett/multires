@@ -2,7 +2,7 @@ use std::{ffi::CString, ptr, sync::Arc};
 
 use ash::vk;
 
-use super::{device::Device, share};
+use super::device::Device;
 
 pub struct Pipeline {
     device: Arc<Device>,
@@ -30,21 +30,37 @@ impl Drop for Pipeline {
     }
 }
 
+pub fn create_shader_module(device: &ash::Device, code: Vec<u8>) -> vk::ShaderModule {
+    let shader_module_create_info = vk::ShaderModuleCreateInfo {
+        s_type: vk::StructureType::SHADER_MODULE_CREATE_INFO,
+        p_next: ptr::null(),
+        flags: vk::ShaderModuleCreateFlags::empty(),
+        code_size: code.len(),
+        p_code: code.as_ptr() as *const u32,
+    };
+
+    unsafe {
+        device
+            .create_shader_module(&shader_module_create_info, None)
+            .expect("Failed to create Shader Module!")
+    }
+}
+
 pub fn create_graphics_pipeline(
     device: Arc<Device>,
     render_pass: vk::RenderPass,
     swapchain_extent: vk::Extent2D,
     ubo_set_layout: vk::DescriptorSetLayout,
 ) -> Pipeline {
-    let task_shader_module = share::create_shader_module(
+    let task_shader_module = create_shader_module(
         &device.handle,
         include_bytes!("../../shaders/spv/mesh-shader.task").to_vec(),
     );
-    let mesh_shader_module = share::create_shader_module(
+    let mesh_shader_module = create_shader_module(
         &device.handle,
         include_bytes!("../../shaders/spv/mesh-shader.mesh").to_vec(),
     );
-    let frag_shader_module = share::create_shader_module(
+    let frag_shader_module = create_shader_module(
         &device.handle,
         include_bytes!("../../shaders/spv/mesh-shader.frag").to_vec(),
     );
