@@ -2,6 +2,7 @@ extern crate gltf;
 
 use idmap::IntegerId;
 use metis::{idx_t, PartitioningConfig, PartitioningError};
+use petgraph::data::{Build, FromElements};
 use std::collections::{HashMap, HashSet};
 
 use gltf::mesh::util::ReadIndices;
@@ -409,22 +410,16 @@ impl WingedMesh {
         //self.assert_valid();
     }
 
-    pub fn triangle_from_face(&self, face: FaceID) -> Option<[u32; 3]> {
-        if let Some(f) = self.faces.get(face) {
-            let verts: Vec<usize> = self
-                .iter_edge_loop(f.edge)
-                .map(|e| self[e].vert_origin.into())
-                .collect();
+    pub fn triangle_from_face(&self, face: &Face) -> [u32; 3] {
+        let verts: Vec<usize> = self
+            .iter_edge_loop(face.edge)
+            .map(|e| self[e].vert_origin.into())
+            .collect();
 
-            Some([verts[0] as _, verts[1] as _, verts[2] as _])
-        } else {
-            None
-        }
+        [verts[0] as _, verts[1] as _, verts[2] as _]
     }
 
-    pub fn from_gltf(
-        path: impl AsRef<std::path::Path>,
-    ) -> gltf::Result<(Self, Vec<[f32; 3]>, Vec<u32>)> {
+    pub fn from_gltf(path: impl AsRef<std::path::Path>) -> gltf::Result<(Self, Vec<[f32; 3]>)> {
         let (doc, buffers, _) = gltf::import(path)?;
 
         let mesh = doc.meshes().next().unwrap();
@@ -450,7 +445,7 @@ impl WingedMesh {
             mesh.add_tri(FaceID(i), VertID(a), VertID(b), VertID(c));
         }
 
-        Ok((mesh, verts, indices))
+        Ok((mesh, verts))
     }
 
     fn find_edge(&self, a: VertID, b: VertID) -> Option<EdgeID> {
@@ -552,6 +547,9 @@ impl WingedMesh {
     pub fn get_partition(&self) -> Vec<idx_t> {
         self.faces().values().map(|f| f.part).collect()
     }
+    pub fn get_group(&self) -> Vec<idx_t> {
+        self.faces().values().map(|f| f.group).collect()
+    }
 
     pub fn partition(
         &self,
@@ -590,7 +588,7 @@ impl WingedMesh {
         )
     }
 
-    pub fn group(&mut self, config: &PartitioningConfig) -> Result<Vec<idx_t>, PartitioningError> {
+    pub fn group(&mut self, config: &PartitioningConfig) -> Result<(), PartitioningError> {
         let group_count = self.partition_count / 4;
         println!("Partitioning into {group_count} groups");
 
@@ -617,13 +615,89 @@ impl WingedMesh {
         }
 
         println!("Partitioning the partition!");
-        let groups = config.partition_from_graph(5, &graph)?;
+        let groups = config.partition_from_graph(group_count as u32, &graph)?;
 
         for (i, f) in self.faces.values_mut().enumerate() {
             // Some faces will have already been removed
             f.group = groups[f.part as usize];
         }
 
-        Ok(groups)
+        Ok(())
+    }
+
+    /// Within each group, split triangles into two completely new partitions, so as not to preserve any old seams between ancient partitions
+    /// Ensures the data structure is seamless with changing seams! Yippee!
+    pub fn partition_within_groups(
+        &mut self,
+        config: &PartitioningConfig,
+    ) -> Result<(), PartitioningError> {
+        let group_count = self.partition_count / 4;
+        println!("Partitioning {group_count} groups into sub-partitions");
+
+        let mut graphs: Vec<_> = (0..group_count)
+            .map(|i| petgraph::Graph::<i32, i32>::new())
+            .collect();
+
+        // Stores vecs of face IDs, which should be associated with data in graphs
+        let mut ids: Vec<_> = (0..group_count).map(|i| Vec::new()).collect();
+        let mut faces: Vec<_> = (0..group_count).map(|i| HashMap::new()).collect();
+
+        // Give every triangle a node
+        for (i, face) in self.faces().iter() {
+            let g = face.group as usize;
+            let n = graphs[g].add_node(1);
+
+            // indexes should correspond
+            assert_eq!(n.index(), ids[g].len());
+
+            ids[g].push(*i);
+            faces[g].insert(*i, n);
+        }
+        // Apply links between nodes
+        for (i, face) in self.faces().iter() {
+            let g = face.group as usize;
+
+            for e in self.iter_edge_loop(face.edge) {
+                if let Some(twin) = self[e].twin {
+                    let other_face = self[twin].face;
+                    let o_g = self.faces[other_face].group as usize;
+
+                    if g == o_g {
+                        let faces = &faces[g];
+
+                        graphs[g].update_edge(faces[i], faces[&other_face], 1);
+                    }
+                }
+            }
+        }
+
+        println!("Partitioning the groups into further smaller partitions!");
+        println!("(what is even going on anymore)");
+
+        let mut i = 0;
+        const PARTS: u32 = 2;
+        for (graph, ids) in graphs.iter().zip(ids) {
+            let part = config.partition_from_graph(PARTS, graph).unwrap();
+
+            for x in 0..part.len() {
+                self.faces[ids[x]].part = i + part[x];
+            }
+
+            i += PARTS as i32;
+        }
+
+        println!("{i} Partitions from groups");
+
+        // for (i, f) in self.faces.values_mut().enumerate() {
+        //     // Some faces will have already been removed
+        //     f.group = groups[f.part as usize];
+        // }
+
+        Ok(())
+        //Ok(groups)
+    }
+
+    pub fn partition_count(&self) -> usize {
+        self.partition_count
     }
 }

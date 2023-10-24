@@ -13,43 +13,104 @@ use winged_mesh::VertID;
 use crate::winged_mesh::{FaceID, WingedMesh};
 
 fn main() -> gltf::Result<()> {
-    let mesh_name = "../assets/torus.glb";
+    let mesh_name = "../assets/sphere.glb";
 
     println!("Loading from gltf!");
-    let (mut mesh, verts, indices) = winged_mesh::WingedMesh::from_gltf(mesh_name)?;
+    let (mut mesh, verts) = winged_mesh::WingedMesh::from_gltf(mesh_name)?;
 
     println!("Loaded winged edge mesh from gltf!");
 
     println!("Partitioning Graph!");
     let t1 = time::Instant::now();
     let config = PartitioningConfig {
-        //force_contiguous_partitions: Some(true),
+        force_contiguous_partitions: Some(true),
         minimize_subgraph_degree: Some(true),
         ..Default::default()
     };
+
+    // Apply primary partition, that will define the lowest level clusterings
     mesh.apply_partition(&config, 1 + mesh.faces().len() as u32 / 60)
         .unwrap();
 
-    let partitions0 = mesh.get_partition();
-
     println!("Partitioning the partition!");
-    let groups = mesh.group(&config).unwrap();
+    mesh.group(&config).unwrap();
 
     println!("time: {}ms", t1.elapsed().as_millis());
 
+    // halve number of triangles in each meshlet
+
+    println!("Face count L0: {}", mesh.face_count());
+
+    let meshlets = generate_meshlets(&mesh);
+
+    let mut layer_1_mesh = reduce_mesh(&meshlets, mesh.clone());
+
+    println!("Face count L1: {}", layer_1_mesh.face_count());
+    let config = PartitioningConfig {
+        //force_contiguous_partitions: Some(true), TODO:
+        minimize_subgraph_degree: Some(true),
+        ..Default::default()
+    };
+    layer_1_mesh.partition_within_groups(&config).unwrap();
+
+    let partitions1 = layer_1_mesh.get_partition();
+
+    let indices = grab_indicies(&mesh);
+    let layer_1_indices = grab_indicies(&layer_1_mesh);
+
+    assert_eq!(partitions1.len() * 3, layer_1_indices.len());
+
+    MultiResMesh {
+        name: mesh_name.to_owned(),
+        verts: verts.iter().map(|x| [x[0], x[1], x[2], 1.0]).collect(),
+        // layer_1_indices: indices.clone(),
+        layers: vec![
+            MeshLayer {
+                partitions: mesh.get_partition(),
+                groups: mesh.get_group(),
+                indices,
+                meshlets,
+            },
+            MeshLayer {
+                partitions: partitions1,
+                groups: layer_1_mesh.get_group(),
+                indices: layer_1_indices,
+                meshlets: vec![],
+            },
+        ],
+    }
+    .save()
+    .unwrap();
+
+    Ok(())
+}
+
+fn grab_indicies(mesh: &WingedMesh) -> Vec<u32> {
+    let mut indices = Vec::with_capacity(mesh.face_count() * 3);
+    for f in mesh.faces().values() {
+        indices.extend(mesh.triangle_from_face(f));
+    }
+
+    // Validation
+    //for i in &indices {
+    //    verts[*i as usize];
+    //}
+
+    indices
+}
+
+fn generate_meshlets(mesh: &WingedMesh) -> Vec<Meshlet> {
     println!("Generating meshlets!");
 
     // Precondition: partition indexes completely span in some range 0..N
-    let mut meshlets: Vec<_> = (0..=*partitions0.iter().max().unwrap())
+    let mut meshlets: Vec<_> = (0..=mesh.partition_count())
         .map(|_| (Meshlet::default()))
         .collect();
 
-    for i in 0..partitions0.len() {
-        let Some(verts) = mesh.triangle_from_face(FaceID(i)) else {
-            continue;
-        };
+    for face in mesh.faces().values() {
+        let verts = mesh.triangle_from_face(face);
 
-        let m = meshlets.get_mut(partitions0[i] as usize).unwrap();
+        let m = meshlets.get_mut(face.part as usize).unwrap();
 
         for v in 0..3 {
             let vert = verts[v] as u32;
@@ -70,25 +131,6 @@ fn main() -> gltf::Result<()> {
         m.index_count += 3;
     }
 
-    // halve number of triangles in each meshlet
-
-    println!("Face count L0: {}", mesh.face_count());
-
-    let layer_1_mesh = reduce_mesh(&meshlets, mesh.clone());
-    let mut layer_1_indices = Vec::new();
-    for f in layer_1_mesh.faces().keys() {
-        let Some(verts) = layer_1_mesh.triangle_from_face(*f) else {
-            continue;
-        };
-        layer_1_indices.extend(verts);
-    }
-
-    for i in &layer_1_indices {
-        verts[*i as usize];
-    }
-
-    println!("Face count L1: {}", layer_1_mesh.face_count());
-
     let total_indices: u32 = meshlets.iter().map(|m| m.index_count).sum();
     let avg_indices = total_indices / meshlets.len() as u32;
     let max_indices = meshlets.iter().map(|m| m.index_count).max().unwrap();
@@ -98,33 +140,7 @@ fn main() -> gltf::Result<()> {
 
     println!("avg_indices: {avg_indices}/378 max_indices: {max_indices}/378 avg_verts: {avg_verts}/64 max_verts: {max_verts}/64");
 
-    let partitions1 = layer_1_mesh.get_partition();
-
-    assert_eq!(partitions1.len() * 3, layer_1_indices.len());
-
-    MultiResMesh {
-        name: mesh_name.to_owned(),
-        verts: verts.iter().map(|x| [x[0], x[1], x[2], 1.0]).collect(),
-        // layer_1_indices: indices.clone(),
-        layers: vec![
-            MeshLayer {
-                partitions: partitions0,
-                groups,
-                indices,
-                meshlets,
-            },
-            MeshLayer {
-                partitions: partitions1,
-                groups: vec![],
-                indices: layer_1_indices,
-                meshlets: vec![],
-            },
-        ],
-    }
-    .save()
-    .unwrap();
-
-    Ok(())
+    meshlets
 }
 
 fn reduce_mesh(meshlets: &[Meshlet], mut mesh: WingedMesh) -> WingedMesh {

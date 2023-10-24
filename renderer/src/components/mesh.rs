@@ -52,7 +52,7 @@ impl Mesh {
         );
 
         let partitions1 = BufferGroup::create_plural_storage(
-            &[&asset.layers[1].partitions[..], &asset.layers[0].groups[..]],
+            &[&asset.layers[1].partitions[..], &asset.layers[1].groups[..]],
             instance.device(),
             &instance.partition_bind_group_layout(),
             Some("Partition Buffer"),

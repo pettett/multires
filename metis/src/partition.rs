@@ -274,7 +274,7 @@ impl<'a> PartitioningConfig<'a> {
         mut adjacency_weight: Vec<i32>,
     ) -> Result<Vec<idx_t>, PartitioningError> {
         if adjacency.len() == 0 {
-            return Err(PartitioningError::Other);
+            return Ok(vec![]);
         }
 
         let mut n = nodes as idx_t;
