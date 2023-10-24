@@ -1,5 +1,13 @@
+// #![cfg(not(feature = "shaderc"))]
+
 use std::fs;
 
+#[cfg(not(feature = "shaderc"))]
+fn main(){
+	//TODO: better way to skip build script
+}
+
+#[cfg(feature = "shaderc")]
 fn main() {
     // Tell Cargo that if any shaders change, to rerun this build script.
     println!("cargo:rerun-if-changed=shaders/src");

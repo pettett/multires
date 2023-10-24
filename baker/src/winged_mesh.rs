@@ -1,12 +1,8 @@
 extern crate gltf;
 
-use glam::Vec3;
-use metis::{
-    idx_t, real_t, rstatus_et_METIS_ERROR_INPUT, rstatus_et_METIS_ERROR_MEMORY,
-    rstatus_et_METIS_OK, METIS_PartGraphKway, METIS_PartGraphRecursive, METIS_SetDefaultOptions,
-    PartitioningConfig, PartitioningError, PartitioningMethod, METIS_NOPTIONS,
-};
-use std::{collections::HashMap, ptr::null_mut, time};
+use idmap::IntegerId;
+use metis::{idx_t, PartitioningConfig, PartitioningError};
+use std::collections::HashMap;
 
 use gltf::mesh::util::ReadIndices;
 
@@ -28,7 +24,20 @@ impl Into<usize> for EdgeID {
 pub struct FaceID(pub usize);
 impl Into<usize> for FaceID {
     fn into(self) -> usize {
-        self.0
+        self.0 as usize
+    }
+}
+impl IntegerId for FaceID {
+    fn from_id(id: u64) -> Self {
+        FaceID(id as usize)
+    }
+
+    fn id(&self) -> u64 {
+        self.0 as u64
+    }
+
+    fn id32(&self) -> u32 {
+        self.0 as u32
     }
 }
 
@@ -55,7 +64,7 @@ pub struct Vertex {
 
 #[derive(Default, Debug, Clone)]
 pub struct Face {
-    pub edge: Option<EdgeID>,
+    pub edge: EdgeID,
     pub part: idx_t,
 }
 
@@ -115,7 +124,7 @@ impl Iterator for AllEdgeIter {
 #[derive(Debug, Clone)]
 pub struct WingedMesh {
     verts: Vec<Vertex>,
-    faces: Vec<Option<Face>>,
+    faces: idmap::DirectIdMap<FaceID, Face>,
     // partitions: Vec<i32>,
     edges: Vec<HalfEdge>,
     edge_map: HashMap<VertID, Vec<EdgeID>>,
@@ -155,24 +164,13 @@ impl std::ops::IndexMut<EdgeID> for WingedMesh {
         &mut self.edges[index.0]
     }
 }
-impl std::ops::Index<FaceID> for WingedMesh {
-    type Output = Option<Face>;
-
-    fn index(&self, index: FaceID) -> &Self::Output {
-        &self.faces[index.0]
-    }
-}
-impl std::ops::IndexMut<FaceID> for WingedMesh {
-    fn index_mut(&mut self, index: FaceID) -> &mut Self::Output {
-        &mut self.faces[index.0]
-    }
-}
 
 impl WingedMesh {
     pub fn new(faces: usize, verts: usize) -> Self {
         Self {
             verts: vec![Default::default(); verts],
-            faces: vec![Default::default(); faces],
+            //faces: vec![Default::default(); faces],
+            faces: idmap::DirectIdMap::with_capacity_direct(faces),
             // partitions: vec![Default::default(); faces],
             edges: Default::default(),
             edge_map: Default::default(),
@@ -180,17 +178,9 @@ impl WingedMesh {
     }
 
     pub fn face_count(&self) -> usize {
-        let mut c = 0;
-
-        for f in &self.faces {
-            match f {
-                Some(_) => c += 1,
-                None => (),
-            }
-        }
-
-        c
+        self.faces.len()
     }
+
     pub fn edge_count(&self) -> usize {
         let mut c = 0;
 
@@ -228,13 +218,9 @@ impl WingedMesh {
     }
 
     pub fn assert_valid(&self) {
-        for (i, f) in self.faces.iter().enumerate() {
-            let Some(f) = f else {
-                continue;
-            };
-
+        for (i, f) in self.faces.iter() {
             let edges: Vec<HalfEdge> = self
-                .iter_edge_loop(f.edge.unwrap())
+                .iter_edge_loop(f.edge)
                 .map(|e| self[e].clone())
                 .collect();
 
@@ -306,7 +292,8 @@ impl WingedMesh {
         let tri = self.iter_edge_loop(eid).collect::<Vec<_>>();
         //println!("Collapsing triangle {tri:?}");
         let e = self[eid].clone();
-        self[e.face] = None;
+
+        self.faces.remove(e.face);
 
         assert_eq!(tri.len(), 3);
         assert_eq!(tri[0], eid);
@@ -417,9 +404,9 @@ impl WingedMesh {
     }
 
     pub fn triangle_from_face(&self, face: FaceID) -> Option<[u32; 3]> {
-        if let Some(f) = &self[face] {
+        if let Some(f) = self.faces.get(face) {
             let verts: Vec<usize> = self
-                .iter_edge_loop(f.edge.unwrap())
+                .iter_edge_loop(f.edge)
                 .map(|e| self[e].vert_origin.into())
                 .collect();
 
@@ -446,9 +433,10 @@ impl WingedMesh {
             Some(ReadIndices::U32(iter)) => iter.collect(),
             _ => panic!("Unsupported index size"),
         };
-        let mut mesh = WingedMesh::new(indices.len() / 3, verts.len());
+        let face_count = indices.len() / 3;
+        let mut mesh = WingedMesh::new(face_count, verts.len());
 
-        for i in 0..mesh.faces.len() {
+        for i in 0..face_count {
             let a = indices[i * 3] as usize;
             let b = indices[i * 3 + 1] as usize;
             let c = indices[i * 3 + 2] as usize;
@@ -524,14 +512,17 @@ impl WingedMesh {
             self[c].edge = Some(iec);
         }
 
-        self[f] = Some(Face {
-            edge: Some(iea),
-            part: -1,
-        });
+        self.faces.insert(
+            f,
+            Face {
+                edge: iea,
+                part: -1,
+            },
+        );
     }
 
-    pub fn faces(&self) -> &[Option<Face>] {
-        self.faces.as_ref()
+    pub fn faces(&self) -> &idmap::DirectIdMap<FaceID, Face> {
+        &self.faces
     }
 
     pub fn apply_partition(
@@ -541,40 +532,43 @@ impl WingedMesh {
     ) -> Result<(), PartitioningError> {
         let part = self.partition(config, partitions)?;
         let mut i = 0;
-        for f in self.faces.iter_mut() {
+        // for f in self.faces.iter_mut() {
+        //     // Some faces will have already been removed
+        //     if let Some(f) = f {
+        //         f.part = part[i];
+        //         i += 1;
+        //     }
+        // }
+
+        for (i, f) in self.faces.values_mut().enumerate() {
             // Some faces will have already been removed
-            if let Some(f) = f {
-                f.part = part[i];
-                i += 1;
-            }
+            f.part = part[i];
         }
 
         Ok(())
     }
 
     pub fn get_partition(&self) -> Vec<idx_t> {
-        self.faces()
-            .iter()
-            .filter_map(|f| f.as_ref().map(|f| f.part))
-            .collect()
+        self.faces().values().map(|f| f.part).collect()
     }
 
     pub fn partition(
         &self,
         config: &PartitioningConfig,
         partitions: u32,
-    ) -> Result<(Vec<idx_t>), PartitioningError> {
+    ) -> Result<Vec<idx_t>, PartitioningError> {
+        println!("Partitioning into {partitions} partitions");
+
         let mut adjacency = Vec::new(); // adjncy
         let mut adjacency_idx = Vec::new(); // xadj
 
-        for v in self.faces.iter() {
+        for f in self.faces.values() {
             // Some faces will have already been removed
-            if let Some(v) = v {
-                adjacency_idx.push(adjacency.len() as idx_t);
-                for e in self.iter_edge_loop(v.edge.unwrap()) {
-                    if let Some(twin) = self[e].twin {
-                        adjacency.push(self[twin].face.0 as i32);
-                    }
+
+            adjacency_idx.push(adjacency.len() as idx_t);
+            for e in self.iter_edge_loop(f.edge) {
+                if let Some(twin) = self[e].twin {
+                    adjacency.push(self[twin].face.0 as i32);
                 }
             }
         }

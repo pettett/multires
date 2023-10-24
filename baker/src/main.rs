@@ -5,7 +5,7 @@ use common::{asset::Asset, Meshlet, MultiResMesh};
 use metis::PartitioningConfig;
 use rand::Rng;
 use std::{
-    collections::{hash_map::RandomState, HashMap, HashSet},
+    collections::{HashMap, HashSet},
     time,
 };
 use winged_mesh::VertID;
@@ -13,7 +13,7 @@ use winged_mesh::VertID;
 use crate::winged_mesh::{FaceID, WingedMesh};
 
 fn main() -> gltf::Result<()> {
-    let mesh_name = "../assets/plane.glb";
+    let mesh_name = "../assets/torus.glb";
 
     println!("Loading from gltf!");
     let (mut mesh, verts, indices) = winged_mesh::WingedMesh::from_gltf(mesh_name)?;
@@ -74,8 +74,8 @@ fn main() -> gltf::Result<()> {
 
     let layer_1_mesh = reduce_mesh(&meshlets, mesh.clone());
     let mut layer_1_indices = Vec::new();
-    for i in 0..clusters.len() {
-        let Some(verts) = layer_1_mesh.triangle_from_face(FaceID(i)) else {
+    for f in layer_1_mesh.faces().keys() {
+        let Some(verts) = layer_1_mesh.triangle_from_face(*f) else {
             continue;
         };
         layer_1_indices.extend(verts);
@@ -104,12 +104,12 @@ fn main() -> gltf::Result<()> {
         })
         .collect();
 
-    for (i, face) in mesh.faces().iter().enumerate() {
-        for e in mesh.iter_edge_loop(face.as_ref().unwrap().edge.unwrap()) {
+    for (i, face) in mesh.faces().iter() {
+        for e in mesh.iter_edge_loop(face.edge) {
             if let Some(twin) = mesh[e].twin {
                 let idx: usize = mesh[twin].face.into();
 
-                graph.update_edge(nodes[&clusters[i]], nodes[&clusters[idx]], 1);
+                graph.update_edge(nodes[&clusters[i.0]], nodes[&clusters[idx]], 1);
             }
         }
     }
@@ -144,7 +144,7 @@ fn reduce_mesh(meshlets: &[Meshlet], mut mesh: WingedMesh) -> WingedMesh {
         // reduce triangle count in meshlet by half
 
         let mut tris = m.index_count / 3;
-        let target = tris / 2;
+        let target = tris * 2 / 3;
 
         let mut vi = 0;
 
@@ -155,7 +155,7 @@ fn reduce_mesh(meshlets: &[Meshlet], mut mesh: WingedMesh) -> WingedMesh {
             vi += rng.gen_range(0..m.vertex_count as usize);
             vi %= m.vertex_count as usize;
 
-            println!("{tris}/ {target}, {v:?}");
+            //println!("{tris}/ {target}, {v:?}");
 
             let Some(i) = mesh[v].edge else {
                 continue;
@@ -164,11 +164,10 @@ fn reduce_mesh(meshlets: &[Meshlet], mut mesh: WingedMesh) -> WingedMesh {
             let mut valid_face = mesh.vertex_has_complete_fan(v);
 
             if valid_face {
-                let f = mesh[mesh[i].face].as_ref().unwrap().part;
+                let f = mesh.faces()[mesh[i].face].part;
                 for e in mesh.outgoing_edges(v) {
-                    if f != mesh[mesh[*e].face].as_ref().unwrap().part {
+                    if f != mesh.faces()[mesh[*e].face].part {
                         valid_face = false;
-                        println!("Invalid face around partitions");
                         break;
                     }
                 }

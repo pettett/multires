@@ -15,7 +15,6 @@ pollster = "0.3"
 bevy_ecs = "0.11"
 common = { path = "../common" }
 common_renderer = { path = "../common_renderer" }
-ash_renderer = { path = "../ash_renderer" }
 vulkano = "0.33"
 vulkano-win = "0.33"
 vulkano-shaders = "0.33"
