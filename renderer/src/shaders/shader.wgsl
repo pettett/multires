@@ -45,5 +45,5 @@ fn fs_main(in: VertexOutput, @builtin(primitive_index) primitive_index: u32) -> 
     var color1 = integer_to_rgb(&part1);
     var color2 = integer_to_rgb(&part2);
 
-    return vec4<f32>(mix(color1, color2, 0.8), 1.0);
+    return vec4<f32>(mix(color1, color2, 1.0), 1.0);
 }

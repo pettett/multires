@@ -590,18 +590,15 @@ impl WingedMesh {
 
     pub fn group(&mut self, config: &PartitioningConfig) -> Result<(), PartitioningError> {
         let group_count = self.partition_count / 4;
-        println!("Partitioning into {group_count} groups");
+        println!(
+            "Partitioning into {group_count} groups from {} partitions",
+            self.partition_count
+        );
 
         let mut graph = petgraph::Graph::<i32, i32>::new();
 
-        let parts: HashSet<_> = (0..self.partition_count).collect();
-
-        let nodes: HashMap<_, _> = parts
-            .iter()
-            .map(|i| {
-                let n = graph.add_node(1);
-                (n.index() as i32, n)
-            })
+        let nodes: HashMap<_, _> = (0..self.partition_count as i32)
+            .map(|i| (i, graph.add_node(1)))
             .collect();
 
         for (i, face) in self.faces().iter() {
@@ -619,7 +616,7 @@ impl WingedMesh {
 
         for (i, f) in self.faces.values_mut().enumerate() {
             // Some faces will have already been removed
-            f.group = groups[f.part as usize];
+            f.group = groups[nodes[&f.part].index()];
         }
 
         Ok(())

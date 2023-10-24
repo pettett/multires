@@ -13,7 +13,7 @@ use winged_mesh::VertID;
 use crate::winged_mesh::{FaceID, WingedMesh};
 
 fn main() -> gltf::Result<()> {
-    let mesh_name = "../assets/sphere.glb";
+    let mesh_name = "../assets/torus.glb";
 
     println!("Loading from gltf!");
     let (mut mesh, verts) = winged_mesh::WingedMesh::from_gltf(mesh_name)?;
@@ -32,7 +32,6 @@ fn main() -> gltf::Result<()> {
     mesh.apply_partition(&config, 1 + mesh.faces().len() as u32 / 60)
         .unwrap();
 
-    println!("Partitioning the partition!");
     mesh.group(&config).unwrap();
 
     println!("time: {}ms", t1.elapsed().as_millis());
@@ -46,12 +45,17 @@ fn main() -> gltf::Result<()> {
     let mut layer_1_mesh = reduce_mesh(&meshlets, mesh.clone());
 
     println!("Face count L1: {}", layer_1_mesh.face_count());
-    let config = PartitioningConfig {
-        //force_contiguous_partitions: Some(true), TODO:
+    let within_group_config = PartitioningConfig {
+        method: metis::PartitioningMethod::MultilevelRecursiveBisection,
+        force_contiguous_partitions: Some(true),
         minimize_subgraph_degree: Some(true),
         ..Default::default()
     };
-    layer_1_mesh.partition_within_groups(&config).unwrap();
+    layer_1_mesh
+        .partition_within_groups(&within_group_config)
+        .unwrap();
+
+    layer_1_mesh.group(&within_group_config).unwrap();
 
     let partitions1 = layer_1_mesh.get_partition();
 
@@ -147,7 +151,7 @@ fn reduce_mesh(meshlets: &[Meshlet], mut mesh: WingedMesh) -> WingedMesh {
     let mut rng = rand::thread_rng();
 
     for (i, m) in meshlets.iter().enumerate() {
-        println!("Reducing meshlet {i}/{}", meshlets.len());
+        //println!("Reducing meshlet {i}/{}", meshlets.len());
 
         // reduce triangle count in meshlet by half
 
