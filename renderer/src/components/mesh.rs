@@ -37,7 +37,7 @@ impl Mesh {
         let asset = common::MultiResMesh::load().unwrap();
 
         let partitions = BufferGroup::create_plural_storage(
-            &[&asset.clusters[..], &asset.clusters2[..]],
+            &[&asset.clusters[..], &asset.groups[..]],
             instance.device(),
             &instance.partition_bind_group_layout(),
             Some("Partition Buffer"),

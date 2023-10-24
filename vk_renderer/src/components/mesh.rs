@@ -80,7 +80,7 @@ impl Mesh {
                 usage: MemoryUsage::Upload,
                 ..Default::default()
             },
-            asset.clusters2,
+            asset.groups,
         )
         .expect("failed to create p2 buffer");
 

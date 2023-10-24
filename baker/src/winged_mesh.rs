@@ -2,7 +2,7 @@ extern crate gltf;
 
 use idmap::IntegerId;
 use metis::{idx_t, PartitioningConfig, PartitioningError};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use gltf::mesh::util::ReadIndices;
 
@@ -66,6 +66,7 @@ pub struct Vertex {
 pub struct Face {
     pub edge: EdgeID,
     pub part: idx_t,
+    pub group: idx_t,
 }
 
 pub struct EdgeIter<'a> {
@@ -123,6 +124,7 @@ impl Iterator for AllEdgeIter {
 
 #[derive(Debug, Clone)]
 pub struct WingedMesh {
+    partition_count: usize,
     verts: Vec<Vertex>,
     faces: idmap::DirectIdMap<FaceID, Face>,
     // partitions: Vec<i32>,
@@ -137,11 +139,13 @@ impl std::ops::Index<VertID> for WingedMesh {
         &self.verts[index.0]
     }
 }
+
 impl std::ops::IndexMut<VertID> for WingedMesh {
     fn index_mut(&mut self, index: VertID) -> &mut Self::Output {
         &mut self.verts[index.0]
     }
 }
+
 impl std::ops::Index<EdgeID> for WingedMesh {
     type Output = HalfEdge;
 
@@ -154,6 +158,7 @@ impl std::ops::Index<EdgeID> for WingedMesh {
         &self.edges[index.0]
     }
 }
+
 impl std::ops::IndexMut<EdgeID> for WingedMesh {
     fn index_mut(&mut self, index: EdgeID) -> &mut Self::Output {
         assert!(
@@ -168,6 +173,7 @@ impl std::ops::IndexMut<EdgeID> for WingedMesh {
 impl WingedMesh {
     pub fn new(faces: usize, verts: usize) -> Self {
         Self {
+            partition_count: 0,
             verts: vec![Default::default(); verts],
             //faces: vec![Default::default(); faces],
             faces: idmap::DirectIdMap::with_capacity_direct(faces),
@@ -517,6 +523,7 @@ impl WingedMesh {
             Face {
                 edge: iea,
                 part: -1,
+                group: -1,
             },
         );
     }
@@ -531,19 +538,13 @@ impl WingedMesh {
         partitions: u32,
     ) -> Result<(), PartitioningError> {
         let part = self.partition(config, partitions)?;
-        let mut i = 0;
-        // for f in self.faces.iter_mut() {
-        //     // Some faces will have already been removed
-        //     if let Some(f) = f {
-        //         f.part = part[i];
-        //         i += 1;
-        //     }
-        // }
 
         for (i, f) in self.faces.values_mut().enumerate() {
             // Some faces will have already been removed
             f.part = part[i];
         }
+
+        self.partition_count = *part.iter().max().unwrap() as usize + 1;
 
         Ok(())
     }
@@ -578,15 +579,6 @@ impl WingedMesh {
         adjacency_idx.push(adjacency.len() as idx_t);
 
         let weights = Vec::new();
-        // if let Some(cw) = &config.weights {
-        //     if cw.len() != partitions as usize {
-        //         return Err(PartitioningError::WeightsMismatch);
-        //     }
-        //     weights.reserve(partitions as usize);
-        //     for &w in cw.iter() {
-        //         weights.push(w as real_t);
-        //     }
-        // }
 
         config.partition_from_adj(
             partitions,
@@ -596,5 +588,42 @@ impl WingedMesh {
             adjacency_idx,
             adjacency_weight,
         )
+    }
+
+    pub fn group(&mut self, config: &PartitioningConfig) -> Result<Vec<idx_t>, PartitioningError> {
+        let group_count = self.partition_count / 4;
+        println!("Partitioning into {group_count} groups");
+
+        let mut graph = petgraph::Graph::<i32, i32>::new();
+
+        let parts: HashSet<_> = (0..self.partition_count).collect();
+
+        let nodes: HashMap<_, _> = parts
+            .iter()
+            .map(|i| {
+                let n = graph.add_node(1);
+                (n.index() as i32, n)
+            })
+            .collect();
+
+        for (i, face) in self.faces().iter() {
+            for e in self.iter_edge_loop(face.edge) {
+                if let Some(twin) = self[e].twin {
+                    let other_face = &self.faces[self[twin].face];
+
+                    graph.update_edge(nodes[&face.part], nodes[&other_face.part], 1);
+                }
+            }
+        }
+
+        println!("Partitioning the partition!");
+        let groups = config.partition_from_graph(5, &graph)?;
+
+        for (i, f) in self.faces.values_mut().enumerate() {
+            // Some faces will have already been removed
+            f.group = groups[f.part as usize];
+        }
+
+        Ok(groups)
     }
 }

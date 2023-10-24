@@ -27,20 +27,22 @@ fn main() -> gltf::Result<()> {
         minimize_subgraph_degree: Some(true),
         ..Default::default()
     };
-    mesh.apply_partition(&config, 1 + mesh.faces().len() as u32 / 70)
+    mesh.apply_partition(&config, 1 + mesh.faces().len() as u32 / 60)
         .unwrap();
 
     let clusters = mesh.get_partition();
 
+    println!("Partitioning the partition!");
+    let groups = mesh.group(&config).unwrap();
+
     println!("time: {}ms", t1.elapsed().as_millis());
 
-    println!("Generating the partition connections Graph!");
-    let mut graph = petgraph::Graph::<i32, i32>::new();
-
-    let parts: HashSet<_> = clusters.iter().collect();
+    println!("Generating meshlets!");
 
     // Precondition: partition indexes completely span in some range 0..N
-    let mut meshlets: Vec<_> = parts.iter().map(|_| (Meshlet::default())).collect();
+    let mut meshlets: Vec<_> = (0..=*clusters.iter().max().unwrap())
+        .map(|_| (Meshlet::default()))
+        .collect();
 
     for i in 0..clusters.len() {
         let Some(verts) = mesh.triangle_from_face(FaceID(i)) else {
@@ -85,7 +87,7 @@ fn main() -> gltf::Result<()> {
         verts[*i as usize];
     }
 
-    println!("Face count L0: {}", layer_1_mesh.face_count());
+    println!("Face count L1: {}", layer_1_mesh.face_count());
 
     let total_indices: u32 = meshlets.iter().map(|m| m.index_count).sum();
     let avg_indices = total_indices / meshlets.len() as u32;
@@ -96,27 +98,6 @@ fn main() -> gltf::Result<()> {
 
     println!("avg_indices: {avg_indices}/378 max_indices: {max_indices}/378 avg_verts: {avg_verts}/64 max_verts: {max_verts}/64");
 
-    let nodes: HashMap<_, _> = parts
-        .iter()
-        .map(|i| {
-            let n = graph.add_node(1);
-            (n.index() as i32, n)
-        })
-        .collect();
-
-    for (i, face) in mesh.faces().iter() {
-        for e in mesh.iter_edge_loop(face.edge) {
-            if let Some(twin) = mesh[e].twin {
-                let idx: usize = mesh[twin].face.into();
-
-                graph.update_edge(nodes[&clusters[i.0]], nodes[&clusters[idx]], 1);
-            }
-        }
-    }
-
-    println!("Partitioning the partition!");
-    let clusters2 = config.partition_from_graph(5, &graph).unwrap();
-
     let clusters = layer_1_mesh.get_partition();
 
     assert_eq!(clusters.len() * 3, layer_1_indices.len());
@@ -124,7 +105,7 @@ fn main() -> gltf::Result<()> {
     MultiResMesh {
         name: mesh_name.to_owned(),
         clusters,
-        clusters2,
+        groups,
         verts: verts.iter().map(|x| [x[0], x[1], x[2], 1.0]).collect(),
         // layer_1_indices: indices.clone(),
         layer_1_indices,
@@ -140,20 +121,21 @@ fn main() -> gltf::Result<()> {
 fn reduce_mesh(meshlets: &[Meshlet], mut mesh: WingedMesh) -> WingedMesh {
     let mut rng = rand::thread_rng();
 
-    for m in meshlets {
+    for (i, m) in meshlets.iter().enumerate() {
+        println!("Reducing meshlet {i}/{}", meshlets.len());
+
         // reduce triangle count in meshlet by half
 
         let mut tris = m.index_count / 3;
-        let target = tris * 2 / 3;
+        let target = tris * 3 / 4;
 
-        let mut vi = 0;
+        let mut todo: Vec<_> = (0..m.vertex_count as usize).collect();
 
-        while tris > target && vi < m.vertex_count as usize {
+        while tris > target && todo.len() > 0 {
             // Pick a random edge in the mesh for now
-
-            let v = VertID(m.vertices[vi] as usize);
-            vi += rng.gen_range(0..m.vertex_count as usize);
-            vi %= m.vertex_count as usize;
+            let i = rng.gen_range(0..todo.len());
+            let v = VertID(m.vertices[todo[i]] as usize);
+            todo.swap_remove(i);
 
             //println!("{tris}/ {target}, {v:?}");
 
@@ -164,9 +146,9 @@ fn reduce_mesh(meshlets: &[Meshlet], mut mesh: WingedMesh) -> WingedMesh {
             let mut valid_face = mesh.vertex_has_complete_fan(v);
 
             if valid_face {
-                let f = mesh.faces()[mesh[i].face].part;
+                let f = mesh.faces()[mesh[i].face].group;
                 for e in mesh.outgoing_edges(v) {
-                    if f != mesh.faces()[mesh[*e].face].part {
+                    if f != mesh.faces()[mesh[*e].face].group {
                         valid_face = false;
                         break;
                     }
