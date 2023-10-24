@@ -3,9 +3,10 @@ use std::sync::Arc;
 use crate::components::camera_uniform::CameraUniform;
 use crate::components::mesh::Mesh;
 use crate::vertex::Vertex;
-use bevy_ecs::event::EventReader;
-use bevy_ecs::system::{Query, ResMut, Resource};
+use bevy_ecs::event::{EventReader, Events};
+use bevy_ecs::system::{Query, Res, ResMut, Resource};
 use common_renderer::components::camera::Camera;
+use common_renderer::components::camera_controller::KeyIn;
 use wgpu::util::DeviceExt;
 use winit::dpi::PhysicalSize;
 use winit::window::Window;
@@ -22,6 +23,7 @@ pub struct Renderer {
     camera_buffer: BufferGroup<1>,
     render_pipeline: wgpu::RenderPipeline,
     depth_texture: Texture,
+    pub apply_remesh: bool,
 }
 
 impl Renderer {
@@ -214,6 +216,7 @@ impl Renderer {
             depth_texture,
             render_pipeline,
             camera_buffer,
+            apply_remesh: false,
         }
     }
     pub fn on_resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
@@ -335,6 +338,12 @@ pub fn handle_screen_events(
                     camera.on_resize(new_size);
                 }
             }
+            ScreenEvent::Key(k) => match k.virtual_keycode {
+                Some(winit::event::VirtualKeyCode::F) => {
+                    renderer.apply_remesh = !renderer.apply_remesh;
+                }
+                _ => (),
+            },
         }
     }
 }

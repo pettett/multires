@@ -28,11 +28,15 @@ impl Default for Meshlet {
 #[derive(Clone, Decode, Encode)]
 pub struct MultiResMesh {
     pub name: String,
-    pub clusters: Vec<i32>,
-    pub groups: Vec<i32>,
     pub verts: Vec<[f32; 4]>,
+    pub layers: Vec<MeshLayer>,
+}
+
+#[derive(Clone, Decode, Encode)]
+pub struct MeshLayer {
+    pub partitions: Vec<i32>,
+    pub groups: Vec<i32>,
     pub indices: Vec<u32>,
-    pub layer_1_indices: Vec<u32>,
     pub meshlets: Vec<Meshlet>,
 }
 

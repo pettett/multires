@@ -66,7 +66,7 @@ impl Mesh {
                 usage: MemoryUsage::Upload,
                 ..Default::default()
             },
-            asset.clusters,
+            asset.layers[0].partitions.clone(),
         )
         .expect("failed to create p1 buffer");
 
@@ -80,7 +80,7 @@ impl Mesh {
                 usage: MemoryUsage::Upload,
                 ..Default::default()
             },
-            asset.groups,
+            asset.layers[0].groups.clone(),
         )
         .expect("failed to create p2 buffer");
 

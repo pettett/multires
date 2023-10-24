@@ -1,7 +1,7 @@
 extern crate gltf;
 
 pub mod winged_mesh;
-use common::{asset::Asset, Meshlet, MultiResMesh};
+use common::{asset::Asset, MeshLayer, Meshlet, MultiResMesh};
 use metis::PartitioningConfig;
 use rand::Rng;
 use std::{
@@ -30,7 +30,7 @@ fn main() -> gltf::Result<()> {
     mesh.apply_partition(&config, 1 + mesh.faces().len() as u32 / 60)
         .unwrap();
 
-    let clusters = mesh.get_partition();
+    let partitions0 = mesh.get_partition();
 
     println!("Partitioning the partition!");
     let groups = mesh.group(&config).unwrap();
@@ -40,16 +40,16 @@ fn main() -> gltf::Result<()> {
     println!("Generating meshlets!");
 
     // Precondition: partition indexes completely span in some range 0..N
-    let mut meshlets: Vec<_> = (0..=*clusters.iter().max().unwrap())
+    let mut meshlets: Vec<_> = (0..=*partitions0.iter().max().unwrap())
         .map(|_| (Meshlet::default()))
         .collect();
 
-    for i in 0..clusters.len() {
+    for i in 0..partitions0.len() {
         let Some(verts) = mesh.triangle_from_face(FaceID(i)) else {
             continue;
         };
 
-        let m = meshlets.get_mut(clusters[i] as usize).unwrap();
+        let m = meshlets.get_mut(partitions0[i] as usize).unwrap();
 
         for v in 0..3 {
             let vert = verts[v] as u32;
@@ -98,19 +98,28 @@ fn main() -> gltf::Result<()> {
 
     println!("avg_indices: {avg_indices}/378 max_indices: {max_indices}/378 avg_verts: {avg_verts}/64 max_verts: {max_verts}/64");
 
-    let clusters = layer_1_mesh.get_partition();
+    let partitions1 = layer_1_mesh.get_partition();
 
-    assert_eq!(clusters.len() * 3, layer_1_indices.len());
+    assert_eq!(partitions1.len() * 3, layer_1_indices.len());
 
     MultiResMesh {
         name: mesh_name.to_owned(),
-        clusters,
-        groups,
         verts: verts.iter().map(|x| [x[0], x[1], x[2], 1.0]).collect(),
         // layer_1_indices: indices.clone(),
-        layer_1_indices,
-        indices,
-        meshlets,
+        layers: vec![
+            MeshLayer {
+                partitions: partitions0,
+                groups,
+                indices,
+                meshlets,
+            },
+            MeshLayer {
+                partitions: partitions1,
+                groups: vec![],
+                indices: layer_1_indices,
+                meshlets: vec![],
+            },
+        ],
     }
     .save()
     .unwrap();
@@ -143,18 +152,18 @@ fn reduce_mesh(meshlets: &[Meshlet], mut mesh: WingedMesh) -> WingedMesh {
                 continue;
             };
 
-            let mut valid_face = mesh.vertex_has_complete_fan(v);
+            let mut valid_edge = mesh.vertex_has_complete_fan(v);
 
-            if valid_face {
+            if valid_edge {
                 let f = mesh.faces()[mesh[i].face].group;
                 for e in mesh.outgoing_edges(v) {
                     if f != mesh.faces()[mesh[*e].face].group {
-                        valid_face = false;
+                        valid_edge = false;
                         break;
                     }
                 }
             }
-            if valid_face {
+            if valid_edge {
                 // all faces are within the partition, we can safely collapse one of the edges
 
                 mesh.collapse_edge(i);

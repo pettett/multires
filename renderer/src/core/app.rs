@@ -15,7 +15,7 @@ use common_renderer::components::{
     transform::Transform,
 };
 use glam::{Quat, Vec3A};
-use winit::event::WindowEvent;
+use winit::event::{KeyboardInput, WindowEvent};
 
 use super::{
     renderer::{handle_screen_events, render},
@@ -25,6 +25,7 @@ use super::{
 #[derive(Event)]
 pub enum ScreenEvent {
     Resize(winit::dpi::PhysicalSize<u32>),
+    Key(KeyboardInput),
 }
 
 pub struct App {
@@ -96,7 +97,10 @@ impl App {
             WindowEvent::MouseInput { state, button, .. } => self
                 .world
                 .send_event(MouseIn(state.clone(), button.clone())),
-            WindowEvent::KeyboardInput { input, .. } => self.world.send_event(KeyIn(input.clone())),
+            WindowEvent::KeyboardInput { input, .. } => {
+                self.world.send_event(KeyIn(input.clone()));
+                self.world.send_event(ScreenEvent::Key(input.clone()))
+            }
             WindowEvent::CursorMoved { position, .. } => {
                 self.world.send_event(MouseMv(position.clone()))
             }

@@ -14,9 +14,8 @@ pub const VALIDATION: ValidationInfo = ValidationInfo {
     is_enable: true,
     required_validation_layers: ["VK_LAYER_KHRONOS_validation"],
 };
-pub const DEVICE_EXTENSIONS: DeviceExtension = DeviceExtension {
-    names: ["VK_KHR_swapchain", "VK_EXT_mesh_shader"],
-};
+pub const DEVICE_EXTENSIONS: DeviceExtension = DeviceExtension {};
+
 pub const MAX_FRAMES_IN_FLIGHT: usize = 2;
 pub const IS_PAINT_FPS_COUNTER: bool = false;
 

@@ -1,5 +1,5 @@
 use std::{
-    ffi::{c_void, CString},
+    ffi::{c_void, CStr, CString},
     ptr,
     sync::Arc,
 };
@@ -29,7 +29,7 @@ impl Instance {
         required_validation_layers: &Vec<&str>,
     ) -> Arc<Self> {
         if is_enable_debug
-            && debug::check_validation_layer_support(entry, required_validation_layers) == false
+            && !debug::check_validation_layer_support(entry, required_validation_layers)
         {
             panic!("Validation layers requested, but not available!");
         }
@@ -271,18 +271,19 @@ impl Instance {
                 .expect("Failed to get device extension properties.")
         };
 
-        let mut available_extension_names = vec![];
+        use std::collections::HashSet;
+        let mut available_extension_names = HashSet::new();
 
         for extension in available_extensions.iter() {
-            let extension_name = super::tools::vk_to_string(&extension.extension_name);
+            let raw_string = unsafe { CStr::from_ptr(extension.extension_name.as_ptr()) };
 
-            available_extension_names.push(extension_name);
+            available_extension_names.insert(raw_string);
         }
 
-        use std::collections::HashSet;
         let mut required_extensions = HashSet::new();
-        for extension in device_extensions.names.iter() {
-            required_extensions.insert(extension.to_string());
+        for extension in device_extensions.get_extensions_raw_names() {
+            let raw_string = unsafe { CStr::from_ptr(extension) };
+            required_extensions.insert(raw_string);
         }
 
         for extension_name in available_extension_names.iter() {
