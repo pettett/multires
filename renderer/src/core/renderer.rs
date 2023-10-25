@@ -9,6 +9,7 @@ use common_renderer::components::camera::Camera;
 use common_renderer::components::camera_controller::KeyIn;
 use wgpu::util::DeviceExt;
 use winit::dpi::PhysicalSize;
+use winit::event::ElementState;
 use winit::window::Window;
 
 use super::app::ScreenEvent;
@@ -23,7 +24,7 @@ pub struct Renderer {
     camera_buffer: BufferGroup<1>,
     render_pipeline: wgpu::RenderPipeline,
     depth_texture: Texture,
-    pub apply_remesh: bool,
+    pub mesh_index: usize,
 }
 
 impl Renderer {
@@ -216,7 +217,7 @@ impl Renderer {
             depth_texture,
             render_pipeline,
             camera_buffer,
-            apply_remesh: false,
+            mesh_index: 0,
         }
     }
     pub fn on_resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
@@ -338,12 +339,19 @@ pub fn handle_screen_events(
                     camera.on_resize(new_size);
                 }
             }
-            ScreenEvent::Key(k) => match k.virtual_keycode {
-                Some(winit::event::VirtualKeyCode::F) => {
-                    renderer.apply_remesh = !renderer.apply_remesh;
+            ScreenEvent::Key(k) => {
+                if k.state == ElementState::Pressed {
+                    match k.virtual_keycode {
+                        Some(winit::event::VirtualKeyCode::F) => {
+                            renderer.mesh_index += 1;
+                        }
+                        Some(winit::event::VirtualKeyCode::R) if renderer.mesh_index > 0 => {
+                            renderer.mesh_index -= 1;
+                        }
+                        _ => (),
+                    }
                 }
-                _ => (),
-            },
+            }
         }
     }
 }

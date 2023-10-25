@@ -13,7 +13,7 @@ use winged_mesh::VertID;
 use crate::winged_mesh::{FaceID, WingedMesh};
 
 fn main() -> gltf::Result<()> {
-    let mesh_name = "../assets/torus.glb";
+    let mesh_name = "../assets/plane_high.glb";
 
     println!("Loading from gltf!");
     let (mut mesh, verts) = winged_mesh::WingedMesh::from_gltf(mesh_name)?;
@@ -29,7 +29,7 @@ fn main() -> gltf::Result<()> {
     };
 
     // Apply primary partition, that will define the lowest level clusterings
-    mesh.apply_partition(&config, 1 + mesh.faces().len() as u32 / 60)
+    mesh.apply_partition(&config, (mesh.faces().len() as u32).div_ceil(60))
         .unwrap();
 
     mesh.group(&config).unwrap();
@@ -38,50 +38,69 @@ fn main() -> gltf::Result<()> {
 
     // halve number of triangles in each meshlet
 
+
+	let mut group_partitions = HashMap::<_, HashSet<_>>::new();
+	
+	for f in mesh.faces().values() {
+
+		group_partitions.entry(f.group).or_default().insert(f.part);
+
+	}
+
+	println!("Mesh 1 group partitions: {group_partitions:#?}");
+
+
+
     println!("Face count L0: {}", mesh.face_count());
 
     let meshlets = generate_meshlets(&mesh);
 
-    let mut layer_1_mesh = reduce_mesh(&meshlets, mesh.clone());
+	
+	let within_group_config = PartitioningConfig {
+		method: metis::PartitioningMethod::MultilevelRecursiveBisection,
+		force_contiguous_partitions: Some(true),
+		minimize_subgraph_degree: Some(true),
+		..Default::default()
+	};
+	let mut meshes = vec![mesh];
 
-    println!("Face count L1: {}", layer_1_mesh.face_count());
-    let within_group_config = PartitioningConfig {
-        method: metis::PartitioningMethod::MultilevelRecursiveBisection,
-        force_contiguous_partitions: Some(true),
-        minimize_subgraph_degree: Some(true),
-        ..Default::default()
-    };
-    layer_1_mesh
-        .partition_within_groups(&within_group_config)
-        .unwrap();
+	let mut layers = Vec::new();
 
-    layer_1_mesh.group(&within_group_config).unwrap();
+	layers.push(to_mesh_layer(&meshes[0]));
+	
+	// Generate 2 more meshes
+	for i in 0..3{
+		// i = index of previous mesh layer
+		let mut next_mesh = reduce_mesh(&meshlets, meshes[i].clone());
 
-    let partitions1 = layer_1_mesh.get_partition();
+		println!("Face count L{}: {}", i+1, next_mesh.face_count());
 
-    let indices = grab_indicies(&mesh);
-    let layer_1_indices = grab_indicies(&layer_1_mesh);
+		next_mesh
+			.partition_within_groups(&within_group_config)
+			.unwrap();
+		
+		// View a snapshot of the mesh without any re-groupings applied
+		layers.push(to_mesh_layer(&next_mesh));
+	
+		next_mesh.group(&within_group_config).unwrap();
 
-    assert_eq!(partitions1.len() * 3, layer_1_indices.len());
+		// view a snapshot of the mesh ready to create the next layer
+		layers.push(to_mesh_layer(&next_mesh));
+
+		meshes.push(next_mesh)
+	}
+
+
+	for m in &meshes{
+	}
+
+    //assert_eq!(partitions1.len() * 3, layer_1_indices.len());
 
     MultiResMesh {
         name: mesh_name.to_owned(),
         verts: verts.iter().map(|x| [x[0], x[1], x[2], 1.0]).collect(),
         // layer_1_indices: indices.clone(),
-        layers: vec![
-            MeshLayer {
-                partitions: mesh.get_partition(),
-                groups: mesh.get_group(),
-                indices,
-                meshlets,
-            },
-            MeshLayer {
-                partitions: partitions1,
-                groups: layer_1_mesh.get_group(),
-                indices: layer_1_indices,
-                meshlets: vec![],
-            },
-        ],
+        layers,
     }
     .save()
     .unwrap();
@@ -89,9 +108,20 @@ fn main() -> gltf::Result<()> {
     Ok(())
 }
 
+
+fn to_mesh_layer(mesh : &WingedMesh) -> MeshLayer{
+	MeshLayer { partitions: mesh.get_partition(), groups: mesh.get_group(), indices: grab_indicies(&mesh), meshlets: generate_meshlets(&mesh) }
+}
+
 fn grab_indicies(mesh: &WingedMesh) -> Vec<u32> {
     let mut indices = Vec::with_capacity(mesh.face_count() * 3);
-    for f in mesh.faces().values() {
+    
+
+	for f in mesh.faces().values() {
+
+
+
+
         indices.extend(mesh.triangle_from_face(f));
     }
 

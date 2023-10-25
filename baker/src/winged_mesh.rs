@@ -126,6 +126,7 @@ impl Iterator for AllEdgeIter {
 #[derive(Debug, Clone)]
 pub struct WingedMesh {
     partition_count: usize,
+    group_count: usize,
     verts: Vec<Vertex>,
     faces: idmap::DirectIdMap<FaceID, Face>,
     // partitions: Vec<i32>,
@@ -175,6 +176,7 @@ impl WingedMesh {
     pub fn new(faces: usize, verts: usize) -> Self {
         Self {
             partition_count: 0,
+            group_count: 0,
             verts: vec![Default::default(); verts],
             //faces: vec![Default::default(); faces],
             faces: idmap::DirectIdMap::with_capacity_direct(faces),
@@ -589,7 +591,11 @@ impl WingedMesh {
     }
 
     pub fn group(&mut self, config: &PartitioningConfig) -> Result<(), PartitioningError> {
-        let group_count = self.partition_count / 4;
+
+		//TODO: Give lower weight to grouping partitions that have not been recently grouped, to ensure we are 
+		// constantly overwriting old borders with remeshes
+
+        let group_count = self.partition_count.div_ceil(4);
         println!(
             "Partitioning into {group_count} groups from {} partitions",
             self.partition_count
@@ -628,7 +634,7 @@ impl WingedMesh {
         &mut self,
         config: &PartitioningConfig,
     ) -> Result<(), PartitioningError> {
-        let group_count = self.partition_count / 4;
+        let group_count = self.partition_count.div_ceil(4);
         println!("Partitioning {group_count} groups into sub-partitions");
 
         let mut graphs: Vec<_> = (0..group_count)
@@ -672,18 +678,22 @@ impl WingedMesh {
         println!("(what is even going on anymore)");
 
         let mut i = 0;
-        const PARTS: u32 = 2;
+
         for (graph, ids) in graphs.iter().zip(ids) {
-            let part = config.partition_from_graph(PARTS, graph).unwrap();
+            // TODO: fine tune so we get 64/126 meshlets
+            let parts = (graph.node_count() as u32).div_ceil(60);
+
+            let part = config.partition_from_graph(parts, graph).unwrap();
 
             for x in 0..part.len() {
                 self.faces[ids[x]].part = i + part[x];
             }
 
-            i += PARTS as i32;
+            i += parts as i32;
         }
 
         println!("{i} Partitions from groups");
+        self.partition_count = i as usize;
 
         // for (i, f) in self.faces.values_mut().enumerate() {
         //     // Some faces will have already been removed
