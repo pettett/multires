@@ -13,7 +13,7 @@ use winged_mesh::VertID;
 use crate::winged_mesh::{FaceID, WingedMesh};
 
 fn main() -> gltf::Result<()> {
-    let mesh_name = "../assets/plane_high.glb";
+    let mesh_name = "../assets/sphere_low.glb";
 
     println!("Loading from gltf!");
     let (mut mesh, verts) = winged_mesh::WingedMesh::from_gltf(mesh_name)?;
@@ -23,6 +23,14 @@ fn main() -> gltf::Result<()> {
     println!("Partitioning Graph!");
     let t1 = time::Instant::now();
     let config = PartitioningConfig {
+        method: metis::PartitioningMethod::MultilevelRecursiveBisection,
+        force_contiguous_partitions: Some(true),
+        minimize_subgraph_degree: Some(true),
+        ..Default::default()
+    };
+
+    let within_group_config = PartitioningConfig {
+        method: metis::PartitioningMethod::MultilevelRecursiveBisection,
         force_contiguous_partitions: Some(true),
         minimize_subgraph_degree: Some(true),
         ..Default::default()
@@ -38,61 +46,57 @@ fn main() -> gltf::Result<()> {
 
     // halve number of triangles in each meshlet
 
+    let mut group_partitions = HashMap::<_, HashSet<_>>::new();
 
-	let mut group_partitions = HashMap::<_, HashSet<_>>::new();
-	
-	for f in mesh.faces().values() {
+    for f in mesh.faces().values() {
+        group_partitions.entry(f.group).or_default().insert(f.part);
+    }
 
-		group_partitions.entry(f.group).or_default().insert(f.part);
-
-	}
-
-	println!("Mesh 1 group partitions: {group_partitions:#?}");
-
-
+    println!("Mesh 1 group partitions: {group_partitions:#?}");
 
     println!("Face count L0: {}", mesh.face_count());
 
     let meshlets = generate_meshlets(&mesh);
 
-	
-	let within_group_config = PartitioningConfig {
-		method: metis::PartitioningMethod::MultilevelRecursiveBisection,
-		force_contiguous_partitions: Some(true),
-		minimize_subgraph_degree: Some(true),
-		..Default::default()
-	};
-	let mut meshes = vec![mesh];
+    let mut meshes = vec![mesh];
 
-	let mut layers = Vec::new();
+    let mut layers = Vec::new();
 
-	layers.push(to_mesh_layer(&meshes[0]));
-	
-	// Generate 2 more meshes
-	for i in 0..3{
-		// i = index of previous mesh layer
-		let mut next_mesh = reduce_mesh(&meshlets, meshes[i].clone());
+    layers.push(to_mesh_layer(&meshes[0]));
 
-		println!("Face count L{}: {}", i+1, next_mesh.face_count());
+    // Generate 2 more meshes
+    for i in 0..2 {
+        // i = index of previous mesh layer
+        let mut next_mesh = reduce_mesh(&meshlets, meshes[i].clone());
 
-		next_mesh
-			.partition_within_groups(&within_group_config)
-			.unwrap();
-		
-		// View a snapshot of the mesh without any re-groupings applied
-		layers.push(to_mesh_layer(&next_mesh));
-	
-		next_mesh.group(&within_group_config).unwrap();
+        println!("Face count L{}: {}", i + 1, next_mesh.face_count());
 
-		// view a snapshot of the mesh ready to create the next layer
-		layers.push(to_mesh_layer(&next_mesh));
+        match next_mesh.partition_within_groups(&within_group_config) {
+            Ok(()) => {
+                // View a snapshot of the mesh without any re-groupings applied
+                layers.push(to_mesh_layer(&next_mesh));
 
-		meshes.push(next_mesh)
-	}
+                match next_mesh.group(&within_group_config) {
+                    Ok(()) => {
+                        // view a snapshot of the mesh ready to create the next layer
+                        layers.push(to_mesh_layer(&next_mesh));
 
+                        meshes.push(next_mesh)
+                    }
+                    Err(e) => {
+                        eprintln!("{}", e);
+                        break;
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("{}", e);
+                break;
+            }
+        }
+    }
 
-	for m in &meshes{
-	}
+    println!("Done with partitioning");
 
     //assert_eq!(partitions1.len() * 3, layer_1_indices.len());
 
@@ -108,20 +112,19 @@ fn main() -> gltf::Result<()> {
     Ok(())
 }
 
-
-fn to_mesh_layer(mesh : &WingedMesh) -> MeshLayer{
-	MeshLayer { partitions: mesh.get_partition(), groups: mesh.get_group(), indices: grab_indicies(&mesh), meshlets: generate_meshlets(&mesh) }
+fn to_mesh_layer(mesh: &WingedMesh) -> MeshLayer {
+    MeshLayer {
+        partitions: mesh.get_partition(),
+        groups: mesh.get_group(),
+        indices: grab_indicies(&mesh),
+        meshlets: generate_meshlets(&mesh),
+    }
 }
 
 fn grab_indicies(mesh: &WingedMesh) -> Vec<u32> {
     let mut indices = Vec::with_capacity(mesh.face_count() * 3);
-    
 
-	for f in mesh.faces().values() {
-
-
-
-
+    for f in mesh.faces().values() {
         indices.extend(mesh.triangle_from_face(f));
     }
 
@@ -196,7 +199,7 @@ fn reduce_mesh(meshlets: &[Meshlet], mut mesh: WingedMesh) -> WingedMesh {
             let v = VertID(m.vertices[todo[i]] as usize);
             todo.swap_remove(i);
 
-            //println!("{tris}/ {target}, {v:?}");
+            // println!("{i} {tris}/ {target}, {v:?}");
 
             let Some(i) = mesh[v].edge else {
                 continue;

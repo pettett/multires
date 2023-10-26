@@ -23,6 +23,7 @@ pub struct Renderer {
     window: Window,
     camera_buffer: BufferGroup<1>,
     render_pipeline: wgpu::RenderPipeline,
+    render_pipeline_wire: wgpu::RenderPipeline,
     depth_texture: Texture,
     pub mesh_index: usize,
 }
@@ -57,7 +58,8 @@ impl Renderer {
         let (device, queue) = adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
-                    features: wgpu::Features::SHADER_PRIMITIVE_INDEX,
+                    features: wgpu::Features::SHADER_PRIMITIVE_INDEX
+                        | wgpu::Features::POLYGON_MODE_LINE,
                     // WebGL doesn't support all of wgpu's features, so if
                     // we're building for the web we'll have to disable some.
                     limits: if cfg!(target_arch = "wasm32") {
@@ -94,6 +96,8 @@ impl Renderer {
         surface.configure(&device, &config);
 
         let shader = device.create_shader_module(wgpu::include_wgsl!("../shaders/shader.wgsl"));
+        let shader_wire =
+            device.create_shader_module(wgpu::include_wgsl!("../shaders/shader_wire.wgsl"));
 
         let camera_bind_group_layout = BindGroupLayout::create(
             &device,
@@ -155,51 +159,20 @@ impl Renderer {
                 push_constant_ranges: &[],
             });
 
-        let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Render Pipeline"),
-            layout: Some(&render_pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: "vs_main", // 1.
-                buffers: &[<[f32; 4]>::desc()],
-            },
-            fragment: Some(wgpu::FragmentState {
-                // 3.
-                module: &shader,
-                entry_point: "fs_main",
-                targets: &[Some(wgpu::ColorTargetState {
-                    // 4.
-                    format: config.format,
-                    blend: Some(wgpu::BlendState::REPLACE),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: Some(wgpu::Face::Back),
-                // Setting this to anything other than Fill requires Features::NON_FILL_POLYGON_MODE
-                polygon_mode: wgpu::PolygonMode::Fill,
-                // Requires Features::DEPTH_CLIP_CONTROL
-                unclipped_depth: false,
-                // Requires Features::CONSERVATIVE_RASTERIZATION
-                conservative: false,
-            },
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: Texture::DEPTH_FORMAT,
-                depth_write_enabled: true,
-                depth_compare: wgpu::CompareFunction::Less,
-                stencil: wgpu::StencilState::default(),
-                bias: wgpu::DepthBiasState::default(),
-            }),
-            multisample: wgpu::MultisampleState {
-                count: 1,
-                mask: !0,
-                alpha_to_coverage_enabled: false,
-            },
-            multiview: None,
-        });
+        let render_pipeline = make_render_pipeline(
+            &device,
+            &render_pipeline_layout,
+            &shader,
+            config.format,
+            wgpu::PolygonMode::Fill,
+        );
+        let render_pipeline_wire = make_render_pipeline(
+            &device,
+            &render_pipeline_layout,
+            &shader_wire,
+            config.format,
+            wgpu::PolygonMode::Line,
+        );
 
         let depth_texture = Texture::create_depth_texture(&device, &config, "Depth Texture");
 
@@ -216,6 +189,7 @@ impl Renderer {
             size,
             depth_texture,
             render_pipeline,
+            render_pipeline_wire,
             camera_buffer,
             mesh_index: 0,
         }
@@ -254,6 +228,9 @@ impl Renderer {
     pub fn render_pipeline(&self) -> &wgpu::RenderPipeline {
         &self.render_pipeline
     }
+    pub fn render_pipeline_wire(&self) -> &wgpu::RenderPipeline {
+        &self.render_pipeline_wire
+    }
     pub fn camera_buffer(&self) -> &BufferGroup<1> {
         &self.camera_buffer
     }
@@ -261,6 +238,60 @@ impl Renderer {
     pub fn instance(&self) -> Arc<Instance> {
         self.instance.clone()
     }
+}
+
+fn make_render_pipeline(
+    device: &wgpu::Device,
+    layout: &wgpu::PipelineLayout,
+    module: &wgpu::ShaderModule,
+    format: wgpu::TextureFormat,
+    // Setting this to anything other than Fill requires Features::NON_FILL_POLYGON_MODE
+    polygon_mode: wgpu::PolygonMode,
+) -> wgpu::RenderPipeline {
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("Render Pipeline"),
+        layout: Some(&layout),
+        vertex: wgpu::VertexState {
+            module,
+            entry_point: "vs_main", // 1.
+            buffers: &[<[f32; 4]>::desc()],
+        },
+        fragment: Some(wgpu::FragmentState {
+            // 3.
+            module,
+            entry_point: "fs_main",
+            targets: &[Some(wgpu::ColorTargetState {
+                // 4.
+                format,
+                blend: Some(wgpu::BlendState::REPLACE),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            strip_index_format: None,
+            front_face: wgpu::FrontFace::Ccw,
+            cull_mode: Some(wgpu::Face::Back),
+            polygon_mode,
+            // Requires Features::DEPTH_CLIP_CONTROL
+            unclipped_depth: false,
+            // Requires Features::CONSERVATIVE_RASTERIZATION
+            conservative: false,
+        },
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: Texture::DEPTH_FORMAT,
+            depth_write_enabled: true,
+            depth_compare: wgpu::CompareFunction::Less,
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState::default(),
+        }),
+        multisample: wgpu::MultisampleState {
+            count: 1,
+            mask: !0,
+            alpha_to_coverage_enabled: false,
+        },
+        multiview: None,
+    })
 }
 
 pub fn render(mut renderer: ResMut<Renderer>, meshes: Query<&Mesh>, camera: Query<&CameraUniform>) {

@@ -35,6 +35,11 @@ impl Mesh {
 
         render_pass.set_bind_group(1, remesh.partitions.bind_group(), &[]);
         render_pass.set_index_buffer(remesh.indices.slice(..), self.index_format);
+
+        render_pass.draw_indexed(0..remesh.num_indices, 0, 0..1);
+
+        render_pass.set_pipeline(state.render_pipeline_wire());
+
         render_pass.draw_indexed(0..remesh.num_indices, 0, 0..1);
     }
 

@@ -591,9 +591,8 @@ impl WingedMesh {
     }
 
     pub fn group(&mut self, config: &PartitioningConfig) -> Result<(), PartitioningError> {
-
-		//TODO: Give lower weight to grouping partitions that have not been recently grouped, to ensure we are 
-		// constantly overwriting old borders with remeshes
+        //TODO: Give lower weight to grouping partitions that have not been recently grouped, to ensure we are
+        // constantly overwriting old borders with remeshes
 
         let group_count = self.partition_count.div_ceil(4);
         println!(
@@ -683,7 +682,7 @@ impl WingedMesh {
             // TODO: fine tune so we get 64/126 meshlets
             let parts = (graph.node_count() as u32).div_ceil(60);
 
-            let part = config.partition_from_graph(parts, graph).unwrap();
+            let part = config.partition_from_graph(parts, graph)?;
 
             for x in 0..part.len() {
                 self.faces[ids[x]].part = i + part[x];
