@@ -4,7 +4,7 @@ use std::{
 };
 
 use bevy_ecs::component::Component;
-use common::asset::Asset;
+use common::{asset::Asset, MultiResMesh};
 use wgpu::util::DeviceExt;
 
 use crate::core::{BufferGroup, Instance, Renderer};
@@ -20,6 +20,8 @@ pub struct Mesh {
     vertex_buffer: wgpu::Buffer,
     index_format: wgpu::IndexFormat,
     remeshes: Vec<ReMesh>,
+    asset: MultiResMesh,
+    pub remesh: usize,
     //puffin_ui : puffin_imgui::ProfilerUi,
 }
 impl Mesh {
@@ -31,7 +33,7 @@ impl Mesh {
         render_pass.set_bind_group(0, state.camera_buffer().bind_group(), &[]);
         render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
 
-        let remesh = &self.remeshes[state.mesh_index.min(self.remeshes.len() - 1)];
+        let remesh = &self.remeshes[self.remesh];
 
         render_pass.set_bind_group(1, remesh.partitions.bind_group(), &[]);
         render_pass.set_index_buffer(remesh.indices.slice(..), self.index_format);
@@ -48,7 +50,7 @@ impl Mesh {
 
         let mut remeshes = Vec::new();
 
-        for r in asset.layers {
+        for r in &asset.layers {
             let partitions = BufferGroup::create_plural_storage(
                 &[&r.partitions[..], &r.groups[..]],
                 instance.device(),
@@ -89,6 +91,12 @@ impl Mesh {
             vertex_buffer,
             remeshes,
             index_format,
+            asset,
+            remesh: 0,
         }
+    }
+
+    pub fn remeshes(&self) -> usize {
+        self.remeshes.len()
     }
 }

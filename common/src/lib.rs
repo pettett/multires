@@ -1,4 +1,6 @@
 pub mod asset;
+use std::collections::HashMap;
+
 use bincode::{config, Decode, Encode};
 use glam::Vec3;
 
@@ -36,6 +38,11 @@ pub struct MultiResMesh {
 pub struct MeshLayer {
     pub partitions: Vec<i32>,
     pub groups: Vec<i32>,
+    /// partition -> group in previous layers
+    pub dependant_partitions: HashMap<i32, i32>,
+    /// used by the layer below to tell what dependant tris means
+    /// group -> partition
+    pub partition_groups: HashMap<i32, Vec<i32>>,
     pub indices: Vec<u32>,
     pub meshlets: Vec<Meshlet>,
 }

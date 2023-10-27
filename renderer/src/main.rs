@@ -1,5 +1,6 @@
 pub mod components;
 pub mod core;
+pub mod gui;
 pub mod vertex;
 
 use core::{App, Renderer};
@@ -23,8 +24,6 @@ pub async fn run() -> ! {
     let mut state = App::new(renderer).await;
 
     event_loop.run(move |event, _, control_flow| {
-        //state.handle_event(&event);
-
         match event {
             Event::WindowEvent {
                 ref event,

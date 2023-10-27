@@ -10,6 +10,7 @@ pub struct Camera {
     fovy: f32,
     znear: f32,
     zfar: f32,
+    pub part_highlight: i32,
 }
 
 #[rustfmt::skip]
@@ -30,6 +31,7 @@ impl Camera {
             fovy: 45.0,
             znear: 0.01,
             zfar: 100.0,
+            part_highlight: -1,
         }
     }
 

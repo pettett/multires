@@ -13,7 +13,7 @@ use winged_mesh::VertID;
 use crate::winged_mesh::{FaceID, WingedMesh};
 
 fn main() -> gltf::Result<()> {
-    let mesh_name = "../assets/sphere_low.glb";
+    let mesh_name = "../assets/sphere.glb";
 
     println!("Loading from gltf!");
     let (mut mesh, verts) = winged_mesh::WingedMesh::from_gltf(mesh_name)?;
@@ -74,7 +74,7 @@ fn main() -> gltf::Result<()> {
         match next_mesh.partition_within_groups(&within_group_config) {
             Ok(()) => {
                 // View a snapshot of the mesh without any re-groupings applied
-                layers.push(to_mesh_layer(&next_mesh));
+                //layers.push(to_mesh_layer(&next_mesh));
 
                 match next_mesh.group(&within_group_config) {
                     Ok(()) => {
@@ -118,6 +118,8 @@ fn to_mesh_layer(mesh: &WingedMesh) -> MeshLayer {
         groups: mesh.get_group(),
         indices: grab_indicies(&mesh),
         meshlets: generate_meshlets(&mesh),
+        dependant_partitions: mesh.partition_dependence().clone(),
+        partition_groups: mesh.partition_groups(),
     }
 }
 

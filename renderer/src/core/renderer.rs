@@ -2,9 +2,10 @@ use std::sync::Arc;
 
 use crate::components::camera_uniform::CameraUniform;
 use crate::components::mesh::Mesh;
+use crate::gui::gui::Gui;
 use crate::vertex::Vertex;
 use bevy_ecs::event::{EventReader, Events};
-use bevy_ecs::system::{Query, Res, ResMut, Resource};
+use bevy_ecs::system::{Commands, NonSend, NonSendMut, Query, Res, ResMut, Resource};
 use common_renderer::components::camera::Camera;
 use common_renderer::components::camera_controller::KeyIn;
 use wgpu::util::DeviceExt;
@@ -25,6 +26,7 @@ pub struct Renderer {
     render_pipeline: wgpu::RenderPipeline,
     render_pipeline_wire: wgpu::RenderPipeline,
     depth_texture: Texture,
+    surface_format: wgpu::TextureFormat,
     pub mesh_index: usize,
 }
 
@@ -62,11 +64,7 @@ impl Renderer {
                         | wgpu::Features::POLYGON_MODE_LINE,
                     // WebGL doesn't support all of wgpu's features, so if
                     // we're building for the web we'll have to disable some.
-                    limits: if cfg!(target_arch = "wasm32") {
-                        wgpu::Limits::downlevel_webgl2_defaults()
-                    } else {
-                        wgpu::Limits::default()
-                    },
+                    limits: wgpu::Limits::default(),
                     label: None,
                 },
                 None, // Trace path
@@ -103,7 +101,7 @@ impl Renderer {
             &device,
             &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX,
+                visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
@@ -187,6 +185,7 @@ impl Renderer {
             )),
             config,
             size,
+            surface_format,
             depth_texture,
             render_pipeline,
             render_pipeline_wire,
@@ -237,6 +236,10 @@ impl Renderer {
 
     pub fn instance(&self) -> Arc<Instance> {
         self.instance.clone()
+    }
+
+    pub fn surface_format(&self) -> wgpu::TextureFormat {
+        self.surface_format
     }
 }
 
@@ -294,7 +297,16 @@ fn make_render_pipeline(
     })
 }
 
-pub fn render(mut renderer: ResMut<Renderer>, meshes: Query<&Mesh>, camera: Query<&CameraUniform>) {
+pub fn render(
+    renderer: Res<Renderer>,
+    mut gui: ResMut<Gui>,
+    ctx: NonSend<egui::Context>,
+    mut state: NonSendMut<egui_winit::State>,
+    meshes: Query<&mut Mesh>,
+    camera: Query<&CameraUniform>,
+    cameras: Query<&mut Camera>,
+    mut commands: Commands,
+) {
     let output = renderer.instance.surface().get_current_texture().unwrap();
     let view = output
         .texture
@@ -348,6 +360,17 @@ pub fn render(mut renderer: ResMut<Renderer>, meshes: Query<&Mesh>, camera: Quer
             mesh.render_pass(&renderer, &mut render_pass);
         }
     }
+
+    gui.render_pass(
+        &renderer,
+        &mut state,
+        &ctx,
+        &mut encoder,
+        &view,
+        meshes,
+        cameras,
+        &mut commands,
+    );
 
     // submit will accept anything that implements IntoIter
     renderer

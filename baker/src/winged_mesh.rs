@@ -132,6 +132,7 @@ pub struct WingedMesh {
     // partitions: Vec<i32>,
     edges: Vec<HalfEdge>,
     edge_map: HashMap<VertID, Vec<EdgeID>>,
+    partition_dependence: HashMap<i32, i32>,
 }
 
 impl std::ops::Index<VertID> for WingedMesh {
@@ -183,6 +184,7 @@ impl WingedMesh {
             // partitions: vec![Default::default(); faces],
             edges: Default::default(),
             edge_map: Default::default(),
+            partition_dependence: Default::default(),
         }
     }
 
@@ -684,8 +686,14 @@ impl WingedMesh {
 
             let part = config.partition_from_graph(parts, graph)?;
 
+            // Each new part needs to register its dependence on the group we were a part of before
+            let group = self.faces[ids[0]].group;
+            self.partition_dependence.clear();
+
             for x in 0..part.len() {
                 self.faces[ids[x]].part = i + part[x];
+
+                *self.partition_dependence.entry(i + part[x]).or_default() = group;
             }
 
             i += parts as i32;
@@ -705,5 +713,20 @@ impl WingedMesh {
 
     pub fn partition_count(&self) -> usize {
         self.partition_count
+    }
+
+    pub fn partition_groups(&self) -> HashMap<i32, Vec<i32>> {
+        let mut partition_groups: HashMap<i32, Vec<i32>> = HashMap::new();
+        for face in self.faces.values() {
+            let v = partition_groups.entry(face.group).or_default();
+            if !v.contains(&face.part) {
+                v.push(face.part);
+            }
+        }
+        partition_groups
+    }
+
+    pub fn partition_dependence(&self) -> &HashMap<i32, i32> {
+        &self.partition_dependence
     }
 }

@@ -1,10 +1,14 @@
-use crate::components::{
-    camera_uniform::{update_view_proj, CameraUniform},
-    mesh::Mesh,
+use crate::{
+    components::{
+        camera_uniform::{update_view_proj, CameraUniform},
+        mesh::Mesh,
+    },
+    gui::gui::Gui,
 };
 use bevy_ecs::{
     event::{Event, Events},
     schedule::Schedule,
+    system::{NonSend, NonSendMut, SystemState},
     world::{Mut, World},
 };
 use common_renderer::components::{
@@ -45,6 +49,12 @@ impl App {
         world.insert_resource(Events::<MouseMv>::default());
         world.insert_resource(Events::<KeyIn>::default());
         world.insert_resource(Events::<ScreenEvent>::default());
+
+        //GUI state
+        world.insert_resource(Gui::init(&renderer));
+
+        world.insert_non_send_resource(egui::Context::default());
+        world.insert_non_send_resource(egui_winit::State::new(renderer.window()));
 
         let mesh = Mesh::load_mesh(renderer.instance());
 
@@ -93,6 +103,20 @@ impl App {
     }
 
     pub fn input(&mut self, event: &WindowEvent) -> bool {
+        {
+            // Pass to GUI
+            let mut state =
+                SystemState::<(NonSend<egui::Context>, NonSendMut<egui_winit::State>)>::new(
+                    &mut self.world,
+                );
+
+            let (context, mut state) = state.get_mut(&mut self.world);
+
+            if state.on_event(&context, event).consumed {
+                return true;
+            }
+        }
+
         match event {
             WindowEvent::MouseInput { state, button, .. } => self
                 .world
