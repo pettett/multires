@@ -1,6 +1,6 @@
 use std::{
     cell::RefCell,
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{Arc, Mutex},
 };
 
@@ -19,6 +19,8 @@ pub struct SubMesh {
     pub part: i32,
     // Partitions in the layer above that this is not compatible with
     pub dependences: Vec<Entity>,
+    pub dependants: Vec<Entity>,
+    pub group: Vec<Entity>,
 }
 #[derive(Component)]
 
@@ -28,12 +30,57 @@ pub struct Visible();
 pub struct Mesh {
     vertex_buffer: wgpu::Buffer,
     index_format: wgpu::IndexFormat,
-    pub submeshes: Vec<Entity>,
+    pub submeshes: HashSet<Entity>,
     asset: MultiResMesh,
     //pub remesh: usize,
     //puffin_ui : puffin_imgui::ProfilerUi,
 }
 impl Mesh {
+    pub fn add_submesh(&mut self, ent: Entity, submeshes: &Query<&SubMesh>) {
+        self.remove_submesh_upwards(&ent, submeshes);
+        self.remove_submesh_downwards(&ent, submeshes);
+
+        let s = submeshes.get(ent).unwrap();
+
+        self.submeshes.insert(ent);
+        for g in &s.group {
+            if self.submeshes.insert(*g) {
+                println!("Added group member");
+            }
+        }
+
+        // Need to remove them down the chain also
+
+        // Other meshes in the group need to be enabled to fill any holes
+    }
+
+    // disable a submesh, by recursively disabling dependants above too
+    fn remove_submesh_upwards(&mut self, ent: &Entity, submeshes: &Query<&SubMesh>) {
+        if self.submeshes.remove(ent) {
+            println!("Disabled mesh above");
+        }
+
+        let s = submeshes.get(*ent).unwrap();
+
+        for dep in &s.dependences {
+            // These must be disabled, recursively
+            self.remove_submesh_upwards(dep, submeshes)
+        }
+    }
+
+    fn remove_submesh_downwards(&mut self, ent: &Entity, submeshes: &Query<&SubMesh>) {
+        if self.submeshes.remove(ent) {
+            println!("Disabled mesh below");
+        }
+
+        let s = submeshes.get(*ent).unwrap();
+
+        for dep in &s.dependants {
+            // These must be disabled, recursively
+            self.remove_submesh_downwards(dep, submeshes)
+        }
+    }
+
     pub fn render_pass<'a>(
         &'a self,
         state: &'a Renderer,
@@ -63,7 +110,7 @@ impl Mesh {
         let asset = common::MultiResMesh::load().unwrap();
 
         let mut vis = true;
-        let mut submeshes = Vec::new();
+        let mut submeshes = HashSet::new();
         let mut all_ents: Vec<HashMap<i32, Entity>> = Vec::new();
 
         for (layer, r) in asset.layers.iter().enumerate() {
@@ -118,16 +165,58 @@ impl Mesh {
                     layer,
                     part,
 
-                    dependences,
+                    dependences: vec![],
+                    dependants: vec![],
+                    group: vec![],
                 };
                 let e = world.spawn(sub).id();
                 if vis {
-                    submeshes.push(e);
+                    submeshes.insert(e);
                 }
                 ents.insert(part, e);
             }
             all_ents.push(ents);
             vis = false;
+        }
+
+        // Search for dependencies, group members, and dependants
+        for (layer, ents) in all_ents.iter().enumerate() {
+            for (part, ent) in ents.iter() {
+                // dependancies
+                if layer > 0 {
+                    // unmap the grouping info from previous layer
+
+                    if let Some(dep_group) = asset.layers[layer].dependant_partitions.get(part) {
+                        let dependences: Vec<_> = asset.layers[layer - 1].partition_groups
+                            [dep_group]
+                            .iter()
+                            .map(|part| all_ents[layer - 1][part])
+                            .collect();
+
+                        for d in &dependences {
+                            world.get_mut::<SubMesh>(*d).unwrap().dependants.push(*ent);
+                        }
+                        world.get_mut::<SubMesh>(*ent).unwrap().dependences = dependences;
+                    }
+                }
+            }
+
+            // Groups
+            for (group, parts) in &asset.layers[layer].partition_groups {
+                println!("{group} {parts:?}");
+
+                for part0 in parts {
+                    let ent0 = ents[part0];
+                    for part1 in parts {
+                        if part0 != part1 {
+                            let ent1 = ents[part1];
+
+                            world.get_mut::<SubMesh>(ent0).unwrap().group.push(ent1);
+                            world.get_mut::<SubMesh>(ent1).unwrap().group.push(ent0);
+                        }
+                    }
+                }
+            }
         }
 
         let vertex_buffer =

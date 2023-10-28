@@ -46,6 +46,7 @@ impl Gui {
         encoder: &mut wgpu::CommandEncoder,
         view: &wgpu::TextureView,
         mut meshes: Query<&mut Mesh>,
+        submeshes: &Query<&SubMesh>,
         mut camera: Query<&mut Camera>,
         commands: &mut Commands,
     ) {
@@ -115,19 +116,10 @@ impl Gui {
                                             //    self.state.graph.nodes[node].user_data.layer;
 
                                             self.user_state.active_nodes.insert(node);
-                                            mesh.submeshes
-                                                .push(self.state.graph[node].user_data.entity)
-                                        }
-                                        MyResponse::ClearActiveNode(node) => {
-                                            self.user_state.active_nodes.remove(&node);
-                                            let index = mesh
-                                                .submeshes
-                                                .iter()
-                                                .position(|x| {
-                                                    *x == self.state.graph[node].user_data.entity
-                                                })
-                                                .unwrap();
-                                            mesh.submeshes.swap_remove(index);
+                                            mesh.add_submesh(
+                                                self.state.graph[node].user_data.entity,
+                                                submeshes,
+                                            );
                                         }
                                     }
                                 }
@@ -236,7 +228,7 @@ impl Gui {
         let mut outputs = HashMap::new();
 
         for (e, s) in submeshes.iter(world) {
-            if e == f_e || s.dependences.contains(&f_e) || f_s.dependences.contains(&e) {
+            if e == f_e || s.dependants.contains(&f_e) || f_s.dependants.contains(&e) {
                 let mut data = MyNodeTemplate::Partition.user_data(&mut user_state);
                 data.part = s.part;
                 data.layer = s.layer;
@@ -253,7 +245,7 @@ impl Gui {
                     id,
                     Pos2 {
                         x: (s.layer as f32) * 230.0,
-                        y: (s.part as f32) * 130.0,
+                        y: ((s.part % 10) as f32) * 130.0,
                     },
                 );
                 state.node_order.push(id);

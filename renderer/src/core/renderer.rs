@@ -370,6 +370,7 @@ pub fn render(
         &mut encoder,
         &view,
         meshes,
+        &submeshes,
         cameras,
         &mut commands,
     );

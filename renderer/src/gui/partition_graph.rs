@@ -70,7 +70,6 @@ pub enum MyNodeTemplate {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MyResponse {
     SetActiveNode(NodeId),
-    ClearActiveNode(NodeId),
 }
 
 /// The graph 'global' state. This state struct is passed around to the node and
@@ -237,7 +236,7 @@ impl NodeDataTrait for MyNodeData {
         // UIs based on that.
 
         let mut responses = vec![];
-        let is_active = user_state.active_nodes.contains(&node_id);
+        let is_active = false; //TODO: user_state.active_nodes.contains(&node_id);
 
         // Pressing the button will emit a custom user response to either set,
         // or clear the active node. These responses do nothing by themselves,
@@ -252,7 +251,7 @@ impl NodeDataTrait for MyNodeData {
                 egui::Button::new(egui::RichText::new("👁 Active").color(egui::Color32::BLACK))
                     .fill(egui::Color32::GOLD);
             if ui.add(button).clicked() {
-                responses.push(NodeResponse::User(MyResponse::ClearActiveNode(node_id)));
+                //responses.push(NodeResponse::User(MyResponse::ClearActiveNode(node_id)));
             }
         }
 
