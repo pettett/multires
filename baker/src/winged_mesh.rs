@@ -531,23 +531,6 @@ impl WingedMesh {
         &self.faces
     }
 
-    pub fn apply_partition(
-        &mut self,
-        config: &PartitioningConfig,
-        partitions: u32,
-    ) -> Result<(), PartitioningError> {
-        let part = self.partition(config, partitions)?;
-
-        for (i, f) in self.faces.values_mut().enumerate() {
-            // Some faces will have already been removed
-            f.part = part[i];
-        }
-
-        self.partition_count = *part.iter().max().unwrap() as usize + 1;
-
-        Ok(())
-    }
-
     pub fn get_partition(&self) -> Vec<idx_t> {
         self.faces().values().map(|f| f.part).collect()
     }
@@ -590,6 +573,29 @@ impl WingedMesh {
             adjacency_idx,
             adjacency_weight,
         )
+    }
+
+    pub fn apply_partition(
+        &mut self,
+        config: &PartitioningConfig,
+        partitions: u32,
+    ) -> Result<(), PartitioningError> {
+        let part = self.partition(config, partitions)?;
+
+        for (i, f) in self.faces.values_mut().enumerate() {
+            // Some faces will have already been removed
+            f.part = part[i];
+        }
+
+        self.partition_dependence.clear();
+        self.partition_count = 0;
+
+        for p in &part {
+            *self.partition_dependence.entry(*p).or_default() = -1;
+            self.partition_count = self.partition_count.max(*p as usize + 1);
+        }
+
+        Ok(())
     }
 
     pub fn group(&mut self, config: &PartitioningConfig) -> Result<(), PartitioningError> {
@@ -680,6 +686,8 @@ impl WingedMesh {
 
         let mut i = 0;
 
+        self.partition_dependence.clear();
+
         for (graph, ids) in graphs.iter().zip(ids) {
             // TODO: fine tune so we get 64/126 meshlets
             let parts = (graph.node_count() as u32).div_ceil(60);
@@ -688,7 +696,6 @@ impl WingedMesh {
 
             // Each new part needs to register its dependence on the group we were a part of before
             let group = self.faces[ids[0]].group;
-            self.partition_dependence.clear();
 
             for x in 0..part.len() {
                 self.faces[ids[x]].part = i + part[x];

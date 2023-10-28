@@ -13,7 +13,7 @@ use winged_mesh::VertID;
 use crate::winged_mesh::{FaceID, WingedMesh};
 
 fn main() -> gltf::Result<()> {
-    let mesh_name = "../assets/sphere.glb";
+    let mesh_name = "../assets/sphere_low.glb";
 
     println!("Loading from gltf!");
     let (mut mesh, verts) = winged_mesh::WingedMesh::from_gltf(mesh_name)?;
@@ -23,7 +23,7 @@ fn main() -> gltf::Result<()> {
     println!("Partitioning Graph!");
     let t1 = time::Instant::now();
     let config = PartitioningConfig {
-        method: metis::PartitioningMethod::MultilevelRecursiveBisection,
+        // method: metis::PartitioningMethod::MultilevelRecursiveBisection,
         force_contiguous_partitions: Some(true),
         minimize_subgraph_degree: Some(true),
         ..Default::default()

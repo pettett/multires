@@ -50,13 +50,13 @@ impl App {
         world.insert_resource(Events::<KeyIn>::default());
         world.insert_resource(Events::<ScreenEvent>::default());
 
+        let mesh = Mesh::load_mesh(renderer.instance());
+
         //GUI state
-        world.insert_resource(Gui::init(&renderer));
+        world.insert_resource(Gui::init(&renderer, &mesh));
 
         world.insert_non_send_resource(egui::Context::default());
         world.insert_non_send_resource(egui_winit::State::new(renderer.window()));
-
-        let mesh = Mesh::load_mesh(renderer.instance());
 
         world.spawn(mesh);
         world.spawn((

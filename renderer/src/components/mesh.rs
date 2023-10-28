@@ -99,4 +99,8 @@ impl Mesh {
     pub fn remeshes(&self) -> usize {
         self.remeshes.len()
     }
+
+    pub fn asset(&self) -> &MultiResMesh {
+        &self.asset
+    }
 }

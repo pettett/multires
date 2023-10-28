@@ -1,7 +1,8 @@
 use std::{collections::HashMap, sync::Arc, time::Instant};
 
 use super::partition_graph::{
-    evaluate_node, AllMyNodeTemplates, MyEditorState, MyGraphState, MyResponse,
+    evaluate_node, AllMyNodeTemplates, MyDataType, MyEditorState, MyGraphState, MyNodeData,
+    MyNodeTemplate, MyResponse, MyValueType,
 };
 use crate::{
     components::{camera_uniform::CameraUniform, mesh::Mesh},
@@ -13,7 +14,7 @@ use bevy_ecs::{
 };
 use common_renderer::components::camera::Camera;
 use egui::{FontDefinitions, Id, LayerId, Pos2, Rect, TextStyle, Ui, Vec2};
-use egui_node_graph::NodeResponse;
+use egui_node_graph::{InputParamKind, NodeResponse, NodeTemplateTrait};
 use egui_wgpu::renderer::ScreenDescriptor;
 use egui_winit::screen_size_in_pixels;
 use winit::{event::Event, window::Window};
@@ -74,53 +75,69 @@ impl Gui {
                                     .prefix("layer: ")
                                     .clamp_range(0..=max),
                             );
-                        }
-                    }
 
-                    ui.add_space(10.0);
+                            ui.add_space(10.0);
 
-                    let graph_response = egui::ScrollArea::both()
-                        .show(ui, |ui| {
-                            // …
-                            self.state.draw_graph_editor(
-                                ui,
-                                AllMyNodeTemplates,
-                                &mut self.user_state,
-                                Vec::default(),
-                            )
-                        })
-                        .inner;
+                            //    println!("{:?}", self.state.node_positions);
 
-                    for node_response in graph_response.node_responses {
-                        // Here, we ignore all other graph events. But you may find
-                        // some use for them. For example, by playing a sound when a new
-                        // connection is created
-                        if let NodeResponse::User(user_event) = node_response {
-                            match user_event {
-                                MyResponse::SetActiveNode(node) => {
-                                    self.user_state.active_node = Some(node)
+                            let graph_response = egui::ScrollArea::both()
+                                .show(ui, |ui| {
+                                    ui.allocate_space(Vec2 {
+                                        x: 300.0,
+                                        y: 15000.0,
+                                    });
+                                    // …
+                                    self.state.draw_graph_editor(
+                                        ui,
+                                        AllMyNodeTemplates,
+                                        &mut self.user_state,
+                                        Vec::default(),
+                                    )
+                                })
+                                .inner;
+
+                            for node_response in graph_response.node_responses {
+                                // Here, we ignore all other graph events. But you may find
+                                // some use for them. For example, by playing a sound when a new
+                                // connection is created
+                                if let NodeResponse::User(user_event) = node_response {
+                                    match user_event {
+                                        MyResponse::SetActiveNode(node) => {
+                                            camera.part_highlight =
+                                                self.state.graph.nodes[node].user_data.part;
+                                            mesh.remesh =
+                                                self.state.graph.nodes[node].user_data.layer;
+
+                                            self.user_state.active_node = Some(node)
+                                        }
+                                        MyResponse::ClearActiveNode => {
+                                            self.user_state.active_node = None
+                                        }
+                                    }
                                 }
-                                MyResponse::ClearActiveNode => self.user_state.active_node = None,
                             }
-                        }
-                    }
 
-                    if let Some(node) = self.user_state.active_node {
-                        if self.state.graph.nodes.contains_key(node) {
-                            let text =
-                                match evaluate_node(&self.state.graph, node, &mut HashMap::new()) {
-                                    Ok(value) => format!("The result is: {:?}", value),
-                                    Err(err) => format!("Execution error: {}", err),
-                                };
-                            ctx.debug_painter().text(
-                                egui::pos2(10.0, 35.0),
-                                egui::Align2::LEFT_TOP,
-                                text,
-                                TextStyle::Button.resolve(&ctx.style()),
-                                egui::Color32::WHITE,
-                            );
-                        } else {
-                            self.user_state.active_node = None;
+                            if let Some(node) = self.user_state.active_node {
+                                if self.state.graph.nodes.contains_key(node) {
+                                    let text = match evaluate_node(
+                                        &self.state.graph,
+                                        node,
+                                        &mut HashMap::new(),
+                                    ) {
+                                        Ok(value) => format!("The result is: {:?}", value),
+                                        Err(err) => format!("Execution error: {}", err),
+                                    };
+                                    ctx.debug_painter().text(
+                                        egui::pos2(10.0, 35.0),
+                                        egui::Align2::LEFT_TOP,
+                                        text,
+                                        TextStyle::Button.resolve(&ctx.style()),
+                                        egui::Color32::WHITE,
+                                    );
+                                } else {
+                                    self.user_state.active_node = None;
+                                }
+                            }
                         }
                     }
                 });
@@ -193,17 +210,73 @@ impl Gui {
         }
     }
 
-    pub fn init(renderer: &Renderer) -> Self {
+    pub fn init(renderer: &Renderer, mesh: &Mesh) -> Self {
         // Set up dear imgui
 
         let renderer =
             egui_wgpu::Renderer::new(renderer.device(), renderer.surface_format(), None, 1);
 
+        let mut state = MyEditorState::default();
+        let mut user_state = MyGraphState::default();
+        let mut outputs = Vec::new();
+        for layer_index in 0..mesh.asset().layers.len() {
+            outputs.push(HashMap::new());
+            for (partition, group) in &mesh.asset().layers[layer_index].dependant_partitions {
+                let mut y = (*partition as f32);
+
+                let mut data = MyNodeTemplate::Partition.user_data(&mut user_state);
+
+                data.part = *partition;
+                data.layer = layer_index;
+
+                let id = state.graph.add_node(
+                    format!("{}/{}", partition, group),
+                    data,
+                    |graph, node_id| {
+                        if layer_index > 0 {
+                            y = 0.0;
+                            let parents =
+                                &mesh.asset().layers[layer_index - 1].partition_groups[group];
+
+                            for parent_part in parents {
+                                // For partition that we depend on, add an input param
+                                let input = graph.add_input_param(
+                                    node_id,
+                                    "".to_string(),
+                                    MyDataType::Hierarchy,
+                                    MyValueType::Hierarchy,
+                                    InputParamKind::ConnectionOnly,
+                                    true,
+                                );
+                                y += *parent_part as f32;
+
+                                graph.add_connection(outputs[layer_index - 1][parent_part], input)
+                            }
+                            y /= parents.len() as f32;
+                        }
+
+                        let output =
+                            graph.add_output_param(node_id, "".to_string(), MyDataType::Hierarchy);
+
+                        outputs[layer_index].insert(partition, output);
+                    },
+                );
+                state.node_positions.insert(
+                    id,
+                    Pos2 {
+                        x: (layer_index as f32) * 230.0,
+                        y: y * 130.0,
+                    },
+                );
+                state.node_order.push(id);
+            }
+        }
+
         Self {
             last_frame: Instant::now(),
             renderer,
-            state: MyEditorState::default(),
-            user_state: MyGraphState::default(),
+            state,
+            user_state,
         }
     }
     pub fn handle_event<T>(&mut self, window: &Window, event: &Event<T>) -> bool {

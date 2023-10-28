@@ -10,6 +10,8 @@ use egui_node_graph::*;
 /// example, the node data stores the template (i.e. the "type") of the node.
 pub struct MyNodeData {
     template: MyNodeTemplate,
+    pub part: i32,
+    pub layer: usize,
 }
 
 /// `DataType`s are what defines the possible range of connections when
@@ -123,7 +125,11 @@ impl NodeTemplateTrait for MyNodeTemplate {
     }
 
     fn user_data(&self, _user_state: &mut Self::UserState) -> Self::NodeData {
-        MyNodeData { template: *self }
+        MyNodeData {
+            template: *self,
+            part: -1,
+            layer: 0,
+        }
     }
 
     fn build_node(
@@ -138,18 +144,18 @@ impl NodeTemplateTrait for MyNodeTemplate {
         // We define some closures here to avoid boilerplate. Note that this is
         // entirely optional.
         let input = |graph: &mut MyGraph, name: &str| {
-            graph.add_input_param(
-                node_id,
-                name.to_string(),
-                MyDataType::Hierarchy,
-                MyValueType::Hierarchy,
-                InputParamKind::ConnectionOnly,
-                true,
-            );
+            // graph.add_input_param(
+            //     node_id,
+            //     name.to_string(),
+            //     MyDataType::Hierarchy,
+            //     MyValueType::Hierarchy,
+            //     InputParamKind::ConnectionOnly,
+            //     true,
+            // );
         };
 
         let output = |graph: &mut MyGraph, name: &str| {
-            graph.add_output_param(node_id, name.to_string(), MyDataType::Hierarchy);
+            // graph.add_output_param(node_id, name.to_string(), MyDataType::Hierarchy);
         };
 
         match self {
