@@ -1,10 +1,11 @@
 use std::sync::Arc;
 
 use crate::components::camera_uniform::CameraUniform;
-use crate::components::mesh::Mesh;
+use crate::components::mesh::{Mesh, SubMesh, Visible};
 use crate::gui::gui::Gui;
 use crate::vertex::Vertex;
 use bevy_ecs::event::{EventReader, Events};
+use bevy_ecs::query::Has;
 use bevy_ecs::system::{Commands, NonSend, NonSendMut, Query, Res, ResMut, Resource};
 use common_renderer::components::camera::Camera;
 use common_renderer::components::camera_controller::KeyIn;
@@ -303,6 +304,7 @@ pub fn render(
     ctx: NonSend<egui::Context>,
     mut state: NonSendMut<egui_winit::State>,
     meshes: Query<&mut Mesh>,
+    submeshes: Query<&SubMesh>,
     camera: Query<&CameraUniform>,
     cameras: Query<&mut Camera>,
     mut commands: Commands,
@@ -357,7 +359,7 @@ pub fn render(
         });
 
         for mesh in meshes.iter() {
-            mesh.render_pass(&renderer, &mut render_pass);
+            mesh.render_pass(&renderer, &submeshes, &mut render_pass);
         }
     }
 

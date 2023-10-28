@@ -1,6 +1,7 @@
 use std::{borrow::Cow, collections::HashMap};
 
-use egui::DragValue;
+use bevy_ecs::entity::Entity;
+use egui::{ahash::HashSet, DragValue};
 use egui_node_graph::*;
 
 // ========= First, define your user data types =============
@@ -12,6 +13,7 @@ pub struct MyNodeData {
     template: MyNodeTemplate,
     pub part: i32,
     pub layer: usize,
+    pub entity: Entity,
 }
 
 /// `DataType`s are what defines the possible range of connections when
@@ -68,7 +70,7 @@ pub enum MyNodeTemplate {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MyResponse {
     SetActiveNode(NodeId),
-    ClearActiveNode,
+    ClearActiveNode(NodeId),
 }
 
 /// The graph 'global' state. This state struct is passed around to the node and
@@ -76,7 +78,7 @@ pub enum MyResponse {
 /// the user. For this example, we use it to keep track of the 'active' node.
 #[derive(Default)]
 pub struct MyGraphState {
-    pub active_node: Option<NodeId>,
+    pub active_nodes: HashSet<NodeId>,
 }
 
 // =========== Then, you need to implement some traits ============
@@ -129,6 +131,7 @@ impl NodeTemplateTrait for MyNodeTemplate {
             template: *self,
             part: -1,
             layer: 0,
+            entity: Entity::PLACEHOLDER,
         }
     }
 
@@ -234,10 +237,7 @@ impl NodeDataTrait for MyNodeData {
         // UIs based on that.
 
         let mut responses = vec![];
-        let is_active = user_state
-            .active_node
-            .map(|id| id == node_id)
-            .unwrap_or(false);
+        let is_active = user_state.active_nodes.contains(&node_id);
 
         // Pressing the button will emit a custom user response to either set,
         // or clear the active node. These responses do nothing by themselves,
@@ -252,7 +252,7 @@ impl NodeDataTrait for MyNodeData {
                 egui::Button::new(egui::RichText::new("👁 Active").color(egui::Color32::BLACK))
                     .fill(egui::Color32::GOLD);
             if ui.add(button).clicked() {
-                responses.push(NodeResponse::User(MyResponse::ClearActiveNode));
+                responses.push(NodeResponse::User(MyResponse::ClearActiveNode(node_id)));
             }
         }
 

@@ -50,15 +50,15 @@ impl App {
         world.insert_resource(Events::<KeyIn>::default());
         world.insert_resource(Events::<ScreenEvent>::default());
 
-        let mesh = Mesh::load_mesh(renderer.instance());
-
+        Mesh::load_mesh(renderer.instance(), &mut world);
         //GUI state
-        world.insert_resource(Gui::init(&renderer, &mesh));
+        let q0 = world.query();
+        let q1 = world.query();
+        world.insert_resource(Gui::init(&renderer, q0, q1, &world));
 
         world.insert_non_send_resource(egui::Context::default());
         world.insert_non_send_resource(egui_winit::State::new(renderer.window()));
 
-        world.spawn(mesh);
         world.spawn((
             CameraController::new(0.03),
             Camera::new(1.0),

@@ -5,12 +5,18 @@ use super::partition_graph::{
     MyNodeTemplate, MyResponse, MyValueType,
 };
 use crate::{
-    components::{camera_uniform::CameraUniform, mesh::Mesh},
+    components::{
+        camera_uniform::CameraUniform,
+        mesh::{Mesh, SubMesh},
+    },
     core::Renderer,
 };
 use bevy_ecs::{
     component::Component,
+    entity::Entity,
+    query::QueryState,
     system::{Commands, Query, Resource},
+    world::World,
 };
 use common_renderer::components::camera::Camera;
 use egui::{FontDefinitions, Id, LayerId, Pos2, Rect, TextStyle, Ui, Vec2};
@@ -69,12 +75,12 @@ impl Gui {
                                 .prefix("highlight partition: "),
                         );
                         for mut mesh in meshes.iter_mut() {
-                            let max = mesh.remeshes() - 1;
-                            ui.add(
-                                egui::widgets::DragValue::new(&mut mesh.remesh)
-                                    .prefix("layer: ")
-                                    .clamp_range(0..=max),
-                            );
+                            //let max = mesh.remeshes() - 1;
+                            //ui.add(
+                            //    egui::widgets::DragValue::new(&mut mesh.remesh)
+                            //        .prefix("layer: ")
+                            //        .clamp_range(0..=max),
+                            //);
 
                             ui.add_space(10.0);
 
@@ -105,37 +111,25 @@ impl Gui {
                                         MyResponse::SetActiveNode(node) => {
                                             camera.part_highlight =
                                                 self.state.graph.nodes[node].user_data.part;
-                                            mesh.remesh =
-                                                self.state.graph.nodes[node].user_data.layer;
+                                            //mesh.remesh =
+                                            //    self.state.graph.nodes[node].user_data.layer;
 
-                                            self.user_state.active_node = Some(node)
+                                            self.user_state.active_nodes.insert(node);
+                                            mesh.submeshes
+                                                .push(self.state.graph[node].user_data.entity)
                                         }
-                                        MyResponse::ClearActiveNode => {
-                                            self.user_state.active_node = None
+                                        MyResponse::ClearActiveNode(node) => {
+                                            self.user_state.active_nodes.remove(&node);
+                                            let index = mesh
+                                                .submeshes
+                                                .iter()
+                                                .position(|x| {
+                                                    *x == self.state.graph[node].user_data.entity
+                                                })
+                                                .unwrap();
+                                            mesh.submeshes.swap_remove(index);
                                         }
                                     }
-                                }
-                            }
-
-                            if let Some(node) = self.user_state.active_node {
-                                if self.state.graph.nodes.contains_key(node) {
-                                    let text = match evaluate_node(
-                                        &self.state.graph,
-                                        node,
-                                        &mut HashMap::new(),
-                                    ) {
-                                        Ok(value) => format!("The result is: {:?}", value),
-                                        Err(err) => format!("Execution error: {}", err),
-                                    };
-                                    ctx.debug_painter().text(
-                                        egui::pos2(10.0, 35.0),
-                                        egui::Align2::LEFT_TOP,
-                                        text,
-                                        TextStyle::Button.resolve(&ctx.style()),
-                                        egui::Color32::WHITE,
-                                    );
-                                } else {
-                                    self.user_state.active_node = None;
                                 }
                             }
                         }
@@ -210,65 +204,88 @@ impl Gui {
         }
     }
 
-    pub fn init(renderer: &Renderer, mesh: &Mesh) -> Self {
-        // Set up dear imgui
+    pub fn init(
+        renderer: &Renderer,
+        mut mesh: QueryState<(&Mesh)>,
+        mut submeshes: QueryState<(Entity, &SubMesh)>,
+        world: &World,
+    ) -> Self {
+        let focused_layer = 1;
+        let focused_part = 1;
+        let (f_e, f_s) = {
+            let mut focused = Entity::PLACEHOLDER;
+            let mut fs = None;
+            for (e, s) in submeshes.iter(world) {
+                if s.part == focused_part && s.layer == focused_layer {
+                    focused = e;
+                    fs = Some(s);
+                    break;
+                }
+            }
+            (focused, fs.unwrap())
+        };
 
         let renderer =
             egui_wgpu::Renderer::new(renderer.device(), renderer.surface_format(), None, 1);
 
         let mut state = MyEditorState::default();
         let mut user_state = MyGraphState::default();
-        let mut outputs = Vec::new();
-        for layer_index in 0..mesh.asset().layers.len() {
-            outputs.push(HashMap::new());
-            for (partition, group) in &mesh.asset().layers[layer_index].dependant_partitions {
-                let mut y = (*partition as f32);
 
+        let mesh = mesh.get_single(world).unwrap();
+
+        let mut outputs = HashMap::new();
+
+        for (e, s) in submeshes.iter(world) {
+            if e == f_e || s.dependences.contains(&f_e) || f_s.dependences.contains(&e) {
                 let mut data = MyNodeTemplate::Partition.user_data(&mut user_state);
+                data.part = s.part;
+                data.layer = s.layer;
+                data.entity = e;
 
-                data.part = *partition;
-                data.layer = layer_index;
-
-                let id = state.graph.add_node(
-                    format!("{}/{}", partition, group),
-                    data,
-                    |graph, node_id| {
-                        if layer_index > 0 {
-                            y = 0.0;
-                            let parents =
-                                &mesh.asset().layers[layer_index - 1].partition_groups[group];
-
-                            for parent_part in parents {
-                                // For partition that we depend on, add an input param
-                                let input = graph.add_input_param(
-                                    node_id,
-                                    "".to_string(),
-                                    MyDataType::Hierarchy,
-                                    MyValueType::Hierarchy,
-                                    InputParamKind::ConnectionOnly,
-                                    true,
-                                );
-                                y += *parent_part as f32;
-
-                                graph.add_connection(outputs[layer_index - 1][parent_part], input)
-                            }
-                            y /= parents.len() as f32;
-                        }
-
+                let id = state
+                    .graph
+                    .add_node("".to_string(), data, |graph, node_id| {
                         let output =
                             graph.add_output_param(node_id, "".to_string(), MyDataType::Hierarchy);
-
-                        outputs[layer_index].insert(partition, output);
-                    },
-                );
+                        outputs.insert(e, (node_id, output));
+                    });
                 state.node_positions.insert(
                     id,
                     Pos2 {
-                        x: (layer_index as f32) * 230.0,
-                        y: y * 130.0,
+                        x: (s.layer as f32) * 230.0,
+                        y: (s.part as f32) * 130.0,
                     },
                 );
                 state.node_order.push(id);
+
+                if mesh.submeshes.contains(&e) {
+                    user_state.active_nodes.insert(id);
+                }
+            }
+        }
+
+        // Do Connections
+
+        for (e, s) in submeshes.iter(world) {
+            for dependent in &s.dependences {
+                let Some((_, output)) = outputs.get(&dependent) else {
+                    continue;
+                };
+                let Some((node_id, _)) = outputs.get(&e) else {
+                    continue;
+                };
+
+                // For partition that we depend on, add an input param
+                let input = state.graph.add_input_param(
+                    *node_id,
+                    "".to_string(),
+                    MyDataType::Hierarchy,
+                    MyValueType::Hierarchy,
+                    InputParamKind::ConnectionOnly,
+                    true,
+                );
+                //y += *parent_part as f32;
+                state.graph.add_connection(*output, input)
             }
         }
 
