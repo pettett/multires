@@ -1,5 +1,3 @@
-use std::marker::PhantomData;
-
 use wgpu::util::DeviceExt;
 
 /// Buffer layout group with typed const length, to held invalidate any bugs for mismatched layouts and groups

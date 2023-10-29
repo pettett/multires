@@ -1,15 +1,12 @@
 use std::sync::Arc;
 
 use crate::components::camera_uniform::CameraUniform;
-use crate::components::mesh::{Mesh, SubMesh, Visible};
+use crate::components::mesh::{Mesh, SubMeshComponent};
 use crate::gui::gui::Gui;
 use crate::vertex::Vertex;
-use bevy_ecs::event::{EventReader, Events};
-use bevy_ecs::query::Has;
+use bevy_ecs::event::EventReader;
 use bevy_ecs::system::{Commands, NonSend, NonSendMut, Query, Res, ResMut, Resource};
 use common_renderer::components::camera::Camera;
-use common_renderer::components::camera_controller::KeyIn;
-use wgpu::util::DeviceExt;
 use winit::dpi::PhysicalSize;
 use winit::event::ElementState;
 use winit::window::Window;
@@ -95,8 +92,8 @@ impl Renderer {
         surface.configure(&device, &config);
 
         let shader = device.create_shader_module(wgpu::include_wgsl!("../shaders/shader.wgsl"));
-        let shader_wire =
-            device.create_shader_module(wgpu::include_wgsl!("../shaders/shader_wire.wgsl"));
+        //let shader_wire =
+        //    device.create_shader_module(wgpu::include_wgsl!("../shaders/shader_wire.wgsl"));
 
         let camera_bind_group_layout = BindGroupLayout::create(
             &device,
@@ -126,7 +123,7 @@ impl Renderer {
             &[
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Storage { read_only: true },
                         has_dynamic_offset: false,
@@ -168,7 +165,7 @@ impl Renderer {
         let render_pipeline_wire = make_render_pipeline(
             &device,
             &render_pipeline_layout,
-            &shader_wire,
+            &shader,
             config.format,
             wgpu::PolygonMode::Line,
         );
@@ -304,7 +301,7 @@ pub fn render(
     ctx: NonSend<egui::Context>,
     mut state: NonSendMut<egui_winit::State>,
     meshes: Query<&mut Mesh>,
-    submeshes: Query<&SubMesh>,
+    submeshes: Query<&SubMeshComponent>,
     camera: Query<&CameraUniform>,
     cameras: Query<&mut Camera>,
     mut commands: Commands,

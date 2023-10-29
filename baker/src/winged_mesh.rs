@@ -1,5 +1,6 @@
 extern crate gltf;
 
+use glam::Vec3;
 use idmap::IntegerId;
 use metis::{idx_t, PartitioningConfig, PartitioningError};
 use petgraph::data::{Build, FromElements};
@@ -124,6 +125,13 @@ impl Iterator for AllEdgeIter {
 }
 
 #[derive(Debug, Clone)]
+pub struct GroupInfo {
+    parts: Vec<i32>,
+    tris: usize,
+    pub center: Vec3,
+}
+
+#[derive(Debug, Clone)]
 pub struct WingedMesh {
     partition_count: usize,
     group_count: usize,
@@ -132,7 +140,12 @@ pub struct WingedMesh {
     // partitions: Vec<i32>,
     edges: Vec<HalfEdge>,
     edge_map: HashMap<VertID, Vec<EdgeID>>,
+    // part -> group in previous layer
     partition_dependence: HashMap<i32, i32>,
+    // Part -> Group in this layer
+    pub group_map: Vec<i32>,
+    // Centres for all groups. TODO: Cleanup
+    pub groups: Vec<GroupInfo>,
 }
 
 impl std::ops::Index<VertID> for WingedMesh {
@@ -185,6 +198,8 @@ impl WingedMesh {
             edges: Default::default(),
             edge_map: Default::default(),
             partition_dependence: Default::default(),
+            groups: Default::default(),
+            group_map: Default::default(),
         }
     }
 
@@ -423,7 +438,7 @@ impl WingedMesh {
         [verts[0] as _, verts[1] as _, verts[2] as _]
     }
 
-    pub fn from_gltf(path: impl AsRef<std::path::Path>) -> gltf::Result<(Self, Vec<[f32; 3]>)> {
+    pub fn from_gltf(path: impl AsRef<std::path::Path>) -> gltf::Result<(Self, Vec<Vec3>)> {
         let (doc, buffers, _) = gltf::import(path)?;
 
         let mesh = doc.meshes().next().unwrap();
@@ -431,7 +446,7 @@ impl WingedMesh {
         let reader = p.reader(|buffer| Some(&buffers[buffer.index()]));
 
         let iter = reader.read_positions().unwrap();
-        let verts: Vec<[f32; 3]> = iter.collect();
+        let verts: Vec<_> = iter.map(|v| Vec3::from_array(v)).collect();
         //.map(|v| Vec3::from_array(v))
         let indices: Vec<u32> = match reader.read_indices() {
             Some(ReadIndices::U16(iter)) => iter.map(|i| i as _).collect(),
@@ -598,7 +613,11 @@ impl WingedMesh {
         Ok(())
     }
 
-    pub fn group(&mut self, config: &PartitioningConfig) -> Result<(), PartitioningError> {
+    pub fn group(
+        &mut self,
+        config: &PartitioningConfig,
+        verts: &[Vec3],
+    ) -> Result<usize, PartitioningError> {
         //TODO: Give lower weight to grouping partitions that have not been recently grouped, to ensure we are
         // constantly overwriting old borders with remeshes
 
@@ -624,15 +643,40 @@ impl WingedMesh {
             }
         }
 
-        println!("Partitioning the partition!");
-        let groups = config.partition_from_graph(group_count as u32, &graph)?;
+        let mut groups = Vec::with_capacity(group_count);
+        for _ in 0..group_count {
+            groups.push(GroupInfo {
+                parts: Vec::new(),
+                tris: 0,
+                center: Vec3::ZERO,
+            })
+        }
+        // Partition -> Group
+        self.group_map = if group_count != 1 {
+            config.partition_from_graph(group_count as u32, &graph)?
+        } else {
+            (0..self.partition_count).map(|_| 0).collect()
+        };
 
-        for (i, f) in self.faces.values_mut().enumerate() {
-            // Some faces will have already been removed
-            f.group = groups[nodes[&f.part].index()];
+        for (part, group) in self.group_map.iter().enumerate() {
+            groups[*group as usize].parts.push(part as i32);
         }
 
-        Ok(())
+        for f in self.faces.values_mut() {
+            // Some faces will have already been removed
+            let group = self.group_map[nodes[&f.part].index()];
+            f.group = group;
+            groups[group as usize].tris += 1;
+            groups[group as usize].center += verts[self.edges[f.edge.0].vert_origin.0];
+        }
+        // Take averages
+        for g in &mut groups {
+            g.center /= g.tris as f32;
+        }
+
+        self.groups = groups;
+
+        Ok(group_count)
     }
 
     /// Within each group, split triangles into two completely new partitions, so as not to preserve any old seams between ancient partitions
@@ -640,7 +684,7 @@ impl WingedMesh {
     pub fn partition_within_groups(
         &mut self,
         config: &PartitioningConfig,
-    ) -> Result<(), PartitioningError> {
+    ) -> Result<usize, PartitioningError> {
         let group_count = self.partition_count.div_ceil(4);
         println!("Partitioning {group_count} groups into sub-partitions");
 
@@ -681,8 +725,8 @@ impl WingedMesh {
             }
         }
 
-        println!("Partitioning the groups into further smaller partitions!");
-        println!("(what is even going on anymore)");
+        //println!("Partitioning the groups into further smaller partitions!");
+        //println!("(what is even going on anymore)");
 
         let mut i = 0;
 
@@ -690,7 +734,7 @@ impl WingedMesh {
 
         for (graph, ids) in graphs.iter().zip(ids) {
             // TODO: fine tune so we get 64/126 meshlets
-            let parts = (graph.node_count() as u32).div_ceil(60);
+            let parts = 2; // (graph.node_count() as u32).div_ceil(60);
 
             let part = config.partition_from_graph(parts, graph)?;
 
@@ -706,7 +750,6 @@ impl WingedMesh {
             i += parts as i32;
         }
 
-        println!("{i} Partitions from groups");
         self.partition_count = i as usize;
 
         // for (i, f) in self.faces.values_mut().enumerate() {
@@ -714,7 +757,7 @@ impl WingedMesh {
         //     f.group = groups[f.part as usize];
         // }
 
-        Ok(())
+        Ok(self.partition_count)
         //Ok(groups)
     }
 

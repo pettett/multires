@@ -9,7 +9,7 @@ use bevy_ecs::{
     event::{Event, Events},
     schedule::Schedule,
     system::{NonSend, NonSendMut, SystemState},
-    world::{Mut, World},
+    world::World,
 };
 use common_renderer::components::{
     camera::Camera,

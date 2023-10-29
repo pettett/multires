@@ -1,7 +1,7 @@
 extern crate gltf;
 
 pub mod winged_mesh;
-use common::{asset::Asset, MeshLayer, Meshlet, MultiResMesh};
+use common::{asset::Asset, MeshLayer, Meshlet, MultiResMesh, SubMesh};
 use metis::PartitioningConfig;
 use rand::Rng;
 use std::{
@@ -10,7 +10,7 @@ use std::{
 };
 use winged_mesh::VertID;
 
-use crate::winged_mesh::{FaceID, WingedMesh};
+use crate::winged_mesh::WingedMesh;
 
 fn main() -> gltf::Result<()> {
     let mesh_name = "../assets/sphere_low.glb";
@@ -40,7 +40,7 @@ fn main() -> gltf::Result<()> {
     mesh.apply_partition(&config, (mesh.faces().len() as u32).div_ceil(60))
         .unwrap();
 
-    mesh.group(&config).unwrap();
+    mesh.group(&config, &verts).unwrap();
 
     println!("time: {}ms", t1.elapsed().as_millis());
 
@@ -56,32 +56,42 @@ fn main() -> gltf::Result<()> {
 
     println!("Face count L0: {}", mesh.face_count());
 
-    let meshlets = generate_meshlets(&mesh);
-
     let mut meshes = vec![mesh];
 
     let mut layers = Vec::new();
 
-    layers.push(to_mesh_layer(&meshes[0]));
+    layers.push(to_mesh_layer(&meshes[0], 0.0));
 
     // Generate 2 more meshes
-    for i in 0..2 {
+    for i in 0..10 {
         // i = index of previous mesh layer
-        let mut next_mesh = reduce_mesh(&meshlets, meshes[i].clone());
+        //let mut next_mesh = reduce_mesh(&meshlets, meshes[i].clone());
+        let mut next_mesh = meshes[i].clone();
 
         println!("Face count L{}: {}", i + 1, next_mesh.face_count());
 
         match next_mesh.partition_within_groups(&within_group_config) {
-            Ok(()) => {
+            Ok(partition_count) => {
                 // View a snapshot of the mesh without any re-groupings applied
                 //layers.push(to_mesh_layer(&next_mesh));
 
-                match next_mesh.group(&within_group_config) {
-                    Ok(()) => {
-                        // view a snapshot of the mesh ready to create the next layer
-                        layers.push(to_mesh_layer(&next_mesh));
+                println!("{partition_count} Partitions from groups");
 
-                        meshes.push(next_mesh)
+                match next_mesh.group(&within_group_config, &verts) {
+                    Ok(group_count) => {
+                        // view a snapshot of the mesh ready to create the next layer
+                        let error = (1.0 + i as f32) / 10.0;
+
+                        println!("{group_count} Groups from partitions, with error {error}");
+
+                        layers.push(to_mesh_layer(&next_mesh, error));
+
+                        meshes.push(next_mesh);
+
+                        if group_count == 1 {
+                            println!("Finished with single group");
+                            break;
+                        }
                     }
                     Err(e) => {
                         eprintln!("{}", e);
@@ -102,7 +112,7 @@ fn main() -> gltf::Result<()> {
 
     MultiResMesh {
         name: mesh_name.to_owned(),
-        verts: verts.iter().map(|x| [x[0], x[1], x[2], 1.0]).collect(),
+        verts: verts.iter().map(|v| [v.x, v.y, v.z, 1.0]).collect(),
         // layer_1_indices: indices.clone(),
         layers,
     }
@@ -112,14 +122,15 @@ fn main() -> gltf::Result<()> {
     Ok(())
 }
 
-fn to_mesh_layer(mesh: &WingedMesh) -> MeshLayer {
+fn to_mesh_layer(mesh: &WingedMesh, error: f32) -> MeshLayer {
     MeshLayer {
         partitions: mesh.get_partition(),
         groups: mesh.get_group(),
         indices: grab_indicies(&mesh),
-        meshlets: generate_meshlets(&mesh),
         dependant_partitions: mesh.partition_dependence().clone(),
         partition_groups: mesh.partition_groups(),
+        meshlets: vec![], //generate_meshlets(&mesh),
+        submeshes: generate_submeshes(mesh, error),
     }
 }
 
@@ -180,6 +191,29 @@ fn generate_meshlets(mesh: &WingedMesh) -> Vec<Meshlet> {
     println!("avg_indices: {avg_indices}/378 max_indices: {max_indices}/378 avg_verts: {avg_verts}/64 max_verts: {max_verts}/64");
 
     meshlets
+}
+
+/// Debug code to generate meshlets with no max size. Used for testing partition trees with no remeshing
+fn generate_submeshes(mesh: &WingedMesh, error: f32) -> Vec<SubMesh> {
+    println!("Generating meshlets!");
+
+    // Precondition: partition indexes completely span in some range 0..N
+    let mut submeshes: Vec<_> = (0..mesh.partition_count())
+        .map(|part| (SubMesh::new(error, mesh.groups[mesh.group_map[part] as usize].center)))
+        .collect();
+
+    for face in mesh.faces().values() {
+        let verts = mesh.triangle_from_face(face);
+
+        let m = submeshes.get_mut(face.part as usize).unwrap();
+
+        for v in 0..3 {
+            let vert = verts[v] as u32;
+            m.indices.push(vert);
+        }
+    }
+
+    submeshes
 }
 
 fn reduce_mesh(meshlets: &[Meshlet], mut mesh: WingedMesh) -> WingedMesh {

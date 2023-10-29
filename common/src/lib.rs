@@ -13,6 +13,23 @@ pub struct Meshlet {
     pub index_count: u32,
 }
 
+#[derive(Debug, Clone, Decode, Encode)]
+pub struct SubMesh {
+    pub indices: Vec<u32>,
+    pub center: [f32; 3],
+    pub error: f32,
+}
+
+impl SubMesh {
+    pub fn new(error: f32, center: Vec3) -> Self {
+        Self {
+            indices: Vec::new(),
+            center: center.to_array(),
+            error,
+        }
+    }
+}
+
 unsafe impl bytemuck::Zeroable for Meshlet {}
 unsafe impl bytemuck::Pod for Meshlet {}
 
@@ -45,6 +62,7 @@ pub struct MeshLayer {
     pub partition_groups: HashMap<i32, Vec<i32>>,
     pub indices: Vec<u32>,
     pub meshlets: Vec<Meshlet>,
+    pub submeshes: Vec<SubMesh>,
 }
 
 impl asset::Asset for MultiResMesh {}

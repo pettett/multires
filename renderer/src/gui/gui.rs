@@ -1,28 +1,23 @@
-use std::{collections::HashMap, sync::Arc, time::Instant};
+use std::{collections::HashMap, time::Instant};
 
 use super::partition_graph::{
-    evaluate_node, AllMyNodeTemplates, MyDataType, MyEditorState, MyGraphState, MyNodeData,
-    MyNodeTemplate, MyResponse, MyValueType,
+    AllMyNodeTemplates, MyDataType, MyEditorState, MyGraphState, MyNodeTemplate, MyResponse,
+    MyValueType,
 };
 use crate::{
-    components::{
-        camera_uniform::CameraUniform,
-        mesh::{Mesh, SubMesh},
-    },
+    components::mesh::{Mesh, SubMeshComponent},
     core::Renderer,
 };
 use bevy_ecs::{
-    component::Component,
     entity::Entity,
     query::QueryState,
     system::{Commands, Query, Resource},
     world::World,
 };
 use common_renderer::components::camera::Camera;
-use egui::{FontDefinitions, Id, LayerId, Pos2, Rect, TextStyle, Ui, Vec2};
+use egui::{Pos2, Vec2};
 use egui_node_graph::{InputParamKind, NodeResponse, NodeTemplateTrait};
 use egui_wgpu::renderer::ScreenDescriptor;
-use egui_winit::screen_size_in_pixels;
 use winit::{event::Event, window::Window};
 
 #[derive(Resource)]
@@ -46,7 +41,7 @@ impl Gui {
         encoder: &mut wgpu::CommandEncoder,
         view: &wgpu::TextureView,
         mut meshes: Query<&mut Mesh>,
-        submeshes: &Query<&SubMesh>,
+        submeshes: &Query<&SubMeshComponent>,
         mut camera: Query<&mut Camera>,
         commands: &mut Commands,
     ) {
@@ -76,54 +71,56 @@ impl Gui {
                                 .prefix("highlight partition: "),
                         );
                         for mut mesh in meshes.iter_mut() {
-                            //let max = mesh.remeshes() - 1;
-                            //ui.add(
-                            //    egui::widgets::DragValue::new(&mut mesh.remesh)
-                            //        .prefix("layer: ")
-                            //        .clamp_range(0..=max),
-                            //);
+                            ui.add(
+                                egui::widgets::Slider::new(&mut mesh.error_left, -1.5..=1.5)
+                                    .prefix("left: "),
+                            );
+                            ui.add(
+                                egui::widgets::Slider::new(&mut mesh.error_right, -1.5..=1.5)
+                                    .prefix("right: "),
+                            );
 
                             ui.add_space(10.0);
 
                             //    println!("{:?}", self.state.node_positions);
 
-                            let graph_response = egui::ScrollArea::both()
-                                .show(ui, |ui| {
-                                    ui.allocate_space(Vec2 {
-                                        x: 300.0,
-                                        y: 15000.0,
-                                    });
-                                    // …
-                                    self.state.draw_graph_editor(
-                                        ui,
-                                        AllMyNodeTemplates,
-                                        &mut self.user_state,
-                                        Vec::default(),
-                                    )
-                                })
-                                .inner;
+                            // let graph_response = egui::ScrollArea::both()
+                            //     .show(ui, |ui| {
+                            //         ui.allocate_space(Vec2 {
+                            //             x: 300.0,
+                            //             y: 15000.0,
+                            //         });
+                            //         // …
+                            //         self.state.draw_graph_editor(
+                            //             ui,
+                            //             AllMyNodeTemplates,
+                            //             &mut self.user_state,
+                            //             Vec::default(),
+                            //         )
+                            //     })
+                            //     .inner;
 
-                            for node_response in graph_response.node_responses {
-                                // Here, we ignore all other graph events. But you may find
-                                // some use for them. For example, by playing a sound when a new
-                                // connection is created
-                                if let NodeResponse::User(user_event) = node_response {
-                                    match user_event {
-                                        MyResponse::SetActiveNode(node) => {
-                                            camera.part_highlight =
-                                                self.state.graph.nodes[node].user_data.part;
-                                            //mesh.remesh =
-                                            //    self.state.graph.nodes[node].user_data.layer;
+                            // for node_response in graph_response.node_responses {
+                            //     // Here, we ignore all other graph events. But you may find
+                            //     // some use for them. For example, by playing a sound when a new
+                            //     // connection is created
+                            //     if let NodeResponse::User(user_event) = node_response {
+                            //         match user_event {
+                            //             MyResponse::SetActiveNode(node) => {
+                            //                 camera.part_highlight =
+                            //                     self.state.graph.nodes[node].user_data.part;
+                            //                 //mesh.remesh =
+                            //                 //    self.state.graph.nodes[node].user_data.layer;
 
-                                            self.user_state.active_nodes.insert(node);
-                                            mesh.add_submesh(
-                                                self.state.graph[node].user_data.entity,
-                                                submeshes,
-                                            );
-                                        }
-                                    }
-                                }
-                            }
+                            //                 self.user_state.active_nodes.insert(node);
+                            //                 mesh.add_submesh(
+                            //                     self.state.graph[node].user_data.entity,
+                            //                     submeshes,
+                            //                 );
+                            //             }
+                            //         }
+                            //     }
+                            // }
                         }
                     }
                 });
@@ -199,7 +196,7 @@ impl Gui {
     pub fn init(
         renderer: &Renderer,
         mut mesh: QueryState<(&Mesh)>,
-        mut submeshes: QueryState<(Entity, &SubMesh)>,
+        mut submeshes: QueryState<(Entity, &SubMeshComponent)>,
         world: &World,
     ) -> Self {
         let focused_layer = 1;
@@ -225,61 +222,61 @@ impl Gui {
 
         let mesh = mesh.get_single(world).unwrap();
 
-        let mut outputs = HashMap::new();
+        //let mut outputs = HashMap::new();
 
-        for (e, s) in submeshes.iter(world) {
-            if e == f_e || s.dependants.contains(&f_e) || f_s.dependants.contains(&e) {
-                let mut data = MyNodeTemplate::Partition.user_data(&mut user_state);
-                data.part = s.part;
-                data.layer = s.layer;
-                data.entity = e;
+        // for (e, s) in submeshes.iter(world) {
+        //     if e == f_e || s.dependants.contains(&f_e) || f_s.dependants.contains(&e) {
+        //         let mut data = MyNodeTemplate::Partition.user_data(&mut user_state);
+        //         data.part = s.part;
+        //         data.layer = s.layer;
+        //         data.entity = e;
 
-                let id = state
-                    .graph
-                    .add_node("".to_string(), data, |graph, node_id| {
-                        let output =
-                            graph.add_output_param(node_id, "".to_string(), MyDataType::Hierarchy);
-                        outputs.insert(e, (node_id, output));
-                    });
-                state.node_positions.insert(
-                    id,
-                    Pos2 {
-                        x: (s.layer as f32) * 230.0,
-                        y: ((s.part % 10) as f32) * 130.0,
-                    },
-                );
-                state.node_order.push(id);
+        //         let id = state
+        //             .graph
+        //             .add_node("".to_string(), data, |graph, node_id| {
+        //                 let output =
+        //                     graph.add_output_param(node_id, "".to_string(), MyDataType::Hierarchy);
+        //                 outputs.insert(e, (node_id, output));
+        //             });
+        //         state.node_positions.insert(
+        //             id,
+        //             Pos2 {
+        //                 x: (s.layer as f32) * 230.0,
+        //                 y: ((s.part % 10) as f32) * 130.0,
+        //             },
+        //         );
+        //         state.node_order.push(id);
 
-                if mesh.submeshes.contains(&e) {
-                    user_state.active_nodes.insert(id);
-                }
-            }
-        }
+        //         if mesh.submeshes.contains(&e) {
+        //             user_state.active_nodes.insert(id);
+        //         }
+        //     }
+        // }
 
         // Do Connections
 
-        for (e, s) in submeshes.iter(world) {
-            for dependent in &s.dependences {
-                let Some((_, output)) = outputs.get(&dependent) else {
-                    continue;
-                };
-                let Some((node_id, _)) = outputs.get(&e) else {
-                    continue;
-                };
-
-                // For partition that we depend on, add an input param
-                let input = state.graph.add_input_param(
-                    *node_id,
-                    "".to_string(),
-                    MyDataType::Hierarchy,
-                    MyValueType::Hierarchy,
-                    InputParamKind::ConnectionOnly,
-                    true,
-                );
-                //y += *parent_part as f32;
-                state.graph.add_connection(*output, input)
-            }
-        }
+        //for (e, s) in submeshes.iter(world) {
+        //    for dependent in &s.dependences {
+        //        let Some((_, output)) = outputs.get(&dependent) else {
+        //            continue;
+        //        };
+        //        let Some((node_id, _)) = outputs.get(&e) else {
+        //            continue;
+        //        };
+        //
+        //        // For partition that we depend on, add an input param
+        //        let input = state.graph.add_input_param(
+        //            *node_id,
+        //            "".to_string(),
+        //            MyDataType::Hierarchy,
+        //            MyValueType::Hierarchy,
+        //            InputParamKind::ConnectionOnly,
+        //            true,
+        //        );
+        //        //y += *parent_part as f32;
+        //        state.graph.add_connection(*output, input)
+        //    }
+        //}
 
         Self {
             last_frame: Instant::now(),
