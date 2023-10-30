@@ -75,31 +75,49 @@ pub struct Face {
     pub part: usize,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
+pub struct SphereBound {
+    pub center: Vec3,
+    pub radius: f32,
+}
+
+impl SphereBound {
+    pub fn include_point_squared(&mut self, point: Vec3) {
+        self.candidate_radius(self.center.distance_squared(point))
+    }
+    pub fn include_sphere(&mut self, other: &SphereBound) {
+        self.candidate_radius(self.center.distance(other.center) + other.radius)
+    }
+    fn candidate_radius(&mut self, radius: f32) {
+        self.radius = self.radius.max(radius)
+    }
+}
+
+#[derive(Debug, Clone, Default)]
 pub struct GroupInfo {
     child_partitions: Vec<usize>,
     tris: usize,
-    pub center: Vec3,
-    pub radius: f32,
+    /// Monotonic bounds for error function of partitions. Includes bounds of all other partitions in the group,
+    /// and all partitions we are children to
+    pub monotonic_bound: SphereBound,
 }
 
 #[derive(Debug, Clone)]
 pub struct PartitionInfo {
     // Group in the previous layer we have been attached to
-    pub child_group_index: usize,
+    pub child_group_index: Option<usize>,
     // Part -> Group in this layer
     pub group_index: usize,
+    pub tight_bound: SphereBound,
 }
 
 #[derive(Debug, Clone)]
 pub struct WingedMesh {
     verts: Vec<Vertex>,
     faces: idmap::DirectIdMap<FaceID, Face>,
-    // partitions: Vec<i32>,
     edges: Vec<HalfEdge>,
     edge_map: HashMap<VertID, Vec<EdgeID>>,
     pub partitions: Vec<PartitionInfo>,
-    // Centres for all groups. TODO: Cleanup
     pub groups: Vec<GroupInfo>,
 }
 
@@ -151,6 +169,25 @@ impl VertID {
                 return true;
             }
         }
+    }
+
+    pub fn incoming_edges(self, mesh: &WingedMesh) -> Vec<EdgeID> {
+        mesh.edges
+            .iter()
+            .enumerate()
+            .filter_map(|(i, e)| {
+                if e.valid && mesh[e.edge_left_cw].vert_origin == self {
+                    Some(EdgeID(i))
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    pub fn outgoing_edges(self, mesh: &WingedMesh) -> &[EdgeID] {
+        const EMPTY: &[EdgeID] = &[];
+        mesh.edge_map.get(&self).map(|v| &v[..]).unwrap_or(EMPTY)
     }
 }
 
@@ -250,44 +287,11 @@ impl WingedMesh {
         }
     }
 
-    pub fn face_count(&self) -> usize {
-        self.faces.len()
-    }
-
-    pub fn edge_count(&self) -> usize {
-        let mut c = 0;
-
-        for f in &self.edges {
-            if f.valid {
-                c += 1
-            }
-        }
-
-        c
-    }
     pub fn iter_edges(&self) -> AllEdgeIter {
         AllEdgeIter {
             edges: self.edges.clone(),
             current: Some(0),
         }
-    }
-    pub fn incoming_edges(&self, vid: VertID) -> Vec<EdgeID> {
-        self.edges
-            .iter()
-            .enumerate()
-            .filter_map(|(i, e)| {
-                if e.valid && self[e.edge_left_cw].vert_origin == vid {
-                    Some(EdgeID(i))
-                } else {
-                    None
-                }
-            })
-            .collect()
-    }
-
-    pub fn outgoing_edges(&self, vid: VertID) -> &[EdgeID] {
-        const EMPTY: &[EdgeID] = &[];
-        self.edge_map.get(&vid).map(|v| &v[..]).unwrap_or(EMPTY)
     }
 
     pub fn assert_valid(&self) {
@@ -387,7 +391,7 @@ impl WingedMesh {
 
             // TODO: smarter selection of verts that require updating
             if self[v].edge.is_some() {
-                self[v].edge = self.outgoing_edges(v).get(0).copied();
+                self[v].edge = v.outgoing_edges(self).get(0).copied();
 
                 //println!("Updating {v:?}");
 
@@ -588,7 +592,7 @@ impl WingedMesh {
             .collect()
     }
 
-    pub fn partition(
+    fn generate_partition_array(
         &self,
         config: &PartitioningConfig,
         partitions: u32,
@@ -625,12 +629,12 @@ impl WingedMesh {
         )
     }
 
-    pub fn apply_partition(
+    pub fn partition(
         &mut self,
         config: &PartitioningConfig,
         partitions: u32,
     ) -> Result<(), PartitioningError> {
-        let part = self.partition(config, partitions)?;
+        let part = self.generate_partition_array(config, partitions)?;
 
         let mut max_part = 0;
         for (i, f) in self.faces.values_mut().enumerate() {
@@ -641,8 +645,9 @@ impl WingedMesh {
 
         self.partitions = vec![
             PartitionInfo {
-                child_group_index: 0,
-                group_index: 0,
+                child_group_index: None,
+                group_index: usize::MAX,
+                tight_bound: Default::default()
             };
             max_part + 1
         ];
@@ -680,15 +685,18 @@ impl WingedMesh {
             }
         }
 
-        let mut groups = Vec::with_capacity(group_count);
-        for _ in 0..group_count {
-            groups.push(GroupInfo {
+        // create new array of groups, and remember the old groups
+        let mut old_groups = vec![
+            GroupInfo {
                 child_partitions: Vec::new(),
                 tris: 0,
-                center: Vec3::ZERO,
-                radius: 0.0,
-            })
-        }
+                monotonic_bound: Default::default()
+            };
+            group_count
+        ];
+
+        std::mem::swap(&mut self.groups, &mut old_groups);
+
         // Partition -> Group
         if group_count != 1 {
             for (part, group) in config
@@ -705,22 +713,44 @@ impl WingedMesh {
         };
 
         for (part, info) in self.partitions.iter().enumerate() {
-            groups[info.group_index].child_partitions.push(part);
+            self.groups[info.group_index].child_partitions.push(part);
         }
 
         for f in self.faces.values_mut() {
-            // Some faces will have already been removed
-            let f_part_info = &self.partitions[nodes[f.part].index()];
-            //f.group = group;
-            groups[f_part_info.group_index].tris += 1;
-            groups[f_part_info.group_index].center += verts[self.edges[f.edge.0].vert_origin.0];
+            let f_group_info = &mut self.groups[self.partitions[nodes[f.part].index()].group_index];
+            f_group_info.tris += 1;
+            f_group_info.monotonic_bound.center += verts[self.edges[f.edge.0].vert_origin.0];
         }
         // Take averages
-        for g in &mut groups {
-            g.center /= g.tris as f32;
+        for g in &mut self.groups {
+            g.monotonic_bound.center /= g.tris as f32;
         }
 
-        self.groups = groups;
+        // Find radii of groups
+        for f in self.faces.values_mut() {
+            let f_group_info = &mut self.groups[self.partitions[nodes[f.part].index()].group_index];
+
+            f_group_info
+                .monotonic_bound
+                .include_point_squared(verts[self.edges[f.edge.0].vert_origin.0]);
+        }
+
+        for g in &mut self.groups {
+            // SQRT each group
+            // Each group also must envelop all the groups it is descended from,
+            // as our partitions must do the same, as we base them off group info
+
+            g.monotonic_bound.radius = g.monotonic_bound.radius.sqrt();
+
+            for p in &g.child_partitions {
+                if let Some(child_group_index) = self.partitions[*p].child_group_index {
+                    let child_group = &old_groups[child_group_index];
+                    // combine groups radius
+                    g.monotonic_bound
+                        .include_sphere(&child_group.monotonic_bound);
+                }
+            }
+        }
 
         Ok(group_count)
     }
@@ -769,9 +799,6 @@ impl WingedMesh {
             }
         }
 
-        //println!("Partitioning the groups into further smaller partitions!");
-        //println!("(what is even going on anymore)");
-
         // Ungrouped partitions but with a dependence on an old group
         let mut new_partitions = Vec::new();
 
@@ -790,16 +817,13 @@ impl WingedMesh {
 
             for p in 0..parts {
                 new_partitions.push(PartitionInfo {
-                    child_group_index: old_group,
+                    child_group_index: Some(old_group),
                     group_index: usize::MAX,
+                    tight_bound: Default::default(), //TODO:
                 })
             }
         }
         self.partitions = new_partitions;
-        // for (i, f) in self.faces.values_mut().enumerate() {
-        //     // Some faces will have already been removed
-        //     f.group = groups[f.part as usize];
-        // }
 
         Ok(self.partitions.len())
         //Ok(groups)
@@ -807,6 +831,7 @@ impl WingedMesh {
 
     pub fn partition_groups(&self) -> Vec<Vec<usize>> {
         let mut partition_groups: Vec<Vec<usize>> = vec![Vec::new(); self.groups.len()];
+
         for face in self.faces.values() {
             let v = &mut partition_groups[self.partitions[face.part].group_index];
             if !v.contains(&face.part) {
@@ -820,10 +845,25 @@ impl WingedMesh {
         self.partitions
             .iter()
             .enumerate()
-            .map(|(i, p)| (i, p.child_group_index))
+            .filter_map(|(i, p)| p.child_group_index.map(|c| (i, c)))
             .collect()
     }
 
+    pub fn face_count(&self) -> usize {
+        self.faces.len()
+    }
+
+    pub fn edge_count(&self) -> usize {
+        let mut c = 0;
+
+        for f in &self.edges {
+            if f.valid {
+                c += 1
+            }
+        }
+
+        c
+    }
     pub fn partition_count(&self) -> usize {
         self.partitions.len()
     }

@@ -38,7 +38,7 @@ fn main() -> gltf::Result<()> {
     };
 
     // Apply primary partition, that will define the lowest level clusterings
-    mesh.apply_partition(&config, (mesh.faces().len() as u32).div_ceil(60))
+    mesh.partition(&config, (mesh.faces().len() as u32).div_ceil(60))
         .unwrap();
 
     mesh.group(&config, &verts).unwrap();
@@ -131,7 +131,7 @@ fn to_mesh_layer(mesh: &WingedMesh) -> MeshLayer {
         partitions: mesh.get_partition(),
         groups: mesh.get_group(),
         indices: grab_indicies(&mesh),
-        dependant_partitions: mesh.partition_dependence().clone(),
+        dependant_partitions: mesh.partition_dependence(),
         partition_groups: mesh.partition_groups(),
         meshlets: vec![], //generate_meshlets(&mesh),
         submeshes: generate_submeshes(mesh),
@@ -207,7 +207,7 @@ fn generate_submeshes(mesh: &WingedMesh) -> Vec<SubMesh> {
     let mut submeshes: Vec<_> = (0..mesh.partition_count())
         .map(|part| {
             let g = &mesh.groups[mesh.partitions[part].group_index];
-            SubMesh::new(0.0, g.center, g.radius)
+            SubMesh::new(0.0, g.monotonic_bound.center, g.monotonic_bound.radius)
         })
         .collect();
 

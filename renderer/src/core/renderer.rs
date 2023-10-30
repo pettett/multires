@@ -272,7 +272,7 @@ fn make_render_pipeline(
             topology: wgpu::PrimitiveTopology::TriangleList,
             strip_index_format: None,
             front_face: wgpu::FrontFace::Ccw,
-            cull_mode: Some(wgpu::Face::Back),
+            cull_mode: None,
             polygon_mode,
             // Requires Features::DEPTH_CLIP_CONTROL
             unclipped_depth: false,
