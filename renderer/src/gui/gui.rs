@@ -18,6 +18,7 @@ use common_renderer::components::camera::Camera;
 use egui::{Pos2, Vec2};
 use egui_node_graph::{InputParamKind, NodeResponse, NodeTemplateTrait};
 use egui_wgpu::renderer::ScreenDescriptor;
+use glam::Vec3;
 use winit::{event::Event, window::Window};
 
 #[derive(Resource)]
@@ -71,16 +72,53 @@ impl Gui {
                                 .prefix("highlight partition: "),
                         );
                         for mut mesh in meshes.iter_mut() {
-                            ui.add(
-                                egui::widgets::Slider::new(&mut mesh.error_left, -1.5..=1.5)
-                                    .prefix("left: "),
-                            );
-                            ui.add(
-                                egui::widgets::Slider::new(&mut mesh.error_right, -1.5..=1.5)
-                                    .prefix("right: "),
-                            );
+                            egui::ComboBox::from_label("Mode ")
+                                .selected_text(format!("{:?}", &mut mesh.error_calc))
+                                .show_ui(ui, |ui| {
+                                    ui.selectable_value(
+                                        &mut mesh.error_calc,
+                                        crate::components::mesh::ErrorMode::MaxError { error: 0.1 },
+                                        "Max Error",
+                                    );
+                                    ui.selectable_value(
+                                        &mut mesh.error_calc,
+                                        crate::components::mesh::ErrorMode::PointDistance {
+                                            camera_point: Vec3::ZERO,
+                                            error_falloff: 2.0,
+                                        },
+                                        "Point distnace",
+                                    );
+                                });
 
-                            ui.add_space(10.0);
+                            match &mut mesh.error_calc {
+                                crate::components::mesh::ErrorMode::PointDistance {
+                                    camera_point,
+                                    error_falloff,
+                                } => {
+                                    ui.add(
+                                        egui::widgets::Slider::new(&mut camera_point.x, -2.5..=2.5)
+                                            .prefix("X: "),
+                                    );
+                                    ui.add(
+                                        egui::widgets::Slider::new(&mut camera_point.y, -2.5..=2.5)
+                                            .prefix("Y: "),
+                                    );
+                                    ui.add(
+                                        egui::widgets::Slider::new(&mut camera_point.z, -2.5..=2.5)
+                                            .prefix("Z: "),
+                                    );
+                                    ui.add_space(10.0);
+                                    ui.add(
+                                        egui::widgets::Slider::new(error_falloff, 0.1..=10.0)
+                                            .prefix("falloff: "),
+                                    );
+                                }
+                                crate::components::mesh::ErrorMode::MaxError { error } => {
+                                    ui.add(
+                                        egui::widgets::Slider::new(error, 0.0..=1.0).prefix("X: "),
+                                    );
+                                }
+                            }
 
                             //    println!("{:?}", self.state.node_positions);
 

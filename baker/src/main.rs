@@ -14,6 +14,7 @@ use crate::winged_mesh::WingedMesh;
 
 fn main() -> gltf::Result<()> {
     let mesh_name = "../assets/sphere_low.glb";
+    //let mut rng = rand::thread_rng();
 
     println!("Loading from gltf!");
     let (mut mesh, verts) = winged_mesh::WingedMesh::from_gltf(mesh_name)?;
@@ -49,7 +50,10 @@ fn main() -> gltf::Result<()> {
     let mut group_partitions = HashMap::<_, HashSet<_>>::new();
 
     for f in mesh.faces().values() {
-        group_partitions.entry(f.group).or_default().insert(f.part);
+        group_partitions
+            .entry(mesh.partitions[f.part].group_index)
+            .or_default()
+            .insert(f.part);
     }
 
     println!("Mesh 1 group partitions: {group_partitions:#?}");
@@ -60,7 +64,7 @@ fn main() -> gltf::Result<()> {
 
     let mut layers = Vec::new();
 
-    layers.push(to_mesh_layer(&meshes[0], 0.0));
+    layers.push(to_mesh_layer(&meshes[0]));
 
     // Generate 2 more meshes
     for i in 0..10 {
@@ -80,11 +84,11 @@ fn main() -> gltf::Result<()> {
                 match next_mesh.group(&within_group_config, &verts) {
                     Ok(group_count) => {
                         // view a snapshot of the mesh ready to create the next layer
-                        let error = (1.0 + i as f32) / 10.0;
+                        // let error = (1.0 + i as f32) / 10.0 + rng.gen_range(-0.05..0.05);
 
-                        println!("{group_count} Groups from partitions, with error {error}");
+                        println!("{group_count} Groups from partitions");
 
-                        layers.push(to_mesh_layer(&next_mesh, error));
+                        layers.push(to_mesh_layer(&next_mesh));
 
                         meshes.push(next_mesh);
 
@@ -122,7 +126,7 @@ fn main() -> gltf::Result<()> {
     Ok(())
 }
 
-fn to_mesh_layer(mesh: &WingedMesh, error: f32) -> MeshLayer {
+fn to_mesh_layer(mesh: &WingedMesh) -> MeshLayer {
     MeshLayer {
         partitions: mesh.get_partition(),
         groups: mesh.get_group(),
@@ -130,7 +134,7 @@ fn to_mesh_layer(mesh: &WingedMesh, error: f32) -> MeshLayer {
         dependant_partitions: mesh.partition_dependence().clone(),
         partition_groups: mesh.partition_groups(),
         meshlets: vec![], //generate_meshlets(&mesh),
-        submeshes: generate_submeshes(mesh, error),
+        submeshes: generate_submeshes(mesh),
     }
 }
 
@@ -194,12 +198,17 @@ fn generate_meshlets(mesh: &WingedMesh) -> Vec<Meshlet> {
 }
 
 /// Debug code to generate meshlets with no max size. Used for testing partition trees with no remeshing
-fn generate_submeshes(mesh: &WingedMesh, error: f32) -> Vec<SubMesh> {
+fn generate_submeshes(mesh: &WingedMesh) -> Vec<SubMesh> {
     println!("Generating meshlets!");
+
+    let inds = 5.0 / mesh.face_count() as f32;
 
     // Precondition: partition indexes completely span in some range 0..N
     let mut submeshes: Vec<_> = (0..mesh.partition_count())
-        .map(|part| (SubMesh::new(error, mesh.groups[mesh.group_map[part] as usize].center)))
+        .map(|part| {
+            let g = &mesh.groups[mesh.partitions[part].group_index];
+            SubMesh::new(0.0, g.center, g.radius)
+        })
         .collect();
 
     for face in mesh.faces().values() {
@@ -211,6 +220,8 @@ fn generate_submeshes(mesh: &WingedMesh, error: f32) -> Vec<SubMesh> {
             let vert = verts[v] as u32;
             m.indices.push(vert);
         }
+
+        m.error += inds;
     }
 
     submeshes
@@ -241,17 +252,8 @@ fn reduce_mesh(meshlets: &[Meshlet], mut mesh: WingedMesh) -> WingedMesh {
                 continue;
             };
 
-            let mut valid_edge = mesh.vertex_has_complete_fan(v);
+            let valid_edge = v.is_local_manifold(&mesh, true);
 
-            if valid_edge {
-                let f = mesh.faces()[mesh[i].face].group;
-                for e in mesh.outgoing_edges(v) {
-                    if f != mesh.faces()[mesh[*e].face].group {
-                        valid_edge = false;
-                        break;
-                    }
-                }
-            }
             if valid_edge {
                 // all faces are within the partition, we can safely collapse one of the edges
 

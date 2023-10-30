@@ -16,7 +16,7 @@ pub struct SubMeshComponent {
     partitions: BufferGroup<2>,
     num_indices: u32,
     pub layer: usize,
-    pub part: i32,
+    pub part: usize,
     pub error: f32,
     pub center: Vec3,
     // Partitions in the layer above that this is not compatible with
@@ -27,22 +27,38 @@ pub struct SubMeshComponent {
 }
 
 impl SubMeshComponent {
-    pub fn error_within_bounds(&self, error_left: f32, error_right: f32) -> bool {
-        let t = (self.center.x + 1.0) * 0.5;
-        let err = (error_left * t + error_right * (1.0 - t)) + self.error;
+    pub fn error_within_bounds(&self, mesh: &Mesh) -> bool {
+        let max_err = match &mesh.error_calc {
+            ErrorMode::PointDistance {
+                camera_point,
+                error_falloff,
+            } => {
+                // Max error we can have before mesh is not suitable to draw
+                self.center.distance_squared(*camera_point) / error_falloff
+            }
+            ErrorMode::MaxError { error } => *error,
+        };
 
-        err < 0.0
+        self.error < max_err
     }
 }
-
+#[derive(Debug, PartialEq)]
+pub enum ErrorMode {
+    PointDistance {
+        camera_point: Vec3,
+        error_falloff: f32,
+    },
+    MaxError {
+        error: f32,
+    },
+}
 #[derive(Component)]
 pub struct Mesh {
     vertex_buffer: wgpu::Buffer,
     index_format: wgpu::IndexFormat,
     pub submeshes: HashSet<Entity>,
     asset: MultiResMesh,
-    pub error_left: f32,
-    pub error_right: f32,
+    pub error_calc: ErrorMode,
     //puffin_ui : puffin_imgui::ProfilerUi,
 }
 impl Mesh {
@@ -115,13 +131,13 @@ impl Mesh {
                     )
                 }
 
-                child.error_within_bounds(self.error_left, self.error_right)
+                child.error_within_bounds(self)
             } else {
                 false
             };
             //TODO: This is messy - we are drawing if *we* have too high an error, but our child does not - this should be flipped,
             // and we should draw the child
-            if !submesh.error_within_bounds(self.error_left, self.error_right) && draw_child {
+            if !submesh.error_within_bounds(self) && draw_child {
                 //let submesh = submeshes.get(*s).unwrap();
 
                 render_pass.set_bind_group(1, submesh.partitions.bind_group(), &[]);
@@ -140,7 +156,7 @@ impl Mesh {
 
         let mut vis = true;
         let mut submeshes = HashSet::new();
-        let mut partitions_per_layer: Vec<HashMap<i32, Entity>> = Vec::new();
+        let mut partitions_per_layer: Vec<HashMap<usize, Entity>> = Vec::new();
 
         for (layer, r) in asset.layers.iter().enumerate() {
             let mut submeshes_per_partition = HashMap::default();
@@ -159,10 +175,10 @@ impl Mesh {
 
                 let num_indices = submesh.indices.len() as u32;
 
-                let part = part as i32;
+                let part = part;
 
                 let partitions = BufferGroup::create_plural_storage(
-                    &[&[part, layer as i32], &[0]],
+                    &[&[part as i32, layer as i32], &[0]],
                     instance.device(),
                     &instance.partition_bind_group_layout(),
                     Some("Partition Buffer"),
@@ -174,7 +190,7 @@ impl Mesh {
                     num_indices,
                     layer,
                     part,
-                    center: Vec3::from_array(submesh.center),
+                    center: submesh.tight_sphere.center(),
                     error: submesh.error,
                     dependences: vec![],
                     //dependants: vec![],
@@ -199,7 +215,7 @@ impl Mesh {
 
                     if let Some(dep_group) = asset.layers[layer].dependant_partitions.get(part) {
                         let dependences: Vec<_> = asset.layers[layer - 1].partition_groups
-                            [dep_group]
+                            [*dep_group]
                             .iter()
                             .map(|dep_part| partitions_per_layer[layer - 1][dep_part])
                             .collect();
@@ -212,12 +228,19 @@ impl Mesh {
                         //        .push(*ent);
                         //}
                         world.get_mut::<SubMeshComponent>(*ent).unwrap().dependences = dependences;
+                        let e = world.get::<SubMeshComponent>(*ent).unwrap();
+
+                        for d in &e.dependences {
+                            let dep = world.get::<SubMeshComponent>(*d).unwrap();
+                            // A dependancy is a higher res mesh we are derived from, it should always have a lower error
+                            assert!(dep.error < e.error);
+                        }
                     }
                 }
             }
 
             // Groups
-            for (group, parts) in &asset.layers[layer].partition_groups {
+            for (group, parts) in asset.layers[layer].partition_groups.iter().enumerate() {
                 println!("{group} {parts:?}");
 
                 for part0 in parts {
@@ -259,8 +282,7 @@ impl Mesh {
             index_format,
             asset,
             submeshes,
-            error_left: 0.0,
-            error_right: 0.0,
+            error_calc: ErrorMode::MaxError { error: 0.1 },
         });
     }
 

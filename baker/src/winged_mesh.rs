@@ -8,6 +8,10 @@ use std::collections::{HashMap, HashSet};
 
 use gltf::mesh::util::ReadIndices;
 
+//Definition 6: A cut in the DAG is a subset of the tree such that for every node Ci all ancestors
+//of Ci are in the cut as well. The front of the cut is the set of arcs that connect a node in the cut
+//to a node outside.
+
 #[derive(Default, Hash, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct VertID(pub usize);
 impl Into<usize> for VertID {
@@ -15,6 +19,7 @@ impl Into<usize> for VertID {
         self.0
     }
 }
+
 #[derive(Default, Hash, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EdgeID(pub usize);
 impl Into<usize> for EdgeID {
@@ -67,8 +72,35 @@ pub struct Vertex {
 #[derive(Default, Debug, Clone)]
 pub struct Face {
     pub edge: EdgeID,
-    pub part: idx_t,
-    pub group: idx_t,
+    pub part: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct GroupInfo {
+    child_partitions: Vec<usize>,
+    tris: usize,
+    pub center: Vec3,
+    pub radius: f32,
+}
+
+#[derive(Debug, Clone)]
+pub struct PartitionInfo {
+    // Group in the previous layer we have been attached to
+    pub child_group_index: usize,
+    // Part -> Group in this layer
+    pub group_index: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct WingedMesh {
+    verts: Vec<Vertex>,
+    faces: idmap::DirectIdMap<FaceID, Face>,
+    // partitions: Vec<i32>,
+    edges: Vec<HalfEdge>,
+    edge_map: HashMap<VertID, Vec<EdgeID>>,
+    pub partitions: Vec<PartitionInfo>,
+    // Centres for all groups. TODO: Cleanup
+    pub groups: Vec<GroupInfo>,
 }
 
 pub struct EdgeIter<'a> {
@@ -76,27 +108,52 @@ pub struct EdgeIter<'a> {
     start: EdgeID,
     current: Option<EdgeID>,
 }
-impl<'a> Iterator for EdgeIter<'a> {
-    type Item = EdgeID;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let current = self.current;
-
-        if let Some(curr) = current {
-            self.current = Some(self.mesh.edges[curr.0].edge_left_cw);
-            if self.current == Some(self.start) {
-                self.current = None;
-            }
-        }
-
-        current
-    }
-}
 
 pub struct AllEdgeIter {
     edges: Vec<HalfEdge>,
     current: Option<usize>,
 }
+impl VertID {
+    /// Does this vertex have a complete fan of triangles surrounding it?
+    pub fn is_local_manifold(&self, mesh: &WingedMesh, is_group_manifold: bool) -> bool {
+        let Some(eid_first) = mesh.verts[self.0].edge else {
+            return false;
+        };
+
+        let mut eid = eid_first;
+
+        let mut last_e_part = None;
+
+        loop {
+            // attempt to move around the fan, by moving to our twin edge and going clockwise
+            let Some(twin) = mesh[eid].twin else {
+                return false;
+            };
+
+            let e = &mesh[twin];
+
+            // Compare against last face's partition
+            if is_group_manifold {
+                let e_part = mesh.partitions[mesh.faces[e.face].part].group_index;
+
+                if let Some(lep) = last_e_part {
+                    if e_part != lep {
+                        return false;
+                    }
+                }
+
+                last_e_part = Some(e_part);
+            }
+
+            eid = e.edge_left_cw;
+
+            if eid == eid_first {
+                return true;
+            }
+        }
+    }
+}
+
 impl Iterator for AllEdgeIter {
     type Item = EdgeID;
 
@@ -124,28 +181,21 @@ impl Iterator for AllEdgeIter {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct GroupInfo {
-    parts: Vec<i32>,
-    tris: usize,
-    pub center: Vec3,
-}
+impl<'a> Iterator for EdgeIter<'a> {
+    type Item = EdgeID;
 
-#[derive(Debug, Clone)]
-pub struct WingedMesh {
-    partition_count: usize,
-    group_count: usize,
-    verts: Vec<Vertex>,
-    faces: idmap::DirectIdMap<FaceID, Face>,
-    // partitions: Vec<i32>,
-    edges: Vec<HalfEdge>,
-    edge_map: HashMap<VertID, Vec<EdgeID>>,
-    // part -> group in previous layer
-    partition_dependence: HashMap<i32, i32>,
-    // Part -> Group in this layer
-    pub group_map: Vec<i32>,
-    // Centres for all groups. TODO: Cleanup
-    pub groups: Vec<GroupInfo>,
+    fn next(&mut self) -> Option<Self::Item> {
+        let current = self.current;
+
+        if let Some(curr) = current {
+            self.current = Some(self.mesh.edges[curr.0].edge_left_cw);
+            if self.current == Some(self.start) {
+                self.current = None;
+            }
+        }
+
+        current
+    }
 }
 
 impl std::ops::Index<VertID> for WingedMesh {
@@ -189,17 +239,14 @@ impl std::ops::IndexMut<EdgeID> for WingedMesh {
 impl WingedMesh {
     pub fn new(faces: usize, verts: usize) -> Self {
         Self {
-            partition_count: 0,
-            group_count: 0,
             verts: vec![Default::default(); verts],
             //faces: vec![Default::default(); faces],
             faces: idmap::DirectIdMap::with_capacity_direct(faces),
             // partitions: vec![Default::default(); faces],
             edges: Default::default(),
             edge_map: Default::default(),
-            partition_dependence: Default::default(),
             groups: Default::default(),
-            group_map: Default::default(),
+            partitions: Default::default(),
         }
     }
 
@@ -284,27 +331,6 @@ impl WingedMesh {
                 self.edges[e.0].vert_origin.0 == i,
                 "Invalid vertex edge source loop - Mesh made invalid on V{i}: {v:?}"
             );
-        }
-    }
-
-    /// Does this vertex have a complete fan of triangles surrounding it?
-    pub fn vertex_has_complete_fan(&self, vid: VertID) -> bool {
-        let Some(eid_first) = self[vid].edge else {
-            return false;
-        };
-
-        let mut eid = eid_first;
-        loop {
-            // attempt to move around the fan, by moving to our twin edge and going clockwise
-            let Some(twin) = self[eid].twin else {
-                return false;
-            };
-
-            eid = self[twin].edge_left_cw;
-
-            if eid == eid_first {
-                return true;
-            }
         }
     }
 
@@ -429,6 +455,12 @@ impl WingedMesh {
         //self.assert_valid();
     }
 
+    pub fn edge_sqr_length(&self, edge: EdgeID, verts: &[Vec3]) -> f32 {
+        let e = &self.edges[edge.0];
+        return verts[e.vert_origin.0]
+            .distance_squared(verts[self.edges[e.edge_left_cw.0].vert_origin.0]);
+    }
+
     pub fn triangle_from_face(&self, face: &Face) -> [u32; 3] {
         let verts: Vec<usize> = self
             .iter_edge_loop(face.edge)
@@ -536,8 +568,7 @@ impl WingedMesh {
             f,
             Face {
                 edge: iea,
-                part: -1,
-                group: -1,
+                part: usize::MAX,
             },
         );
     }
@@ -546,11 +577,15 @@ impl WingedMesh {
         &self.faces
     }
 
-    pub fn get_partition(&self) -> Vec<idx_t> {
+    pub fn get_partition(&self) -> Vec<usize> {
         self.faces().values().map(|f| f.part).collect()
     }
-    pub fn get_group(&self) -> Vec<idx_t> {
-        self.faces().values().map(|f| f.group).collect()
+
+    pub fn get_group(&self) -> Vec<usize> {
+        self.faces()
+            .values()
+            .map(|f| self.partitions[f.part].group_index)
+            .collect()
     }
 
     pub fn partition(
@@ -597,18 +632,20 @@ impl WingedMesh {
     ) -> Result<(), PartitioningError> {
         let part = self.partition(config, partitions)?;
 
+        let mut max_part = 0;
         for (i, f) in self.faces.values_mut().enumerate() {
             // Some faces will have already been removed
-            f.part = part[i];
+            f.part = part[i] as usize;
+            max_part = max_part.max(f.part)
         }
 
-        self.partition_dependence.clear();
-        self.partition_count = 0;
-
-        for p in &part {
-            *self.partition_dependence.entry(*p).or_default() = -1;
-            self.partition_count = self.partition_count.max(*p as usize + 1);
-        }
+        self.partitions = vec![
+            PartitionInfo {
+                child_group_index: 0,
+                group_index: 0,
+            };
+            max_part + 1
+        ];
 
         Ok(())
     }
@@ -621,16 +658,16 @@ impl WingedMesh {
         //TODO: Give lower weight to grouping partitions that have not been recently grouped, to ensure we are
         // constantly overwriting old borders with remeshes
 
-        let group_count = self.partition_count.div_ceil(4);
+        let group_count = self.partitions.len().div_ceil(4);
         println!(
             "Partitioning into {group_count} groups from {} partitions",
-            self.partition_count
+            self.partitions.len()
         );
 
         let mut graph = petgraph::Graph::<i32, i32>::new();
 
-        let nodes: HashMap<_, _> = (0..self.partition_count as i32)
-            .map(|i| (i, graph.add_node(1)))
+        let nodes: Vec<_> = (0..self.partitions.len())
+            .map(|i| graph.add_node(1))
             .collect();
 
         for (i, face) in self.faces().iter() {
@@ -638,7 +675,7 @@ impl WingedMesh {
                 if let Some(twin) = self[e].twin {
                     let other_face = &self.faces[self[twin].face];
 
-                    graph.update_edge(nodes[&face.part], nodes[&other_face.part], 1);
+                    graph.update_edge(nodes[face.part], nodes[other_face.part], 1);
                 }
             }
         }
@@ -646,28 +683,37 @@ impl WingedMesh {
         let mut groups = Vec::with_capacity(group_count);
         for _ in 0..group_count {
             groups.push(GroupInfo {
-                parts: Vec::new(),
+                child_partitions: Vec::new(),
                 tris: 0,
                 center: Vec3::ZERO,
+                radius: 0.0,
             })
         }
         // Partition -> Group
-        self.group_map = if group_count != 1 {
-            config.partition_from_graph(group_count as u32, &graph)?
+        if group_count != 1 {
+            for (part, group) in config
+                .partition_from_graph(group_count as u32, &graph)?
+                .iter()
+                .enumerate()
+            {
+                self.partitions[part].group_index = *group as usize;
+            }
         } else {
-            (0..self.partition_count).map(|_| 0).collect()
+            for p in &mut self.partitions {
+                p.group_index = 0;
+            }
         };
 
-        for (part, group) in self.group_map.iter().enumerate() {
-            groups[*group as usize].parts.push(part as i32);
+        for (part, info) in self.partitions.iter().enumerate() {
+            groups[info.group_index].child_partitions.push(part);
         }
 
         for f in self.faces.values_mut() {
             // Some faces will have already been removed
-            let group = self.group_map[nodes[&f.part].index()];
-            f.group = group;
-            groups[group as usize].tris += 1;
-            groups[group as usize].center += verts[self.edges[f.edge.0].vert_origin.0];
+            let f_part_info = &self.partitions[nodes[f.part].index()];
+            //f.group = group;
+            groups[f_part_info.group_index].tris += 1;
+            groups[f_part_info.group_index].center += verts[self.edges[f.edge.0].vert_origin.0];
         }
         // Take averages
         for g in &mut groups {
@@ -685,20 +731,18 @@ impl WingedMesh {
         &mut self,
         config: &PartitioningConfig,
     ) -> Result<usize, PartitioningError> {
-        let group_count = self.partition_count.div_ceil(4);
+        let group_count = self.partitions.len().div_ceil(4);
         println!("Partitioning {group_count} groups into sub-partitions");
 
-        let mut graphs: Vec<_> = (0..group_count)
-            .map(|i| petgraph::Graph::<i32, i32>::new())
-            .collect();
+        let mut graphs = vec![petgraph::Graph::<i32, i32>::new(); group_count];
 
         // Stores vecs of face IDs, which should be associated with data in graphs
-        let mut ids: Vec<_> = (0..group_count).map(|i| Vec::new()).collect();
-        let mut faces: Vec<_> = (0..group_count).map(|i| HashMap::new()).collect();
+        let mut ids = vec![Vec::new(); group_count];
+        let mut faces = vec![HashMap::new(); group_count];
 
         // Give every triangle a node
         for (i, face) in self.faces().iter() {
-            let g = face.group as usize;
+            let g = self.partitions[face.part].group_index;
             let n = graphs[g].add_node(1);
 
             // indexes should correspond
@@ -709,12 +753,12 @@ impl WingedMesh {
         }
         // Apply links between nodes
         for (i, face) in self.faces().iter() {
-            let g = face.group as usize;
+            let g = self.partitions[face.part].group_index;
 
             for e in self.iter_edge_loop(face.edge) {
                 if let Some(twin) = self[e].twin {
                     let other_face = self[twin].face;
-                    let o_g = self.faces[other_face].group as usize;
+                    let o_g = self.partitions[self.faces[other_face].part].group_index;
 
                     if g == o_g {
                         let faces = &faces[g];
@@ -728,9 +772,8 @@ impl WingedMesh {
         //println!("Partitioning the groups into further smaller partitions!");
         //println!("(what is even going on anymore)");
 
-        let mut i = 0;
-
-        self.partition_dependence.clear();
+        // Ungrouped partitions but with a dependence on an old group
+        let mut new_partitions = Vec::new();
 
         for (graph, ids) in graphs.iter().zip(ids) {
             // TODO: fine tune so we get 64/126 meshlets
@@ -738,37 +781,34 @@ impl WingedMesh {
 
             let part = config.partition_from_graph(parts, graph)?;
 
-            // Each new part needs to register its dependence on the group we were a part of before
-            let group = self.faces[ids[0]].group;
-
+            // Update partitions of the actual triangles
             for x in 0..part.len() {
-                self.faces[ids[x]].part = i + part[x];
-
-                *self.partition_dependence.entry(i + part[x]).or_default() = group;
+                self.faces[ids[x]].part = new_partitions.len() + part[x] as usize;
             }
+            // Each new part needs to register its dependence on the group we were a part of before
+            let old_group = self.partitions[self.faces[ids[0]].part].group_index;
 
-            i += parts as i32;
+            for p in 0..parts {
+                new_partitions.push(PartitionInfo {
+                    child_group_index: old_group,
+                    group_index: usize::MAX,
+                })
+            }
         }
-
-        self.partition_count = i as usize;
-
+        self.partitions = new_partitions;
         // for (i, f) in self.faces.values_mut().enumerate() {
         //     // Some faces will have already been removed
         //     f.group = groups[f.part as usize];
         // }
 
-        Ok(self.partition_count)
+        Ok(self.partitions.len())
         //Ok(groups)
     }
 
-    pub fn partition_count(&self) -> usize {
-        self.partition_count
-    }
-
-    pub fn partition_groups(&self) -> HashMap<i32, Vec<i32>> {
-        let mut partition_groups: HashMap<i32, Vec<i32>> = HashMap::new();
+    pub fn partition_groups(&self) -> Vec<Vec<usize>> {
+        let mut partition_groups: Vec<Vec<usize>> = vec![Vec::new(); self.groups.len()];
         for face in self.faces.values() {
-            let v = partition_groups.entry(face.group).or_default();
+            let v = &mut partition_groups[self.partitions[face.part].group_index];
             if !v.contains(&face.part) {
                 v.push(face.part);
             }
@@ -776,7 +816,15 @@ impl WingedMesh {
         partition_groups
     }
 
-    pub fn partition_dependence(&self) -> &HashMap<i32, i32> {
-        &self.partition_dependence
+    pub fn partition_dependence(&self) -> HashMap<usize, usize> {
+        self.partitions
+            .iter()
+            .enumerate()
+            .map(|(i, p)| (i, p.child_group_index))
+            .collect()
+    }
+
+    pub fn partition_count(&self) -> usize {
+        self.partitions.len()
     }
 }
