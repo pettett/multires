@@ -1,2 +1,3 @@
 pub mod camera_uniform;
-pub mod mesh;
+pub mod debug_mesh;
+pub mod multi_res_mesh;

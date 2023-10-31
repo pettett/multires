@@ -13,6 +13,9 @@ var<storage, read> partitions: array<i32>;
 @group(1) @binding(1)
 var<storage, read> groups: array<i32>;
 
+@group(2) @binding(0) // 1.
+var<uniform> model: mat4x4<f32>;
+
 struct VertexInput {
     @location(0) position: vec4<f32>, 
 };

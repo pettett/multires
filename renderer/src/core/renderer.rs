@@ -1,11 +1,13 @@
 use std::sync::Arc;
 
 use crate::components::camera_uniform::CameraUniform;
-use crate::components::mesh::{Mesh, SubMeshComponent};
+use crate::components::debug_mesh::DebugMesh;
+use crate::components::multi_res_mesh::{MultiResMeshComponent, SubMeshComponent};
 use crate::gui::gui::Gui;
 use crate::vertex::Vertex;
 use bevy_ecs::event::EventReader;
 use bevy_ecs::system::{Commands, NonSend, NonSendMut, Query, Res, ResMut, Resource};
+use common::tri_mesh::TriMesh;
 use common_renderer::components::camera::Camera;
 use winit::dpi::PhysicalSize;
 use winit::event::ElementState;
@@ -25,6 +27,7 @@ pub struct Renderer {
     render_pipeline_wire: wgpu::RenderPipeline,
     depth_texture: Texture,
     surface_format: wgpu::TextureFormat,
+    pub sphere_gizmo: DebugMesh,
     pub mesh_index: usize,
 }
 
@@ -118,6 +121,21 @@ impl Renderer {
             Some("Camera Buffer"),
         );
 
+        let model_bind_group_layout = BindGroupLayout::create(
+            &device,
+            &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+            Some("model_bind_group_layout"),
+        );
+
         let partition_bind_group_layout = BindGroupLayout::create(
             &device,
             &[
@@ -151,6 +169,7 @@ impl Renderer {
                 bind_group_layouts: &[
                     (&camera_bind_group_layout).into(),
                     (&partition_bind_group_layout).into(),
+                    (&model_bind_group_layout).into(),
                 ],
                 push_constant_ranges: &[],
             });
@@ -172,15 +191,21 @@ impl Renderer {
 
         let depth_texture = Texture::create_depth_texture(&device, &config, "Depth Texture");
 
+        let sphere_gizmo = TriMesh::from_gltf("../assets/sphere_low.glb").unwrap();
+
+        let instance = Arc::new(Instance::new(
+            surface,
+            device,
+            queue,
+            camera_bind_group_layout,
+            model_bind_group_layout,
+            partition_bind_group_layout,
+        ));
+
         Self {
             window,
-            instance: Arc::new(Instance::new(
-                surface,
-                device,
-                queue,
-                camera_bind_group_layout,
-                partition_bind_group_layout,
-            )),
+            sphere_gizmo: DebugMesh::from_tris(instance.clone(), &sphere_gizmo),
+            instance,
             config,
             size,
             surface_format,
@@ -300,7 +325,7 @@ pub fn render(
     mut gui: ResMut<Gui>,
     ctx: NonSend<egui::Context>,
     mut state: NonSendMut<egui_winit::State>,
-    meshes: Query<&mut Mesh>,
+    meshes: Query<&mut MultiResMeshComponent>,
     submeshes: Query<&SubMeshComponent>,
     camera: Query<&CameraUniform>,
     cameras: Query<&mut Camera>,

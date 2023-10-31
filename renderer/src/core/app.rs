@@ -1,7 +1,7 @@
 use crate::{
     components::{
         camera_uniform::{update_view_proj, CameraUniform},
-        mesh::Mesh,
+        multi_res_mesh::MultiResMeshComponent,
     },
     gui::gui::Gui,
 };
@@ -50,7 +50,7 @@ impl App {
         world.insert_resource(Events::<KeyIn>::default());
         world.insert_resource(Events::<ScreenEvent>::default());
 
-        Mesh::load_mesh(renderer.instance(), &mut world);
+        MultiResMeshComponent::load_mesh(renderer.instance(), &mut world);
         //GUI state
         let q0 = world.query();
         let q1 = world.query();

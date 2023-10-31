@@ -5,7 +5,7 @@ use super::partition_graph::{
     MyValueType,
 };
 use crate::{
-    components::mesh::{Mesh, SubMeshComponent},
+    components::multi_res_mesh::{MultiResMeshComponent, SubMeshComponent},
     core::Renderer,
 };
 use bevy_ecs::{
@@ -41,7 +41,7 @@ impl Gui {
         ctx: &egui::Context,
         encoder: &mut wgpu::CommandEncoder,
         view: &wgpu::TextureView,
-        mut meshes: Query<&mut Mesh>,
+        mut meshes: Query<&mut MultiResMeshComponent>,
         submeshes: &Query<&SubMeshComponent>,
         mut camera: Query<&mut Camera>,
         commands: &mut Commands,
@@ -77,12 +77,12 @@ impl Gui {
                                 .show_ui(ui, |ui| {
                                     ui.selectable_value(
                                         &mut mesh.error_calc,
-                                        crate::components::mesh::ErrorMode::MaxError { error: 0.1 },
+                                        crate::components::multi_res_mesh::ErrorMode::MaxError { error: 0.1 },
                                         "Max Error",
                                     );
                                     ui.selectable_value(
                                         &mut mesh.error_calc,
-                                        crate::components::mesh::ErrorMode::PointDistance {
+                                        crate::components::multi_res_mesh::ErrorMode::PointDistance {
                                             camera_point: Vec3::ZERO,
                                             error_falloff: 2.0,
                                         },
@@ -91,7 +91,7 @@ impl Gui {
                                 });
 
                             match &mut mesh.error_calc {
-                                crate::components::mesh::ErrorMode::PointDistance {
+                                crate::components::multi_res_mesh::ErrorMode::PointDistance {
                                     camera_point,
                                     error_falloff,
                                 } => {
@@ -113,7 +113,7 @@ impl Gui {
                                             .prefix("falloff: "),
                                     );
                                 }
-                                crate::components::mesh::ErrorMode::MaxError { error } => {
+                                crate::components::multi_res_mesh::ErrorMode::MaxError { error } => {
                                     ui.add(
                                         egui::widgets::Slider::new(error, 0.0..=1.0).prefix("X: "),
                                     );
@@ -233,7 +233,7 @@ impl Gui {
 
     pub fn init(
         renderer: &Renderer,
-        mut mesh: QueryState<(&Mesh)>,
+        mut mesh: QueryState<(&MultiResMeshComponent)>,
         mut submeshes: QueryState<(Entity, &SubMeshComponent)>,
         world: &World,
     ) -> Self {

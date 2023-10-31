@@ -1,5 +1,6 @@
 extern crate gltf;
 
+use common::tri_mesh::TriMesh;
 use glam::Vec3;
 use idmap::IntegerId;
 use metis::{idx_t, PartitioningConfig, PartitioningError};
@@ -474,33 +475,21 @@ impl WingedMesh {
         [verts[0] as _, verts[1] as _, verts[2] as _]
     }
 
-    pub fn from_gltf(path: impl AsRef<std::path::Path>) -> gltf::Result<(Self, Vec<Vec3>)> {
-        let (doc, buffers, _) = gltf::import(path)?;
+    pub fn from_gltf(path: impl AsRef<std::path::Path>) -> gltf::Result<(Self, Box<[Vec3]>)> {
+        let tri_mesh = TriMesh::from_gltf(path)?;
 
-        let mesh = doc.meshes().next().unwrap();
-        let p = mesh.primitives().next().unwrap();
-        let reader = p.reader(|buffer| Some(&buffers[buffer.index()]));
-
-        let iter = reader.read_positions().unwrap();
-        let verts: Vec<_> = iter.map(|v| Vec3::from_array(v)).collect();
-        //.map(|v| Vec3::from_array(v))
-        let indices: Vec<u32> = match reader.read_indices() {
-            Some(ReadIndices::U16(iter)) => iter.map(|i| i as _).collect(),
-            Some(ReadIndices::U32(iter)) => iter.collect(),
-            _ => panic!("Unsupported index size"),
-        };
-        let face_count = indices.len() / 3;
-        let mut mesh = WingedMesh::new(face_count, verts.len());
+        let face_count = tri_mesh.indices.len() / 3;
+        let mut mesh = WingedMesh::new(face_count, tri_mesh.verts.len());
 
         for i in 0..face_count {
-            let a = indices[i * 3] as usize;
-            let b = indices[i * 3 + 1] as usize;
-            let c = indices[i * 3 + 2] as usize;
+            let a = tri_mesh.indices[i * 3] as usize;
+            let b = tri_mesh.indices[i * 3 + 1] as usize;
+            let c = tri_mesh.indices[i * 3 + 2] as usize;
 
             mesh.add_tri(FaceID(i), VertID(a), VertID(b), VertID(c));
         }
 
-        Ok((mesh, verts))
+        Ok((mesh, tri_mesh.verts))
     }
 
     fn find_edge(&self, a: VertID, b: VertID) -> Option<EdgeID> {

@@ -5,7 +5,7 @@ use std::{
 
 use bevy_ecs::{component::Component, entity::Entity, system::Query, world::World};
 use common::{asset::Asset, MultiResMesh};
-use glam::Vec3;
+use glam::{Mat4, Vec3};
 use wgpu::util::DeviceExt;
 
 use crate::core::{BufferGroup, Instance, Renderer};
@@ -27,7 +27,7 @@ pub struct SubMeshComponent {
 }
 
 impl SubMeshComponent {
-    pub fn error_within_bounds(&self, mesh: &Mesh) -> bool {
+    pub fn error_within_bounds(&self, mesh: &MultiResMeshComponent) -> bool {
         let max_err = match &mesh.error_calc {
             ErrorMode::PointDistance {
                 camera_point,
@@ -53,60 +53,16 @@ pub enum ErrorMode {
     },
 }
 #[derive(Component)]
-pub struct Mesh {
+pub struct MultiResMeshComponent {
     vertex_buffer: wgpu::Buffer,
+    model: BufferGroup<1>,
     index_format: wgpu::IndexFormat,
     pub submeshes: HashSet<Entity>,
     asset: MultiResMesh,
     pub error_calc: ErrorMode,
     //puffin_ui : puffin_imgui::ProfilerUi,
 }
-impl Mesh {
-    pub fn add_submesh(&mut self, ent: Entity, submeshes: &Query<&SubMeshComponent>) {
-        self.remove_submesh_upwards(&ent, submeshes);
-        self.remove_submesh_downwards(&ent, submeshes);
-
-        let s = submeshes.get(ent).unwrap();
-
-        self.submeshes.insert(ent);
-        for g in &s.group {
-            if self.submeshes.insert(*g) {
-                println!("Added group member");
-            }
-        }
-
-        // Need to remove them down the chain also
-
-        // Other meshes in the group need to be enabled to fill any holes
-    }
-
-    // disable a submesh, by recursively disabling dependants above too
-    fn remove_submesh_upwards(&mut self, ent: &Entity, submeshes: &Query<&SubMeshComponent>) {
-        if self.submeshes.remove(ent) {
-            println!("Disabled mesh above");
-        }
-
-        let s = submeshes.get(*ent).unwrap();
-        todo!()
-        //for dep in &s.dependences {
-        //    // These must be disabled, recursively
-        //    self.remove_submesh_upwards(dep, submeshes)
-        //}
-    }
-
-    fn remove_submesh_downwards(&mut self, ent: &Entity, submeshes: &Query<&SubMeshComponent>) {
-        if self.submeshes.remove(ent) {
-            println!("Disabled mesh below");
-        }
-
-        let s = submeshes.get(*ent).unwrap();
-        todo!()
-        //for dep in &s.dependants {
-        //    // These must be disabled, recursively
-        //    self.remove_submesh_downwards(dep, submeshes)
-        //}
-    }
-
+impl MultiResMeshComponent {
     pub fn render_pass<'a>(
         &'a self,
         state: &'a Renderer,
@@ -117,6 +73,8 @@ impl Mesh {
 
         render_pass.set_bind_group(0, state.camera_buffer().bind_group(), &[]);
         render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+
+        render_pass.set_bind_group(2, self.model.bind_group(), &[]);
 
         for submesh in submeshes.iter() {
             let draw_child = if let Some(dep) = submesh.dependences.get(0) {
@@ -149,6 +107,8 @@ impl Mesh {
             //render_pass.set_pipeline(state.render_pipeline_wire());
             //render_pass.draw_indexed(0..submesh.num_indices, 0, 0..1);
         }
+
+        // Draw bounds gizmos
     }
 
     pub fn load_mesh(instance: Arc<Instance>, world: &mut World) {
@@ -276,10 +236,19 @@ impl Mesh {
 
         let index_format = wgpu::IndexFormat::Uint32;
 
+        let model = BufferGroup::create_single(
+            &[Mat4::IDENTITY],
+            wgpu::BufferUsages::UNIFORM,
+            instance.device(),
+            instance.model_bind_group_layout(),
+            Some("Uniform Model Buffer"),
+        );
+
         // Update the value stored in this mesh
-        world.spawn(Mesh {
+        world.spawn(MultiResMeshComponent {
             vertex_buffer,
             index_format,
+            model,
             asset,
             submeshes,
             error_calc: ErrorMode::MaxError { error: 0.1 },
