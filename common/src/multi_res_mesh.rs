@@ -15,6 +15,10 @@ impl BoundingSphere {
     pub fn center(&self) -> Vec3 {
         Vec3::from_array(self.center)
     }
+
+    pub fn radius(&self) -> f32 {
+        self.radius
+    }
 }
 
 #[repr(C)]
@@ -35,11 +39,12 @@ pub struct SubMesh {
     // TODO: bounding sphere radii
     pub tight_sphere: BoundingSphere,
     pub saturated_sphere: BoundingSphere,
+    pub debug_group: usize,
     pub error: f32,
 }
 
 impl SubMesh {
-    pub fn new(error: f32, center: Vec3, radius: f32) -> Self {
+    pub fn new(error: f32, center: Vec3, radius: f32, group: usize) -> Self {
         Self {
             indices: Vec::new(),
             tight_sphere: BoundingSphere {
@@ -51,6 +56,7 @@ impl SubMesh {
                 radius,
             },
             error,
+            debug_group: group,
         }
     }
 }

@@ -1,8 +1,8 @@
-use glam::Vec3;
+use glam::{Vec3, Vec4};
 use gltf::mesh::util::ReadIndices;
 
 pub struct TriMesh {
-    pub verts: Box<[Vec3]>,
+    pub verts: Box<[Vec4]>,
     pub indices: Box<[u32]>,
 }
 impl TriMesh {
@@ -16,7 +16,7 @@ impl TriMesh {
         let iter = reader.read_positions().unwrap();
 
         Ok(TriMesh {
-            verts: iter.map(|v| Vec3::from_array(v)).collect(),
+            verts: iter.map(|[x, y, z]| Vec4::new(x, y, z, 1.0)).collect(),
             indices: match reader.read_indices() {
                 Some(ReadIndices::U16(iter)) => iter.map(|i| i as _).collect(),
                 Some(ReadIndices::U32(iter)) => iter.collect(),

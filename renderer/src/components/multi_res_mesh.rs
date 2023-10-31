@@ -14,7 +14,7 @@ use crate::core::{BufferGroup, Instance, Renderer};
 pub struct SubMeshComponent {
     indices: wgpu::Buffer,
     partitions: BufferGroup<2>,
-    num_indices: u32,
+    index_count: u32,
     pub layer: usize,
     pub part: usize,
     pub error: f32,
@@ -24,22 +24,48 @@ pub struct SubMeshComponent {
     // Partitions in the layer below (lower resolution) this is not compatible with
     //pub dependants: Vec<Entity>,
     pub group: Vec<Entity>,
+    pub model: BufferGroup<1>,
 }
 
 impl SubMeshComponent {
     pub fn error_within_bounds(&self, mesh: &MultiResMeshComponent) -> bool {
-        let max_err = match &mesh.error_calc {
+        match &mesh.error_calc {
             ErrorMode::PointDistance {
                 camera_point,
                 error_falloff,
             } => {
                 // Max error we can have before mesh is not suitable to draw
-                self.center.distance_squared(*camera_point) / error_falloff
+                self.error < self.center.distance_squared(*camera_point) / error_falloff
             }
-            ErrorMode::MaxError { error } => *error,
-        };
+            ErrorMode::MaxError { error } => self.error < *error,
+            ErrorMode::ExactLayer { layer } => self.layer == *layer,
+        }
+    }
 
-        self.error < max_err
+    pub fn should_draw(
+        &self,
+        submeshes: &Query<&SubMeshComponent>,
+        mesh: &MultiResMeshComponent,
+    ) -> bool {
+        let draw_child = if let Some(dep) = self.dependences.get(0) {
+            let child = submeshes.get(*dep).unwrap();
+
+            for dep in &self.dependences {
+                let o = submeshes.get(*dep).unwrap();
+
+                assert_eq!(
+                    o.center, child.center,
+                    "All parents should be in the same group"
+                )
+            }
+
+            child.error_within_bounds(mesh)
+        } else {
+            false
+        };
+        //TODO: This is messy - we are drawing if *we* have too high an error, but our child does not - this should be flipped,
+        // and we should draw the child
+        return !self.error_within_bounds(mesh) && draw_child;
     }
 }
 #[derive(Debug, PartialEq)]
@@ -51,6 +77,9 @@ pub enum ErrorMode {
     MaxError {
         error: f32,
     },
+    ExactLayer {
+        layer: usize,
+    },
 }
 #[derive(Component)]
 pub struct MultiResMeshComponent {
@@ -60,55 +89,57 @@ pub struct MultiResMeshComponent {
     pub submeshes: HashSet<Entity>,
     asset: MultiResMesh,
     pub error_calc: ErrorMode,
+    pub focus_part: usize,
     //puffin_ui : puffin_imgui::ProfilerUi,
 }
 impl MultiResMeshComponent {
     pub fn render_pass<'a>(
         &'a self,
-        state: &'a Renderer,
+        renderer: &'a Renderer,
         submeshes: &'a Query<&SubMeshComponent>,
         render_pass: &mut wgpu::RenderPass<'a>,
     ) {
         // 1.
 
-        render_pass.set_bind_group(0, state.camera_buffer().bind_group(), &[]);
+        render_pass.set_bind_group(0, renderer.camera_buffer().bind_group(), &[]);
         render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
 
         render_pass.set_bind_group(2, self.model.bind_group(), &[]);
 
+        render_pass.set_pipeline(renderer.render_pipeline());
+
         for submesh in submeshes.iter() {
-            let draw_child = if let Some(dep) = submesh.dependences.get(0) {
-                let child = submeshes.get(*dep).unwrap();
-
-                for dep in &submesh.dependences {
-                    let o = submeshes.get(*dep).unwrap();
-
-                    assert_eq!(
-                        o.center, child.center,
-                        "All parents should be in the same group"
-                    )
-                }
-
-                child.error_within_bounds(self)
-            } else {
-                false
-            };
-            //TODO: This is messy - we are drawing if *we* have too high an error, but our child does not - this should be flipped,
-            // and we should draw the child
-            if !submesh.error_within_bounds(self) && draw_child {
+            if submesh.should_draw(submeshes, self) {
                 //let submesh = submeshes.get(*s).unwrap();
 
                 render_pass.set_bind_group(1, submesh.partitions.bind_group(), &[]);
                 render_pass.set_index_buffer(submesh.indices.slice(..), self.index_format);
 
-                render_pass.set_pipeline(state.render_pipeline_wire());
-                render_pass.draw_indexed(0..submesh.num_indices, 0, 0..1);
+                render_pass.draw_indexed(0..submesh.index_count, 0, 0..1);
             }
             //render_pass.set_pipeline(state.render_pipeline_wire());
             //render_pass.draw_indexed(0..submesh.num_indices, 0, 0..1);
         }
 
         // Draw bounds gizmos
+
+        render_pass.set_vertex_buffer(0, renderer.sphere_gizmo.verts.slice(..));
+
+        render_pass.set_pipeline(renderer.render_pipeline_wire());
+
+        for submesh in submeshes.iter() {
+            if submesh.part == self.focus_part {
+                if submesh.should_draw(submeshes, self) {
+                    render_pass.set_index_buffer(
+                        renderer.sphere_gizmo.indices.slice(..),
+                        wgpu::IndexFormat::Uint32,
+                    );
+
+                    render_pass.set_bind_group(2, submesh.model.bind_group(), &[]);
+                    render_pass.draw_indexed(0..renderer.sphere_gizmo.index_count, 0, 0..1);
+                }
+            }
+        }
     }
 
     pub fn load_mesh(instance: Arc<Instance>, world: &mut World) {
@@ -135,23 +166,34 @@ impl MultiResMeshComponent {
 
                 let num_indices = submesh.indices.len() as u32;
 
-                let part = part;
-
                 let partitions = BufferGroup::create_plural_storage(
-                    &[&[part as i32, layer as i32], &[0]],
+                    &[
+                        &[part as i32, layer as i32, submesh.debug_group as i32],
+                        &[0],
+                    ],
                     instance.device(),
                     &instance.partition_bind_group_layout(),
                     Some("Partition Buffer"),
                 );
 
+                let model = BufferGroup::create_single(
+                    &[Mat4::from_translation(submesh.tight_sphere.center())
+                        * Mat4::from_scale(Vec3::ONE * submesh.tight_sphere.radius())],
+                    wgpu::BufferUsages::UNIFORM,
+                    instance.device(),
+                    instance.model_bind_group_layout(),
+                    Some("Uniform Debug Model Buffer"),
+                );
+
                 let sub = SubMeshComponent {
                     indices,
                     partitions,
-                    num_indices,
+                    index_count: num_indices,
                     layer,
                     part,
                     center: submesh.tight_sphere.center(),
                     error: submesh.error,
+                    model,
                     dependences: vec![],
                     //dependants: vec![],
                     group: vec![],
@@ -251,7 +293,8 @@ impl MultiResMeshComponent {
             model,
             asset,
             submeshes,
-            error_calc: ErrorMode::MaxError { error: 0.1 },
+            error_calc: ErrorMode::ExactLayer { layer: 0 },
+            focus_part: 0,
         });
     }
 

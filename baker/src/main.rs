@@ -45,17 +45,6 @@ fn main() {
 
     // halve number of triangles in each meshlet
 
-    let mut group_partitions = HashMap::<_, HashSet<_>>::new();
-
-    for f in mesh.faces().values() {
-        group_partitions
-            .entry(mesh.partitions[f.part].group_index)
-            .or_default()
-            .insert(f.part);
-    }
-
-    println!("Mesh 1 group partitions: {group_partitions:#?}");
-
     println!("Face count L0: {}", mesh.face_count());
 
     let mut meshes = vec![mesh];
@@ -202,8 +191,9 @@ fn generate_submeshes(mesh: &WingedMesh) -> Vec<SubMesh> {
     // Precondition: partition indexes completely span in some range 0..N
     let mut submeshes: Vec<_> = (0..mesh.partition_count())
         .map(|part| {
-            let g = &mesh.groups[mesh.partitions[part].group_index];
-            SubMesh::new(0.0, g.monotonic_bound.center, g.monotonic_bound.radius)
+            let gi = mesh.partitions[part].group_index;
+            let g = &mesh.groups[gi];
+            SubMesh::new(0.0, g.monotonic_bound.center, g.monotonic_bound.radius, gi)
         })
         .collect();
 

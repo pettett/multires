@@ -7,10 +7,9 @@ use wgpu::util::DeviceExt;
 use crate::core::{BufferGroup, Instance};
 
 pub struct DebugMesh {
-    verts: wgpu::Buffer,
-    indices: wgpu::Buffer,
-    model: BufferGroup<1>,
-    index_count: usize,
+    pub verts: wgpu::Buffer,
+    pub indices: wgpu::Buffer,
+    pub index_count: u32,
 }
 
 impl DebugMesh {
@@ -31,19 +30,10 @@ impl DebugMesh {
                 usage: wgpu::BufferUsages::INDEX,
             });
 
-        let model = BufferGroup::create_single(
-            &[Mat4::IDENTITY],
-            wgpu::BufferUsages::UNIFORM,
-            instance.device(),
-            instance.model_bind_group_layout(),
-            Some("Uniform Debug Model Buffer"),
-        );
-
         DebugMesh {
             verts,
             indices,
-            model,
-            index_count: mesh.indices.len(),
+            index_count: mesh.indices.len() as _,
         }
     }
 }

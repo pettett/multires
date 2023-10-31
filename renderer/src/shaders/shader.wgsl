@@ -33,19 +33,20 @@ fn integer_to_rgb(integer: ptr<function, i32>) -> vec3<f32> {
 
 @vertex
 fn vs_main(
-    model: VertexInput,
+    in: VertexInput,
 ) -> VertexOutput {
     var out: VertexOutput;
-    out.clip_position = camera.view_proj * vec4<f32>(model.position.xyz * (f32(partitions[1]) * 0.02 + 1.0), 1.0);
+	// vec4<f32>(in.position.xyz * (f32(partitions[1]) * 0.02 + 1.0), 1.0)
+    out.clip_position = camera.view_proj * (model * in.position);
     return out;
 }
 // Fragment shader
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    var part1 = partitions[0];
-    //var part2 = groups[primitive_index];
+    var part = partitions[0];
+    var group = partitions[2];
     //var p = i32(primitive_index);
-    var color1 = integer_to_rgb(&part1);
+    var color1 = integer_to_rgb(&group);
     //var color2 = integer_to_rgb(&part2);
 
     return vec4<f32>(color1, 1.0);

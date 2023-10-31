@@ -5,7 +5,7 @@ use super::partition_graph::{
     MyValueType,
 };
 use crate::{
-    components::multi_res_mesh::{MultiResMeshComponent, SubMeshComponent},
+    components::multi_res_mesh::{ErrorMode, MultiResMeshComponent, SubMeshComponent},
     core::Renderer,
 };
 use bevy_ecs::{
@@ -71,27 +71,38 @@ impl Gui {
                             egui::widgets::DragValue::new(&mut camera.part_highlight)
                                 .prefix("highlight partition: "),
                         );
+
                         for mut mesh in meshes.iter_mut() {
+                            ui.add(
+                                egui::widgets::DragValue::new(&mut mesh.focus_part)
+                                    .prefix("focus partition: "),
+                            );
+
                             egui::ComboBox::from_label("Mode ")
                                 .selected_text(format!("{:?}", &mut mesh.error_calc))
                                 .show_ui(ui, |ui| {
                                     ui.selectable_value(
                                         &mut mesh.error_calc,
-                                        crate::components::multi_res_mesh::ErrorMode::MaxError { error: 0.1 },
+                                        ErrorMode::MaxError { error: 0.1 },
                                         "Max Error",
                                     );
                                     ui.selectable_value(
                                         &mut mesh.error_calc,
-                                        crate::components::multi_res_mesh::ErrorMode::PointDistance {
+                                        ErrorMode::PointDistance {
                                             camera_point: Vec3::ZERO,
                                             error_falloff: 2.0,
                                         },
-                                        "Point distnace",
+                                        "Point distance",
+                                    );
+                                    ui.selectable_value(
+                                        &mut mesh.error_calc,
+                                        ErrorMode::ExactLayer { layer: 0 },
+                                        "Exact Layer",
                                     );
                                 });
 
                             match &mut mesh.error_calc {
-                                crate::components::multi_res_mesh::ErrorMode::PointDistance {
+                                ErrorMode::PointDistance {
                                     camera_point,
                                     error_falloff,
                                 } => {
@@ -113,9 +124,14 @@ impl Gui {
                                             .prefix("falloff: "),
                                     );
                                 }
-                                crate::components::multi_res_mesh::ErrorMode::MaxError { error } => {
+                                ErrorMode::MaxError { error } => {
                                     ui.add(
                                         egui::widgets::Slider::new(error, 0.0..=1.0).prefix("X: "),
+                                    );
+                                }
+                                ErrorMode::ExactLayer { layer } => {
+                                    ui.add(
+                                        egui::widgets::Slider::new(layer, 0..=10).prefix("Layer: "),
                                     );
                                 }
                             }

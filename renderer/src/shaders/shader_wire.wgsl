@@ -33,10 +33,10 @@ fn integer_to_rgb(integer: ptr<function, i32>) -> vec3<f32> {
 
 @vertex
 fn vs_main(
-    model: VertexInput,
+    in: VertexInput,
 ) -> VertexOutput {
     var out: VertexOutput;
-    out.clip_position = camera.view_proj * vec4<f32>(model.position.xyz, 1.0);
+    out.clip_position = camera.view_proj * (model * in.position);
     return out;
 }
 // Fragment shader

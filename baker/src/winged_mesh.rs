@@ -1,9 +1,8 @@
 use common::tri_mesh::TriMesh;
-use glam::Vec3;
+use glam::{Vec3, Vec4, Vec4Swizzles};
 use idmap::IntegerId;
 use metis::{idx_t, PartitioningConfig, PartitioningError};
-use petgraph::data::{Build, FromElements};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 //Definition 6: A cut in the DAG is a subset of the tree such that for every node Ci all ancestors
 //of Ci are in the cut as well. The front of the cut is the set of arcs that connect a node in the cut
@@ -79,8 +78,8 @@ pub struct SphereBound {
 }
 
 impl SphereBound {
-    pub fn include_point_squared(&mut self, point: Vec3) {
-        self.candidate_radius(self.center.distance_squared(point))
+    pub fn include_point(&mut self, point: Vec3) {
+        self.candidate_radius(self.center.distance(point))
     }
     pub fn include_sphere(&mut self, other: &SphereBound) {
         self.candidate_radius(self.center.distance(other.center) + other.radius)
@@ -471,7 +470,7 @@ impl WingedMesh {
         [verts[0] as _, verts[1] as _, verts[2] as _]
     }
 
-    pub fn from_gltf(path: impl AsRef<std::path::Path>) -> (Self, Box<[Vec3]>) {
+    pub fn from_gltf(path: impl AsRef<std::path::Path>) -> (Self, Box<[Vec4]>) {
         let tri_mesh = TriMesh::from_gltf(path).unwrap();
 
         let face_count = tri_mesh.indices.len() / 3;
@@ -643,7 +642,7 @@ impl WingedMesh {
     pub fn group(
         &mut self,
         config: &PartitioningConfig,
-        verts: &[Vec3],
+        verts: &[Vec4],
     ) -> Result<usize, PartitioningError> {
         //TODO: Give lower weight to grouping partitions that have not been recently grouped, to ensure we are
         // constantly overwriting old borders with remeshes
@@ -704,7 +703,7 @@ impl WingedMesh {
         for f in self.faces.values_mut() {
             let f_group_info = &mut self.groups[self.partitions[nodes[f.part].index()].group_index];
             f_group_info.tris += 1;
-            f_group_info.monotonic_bound.center += verts[self.edges[f.edge.0].vert_origin.0];
+            f_group_info.monotonic_bound.center += verts[self.edges[f.edge.0].vert_origin.0].xyz();
         }
         // Take averages
         for g in &mut self.groups {
@@ -717,25 +716,25 @@ impl WingedMesh {
 
             f_group_info
                 .monotonic_bound
-                .include_point_squared(verts[self.edges[f.edge.0].vert_origin.0]);
+                .include_point(verts[self.edges[f.edge.0].vert_origin.0].xyz());
         }
 
-        for g in &mut self.groups {
-            // SQRT each group
-            // Each group also must envelop all the groups it is descended from,
-            // as our partitions must do the same, as we base them off group info
+        // for g in &mut self.groups {
+        //     // SQRT each group
+        //     // Each group also must envelop all the groups it is descended from,
+        //     // as our partitions must do the same, as we base them off group info
 
-            g.monotonic_bound.radius = g.monotonic_bound.radius.sqrt();
+        //     //    g.monotonic_bound.radius = g.monotonic_bound.radius.sqrt();
 
-            for p in &g.child_partitions {
-                if let Some(child_group_index) = self.partitions[*p].child_group_index {
-                    let child_group = &old_groups[child_group_index];
-                    // combine groups radius
-                    g.monotonic_bound
-                        .include_sphere(&child_group.monotonic_bound);
-                }
-            }
-        }
+        //     for p in &g.child_partitions {
+        //         if let Some(child_group_index) = self.partitions[*p].child_group_index {
+        //             let child_group = &old_groups[child_group_index];
+        //             // combine groups radius
+        //             g.monotonic_bound
+        //                 .include_sphere(&child_group.monotonic_bound);
+        //         }
+        //     }
+        // }
 
         Ok(group_count)
     }
