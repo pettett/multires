@@ -1,5 +1,3 @@
-extern crate gltf;
-
 pub mod winged_mesh;
 use common::{asset::Asset, MeshLayer, Meshlet, MultiResMesh, SubMesh};
 use metis::PartitioningConfig;
@@ -12,12 +10,12 @@ use winged_mesh::VertID;
 
 use crate::winged_mesh::WingedMesh;
 
-fn main() -> gltf::Result<()> {
+fn main() {
     let mesh_name = "../assets/sphere_low.glb";
     //let mut rng = rand::thread_rng();
 
     println!("Loading from gltf!");
-    let (mut mesh, verts) = winged_mesh::WingedMesh::from_gltf(mesh_name)?;
+    let (mut mesh, verts) = winged_mesh::WingedMesh::from_gltf(mesh_name);
 
     println!("Loaded winged edge mesh from gltf!");
 
@@ -122,8 +120,6 @@ fn main() -> gltf::Result<()> {
     }
     .save()
     .unwrap();
-
-    Ok(())
 }
 
 fn to_mesh_layer(mesh: &WingedMesh) -> MeshLayer {

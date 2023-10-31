@@ -1,13 +1,9 @@
-extern crate gltf;
-
 use common::tri_mesh::TriMesh;
 use glam::Vec3;
 use idmap::IntegerId;
 use metis::{idx_t, PartitioningConfig, PartitioningError};
 use petgraph::data::{Build, FromElements};
 use std::collections::{HashMap, HashSet};
-
-use gltf::mesh::util::ReadIndices;
 
 //Definition 6: A cut in the DAG is a subset of the tree such that for every node Ci all ancestors
 //of Ci are in the cut as well. The front of the cut is the set of arcs that connect a node in the cut
@@ -475,8 +471,8 @@ impl WingedMesh {
         [verts[0] as _, verts[1] as _, verts[2] as _]
     }
 
-    pub fn from_gltf(path: impl AsRef<std::path::Path>) -> gltf::Result<(Self, Box<[Vec3]>)> {
-        let tri_mesh = TriMesh::from_gltf(path)?;
+    pub fn from_gltf(path: impl AsRef<std::path::Path>) -> (Self, Box<[Vec3]>) {
+        let tri_mesh = TriMesh::from_gltf(path).unwrap();
 
         let face_count = tri_mesh.indices.len() / 3;
         let mut mesh = WingedMesh::new(face_count, tri_mesh.verts.len());
@@ -489,7 +485,7 @@ impl WingedMesh {
             mesh.add_tri(FaceID(i), VertID(a), VertID(b), VertID(c));
         }
 
-        Ok((mesh, tri_mesh.verts))
+        (mesh, tri_mesh.verts)
     }
 
     fn find_edge(&self, a: VertID, b: VertID) -> Option<EdgeID> {
