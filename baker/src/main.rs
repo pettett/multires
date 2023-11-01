@@ -1,5 +1,5 @@
 pub mod winged_mesh;
-use common::{asset::Asset, MeshLayer, Meshlet, MultiResMesh, SubMesh};
+use common::{asset::Asset, MeshLevel, Meshlet, MultiResMesh, SubMesh};
 use metis::PartitioningConfig;
 use rand::Rng;
 use std::{
@@ -14,15 +14,8 @@ fn main() {
     let mesh_name = "../assets/sphere_low.glb";
     //let mut rng = rand::thread_rng();
 
-    println!("Loading from gltf!");
-    let (mut mesh, verts) = winged_mesh::WingedMesh::from_gltf(mesh_name);
-
-    println!("Loaded winged edge mesh from gltf!");
-
-    println!("Partitioning Graph!");
-    let t1 = time::Instant::now();
     let config = PartitioningConfig {
-        // method: metis::PartitioningMethod::MultilevelRecursiveBisection,
+        method: metis::PartitioningMethod::MultilevelRecursiveBisection,
         force_contiguous_partitions: Some(true),
         minimize_subgraph_degree: Some(true),
         ..Default::default()
@@ -35,49 +28,42 @@ fn main() {
         ..Default::default()
     };
 
+    println!("Loading from gltf!");
+    let (mut working_mesh, verts) = winged_mesh::WingedMesh::from_gltf(mesh_name);
+
     // Apply primary partition, that will define the lowest level clusterings
-    mesh.partition(&config, (mesh.faces().len() as u32).div_ceil(60))
+    working_mesh
+        .partition(&config, (working_mesh.faces().len() as u32).div_ceil(60))
         .unwrap();
 
-    mesh.group(&config, &verts).unwrap();
-
-    println!("time: {}ms", t1.elapsed().as_millis());
-
-    // halve number of triangles in each meshlet
-
-    println!("Face count L0: {}", mesh.face_count());
-
-    let mut meshes = vec![mesh];
+    working_mesh.group(&config, &verts).unwrap();
 
     let mut layers = Vec::new();
 
-    layers.push(to_mesh_layer(&meshes[0]));
+    layers.push(to_mesh_layer(&working_mesh));
 
     // Generate 2 more meshes
     for i in 0..10 {
         // i = index of previous mesh layer
         //let mut next_mesh = reduce_mesh(&meshlets, meshes[i].clone());
-        let mut next_mesh = meshes[i].clone();
 
-        println!("Face count L{}: {}", i + 1, next_mesh.face_count());
+        println!("Face count L{}: {}", i + 1, working_mesh.face_count());
 
-        match next_mesh.partition_within_groups(&within_group_config) {
+        match working_mesh.partition_within_groups(&within_group_config) {
             Ok(partition_count) => {
                 // View a snapshot of the mesh without any re-groupings applied
                 //layers.push(to_mesh_layer(&next_mesh));
 
                 println!("{partition_count} Partitions from groups");
 
-                match next_mesh.group(&within_group_config, &verts) {
+                match working_mesh.group(&within_group_config, &verts) {
                     Ok(group_count) => {
                         // view a snapshot of the mesh ready to create the next layer
                         // let error = (1.0 + i as f32) / 10.0 + rng.gen_range(-0.05..0.05);
 
                         println!("{group_count} Groups from partitions");
 
-                        layers.push(to_mesh_layer(&next_mesh));
-
-                        meshes.push(next_mesh);
+                        layers.push(to_mesh_layer(&working_mesh));
 
                         if group_count == 1 {
                             println!("Finished with single group");
@@ -105,21 +91,21 @@ fn main() {
         name: mesh_name.to_owned(),
         verts: verts.iter().map(|v| [v.x, v.y, v.z, 1.0]).collect(),
         // layer_1_indices: indices.clone(),
-        layers,
+        lods: layers,
     }
     .save()
     .unwrap();
 }
 
-fn to_mesh_layer(mesh: &WingedMesh) -> MeshLayer {
-    MeshLayer {
-        partitions: mesh.get_partition(),
-        groups: mesh.get_group(),
+fn to_mesh_layer(mesh: &WingedMesh) -> MeshLevel {
+    MeshLevel {
+        partition_indices: mesh.get_partition(),
+        group_indices: mesh.get_group(),
         indices: grab_indicies(&mesh),
-        dependant_partitions: mesh.partition_dependence(),
-        partition_groups: mesh.partition_groups(),
         meshlets: vec![], //generate_meshlets(&mesh),
         submeshes: generate_submeshes(mesh),
+        partitions: mesh.partitions.clone(),
+        groups: mesh.groups.clone(),
     }
 }
 
@@ -193,7 +179,13 @@ fn generate_submeshes(mesh: &WingedMesh) -> Vec<SubMesh> {
         .map(|part| {
             let gi = mesh.partitions[part].group_index;
             let g = &mesh.groups[gi];
-            SubMesh::new(0.0, g.monotonic_bound.center, g.monotonic_bound.radius, gi)
+            SubMesh::new(
+                0.0,
+                g.monotonic_bound.center(),
+                g.monotonic_bound.radius(),
+                mesh.partitions[part].tight_bound.radius(),
+                gi,
+            )
         })
         .collect();
 

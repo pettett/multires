@@ -4,7 +4,7 @@ use glam::Mat4;
 
 use crate::components::transform::Transform;
 
-#[derive(Component)]
+#[derive(Component, Clone, Debug, PartialEq)]
 pub struct Camera {
     aspect: f32,
     fovy: f32,
@@ -57,5 +57,9 @@ impl Camera {
 
         // 3.
         return OPENGL_TO_WGPU_MATRIX * proj * view;
+    }
+
+    pub fn znear(&self) -> f32 {
+        self.znear
     }
 }

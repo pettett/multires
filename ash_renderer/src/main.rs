@@ -219,7 +219,7 @@ impl VulkanApp26 {
         println!(
             "V: {:?} I: {:?}",
             data.verts.len(),
-            data.layers[0].meshlets.len()
+            data.lods[0].meshlets.len()
         );
 
         let vertex_buffer = create_storage_buffer(
@@ -235,7 +235,7 @@ impl VulkanApp26 {
             &physical_device_memory_properties,
             command_pool.clone(),
             graphics_queue,
-            &data.layers[0].meshlets,
+            &data.lods[0].meshlets,
         );
         let uniform_buffers = create_uniform_buffers(
             device.clone(),
@@ -260,7 +260,7 @@ impl VulkanApp26 {
         println!("Loading command buffers");
 
         let command_buffers = VulkanApp26::create_command_buffers(
-            data.layers[0].meshlets.len() as u32,
+            data.lods[0].meshlets.len() as u32,
             &device,
             command_pool.pool,
             graphics_pipeline.pipeline(),
@@ -350,7 +350,7 @@ impl VulkanApp26 {
 
             is_framebuffer_resized: false,
 
-            meshlet_count: data.layers[0].meshlets.len() as u32,
+            meshlet_count: data.lods[0].meshlets.len() as u32,
         }
     }
 

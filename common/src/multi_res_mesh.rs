@@ -5,7 +5,7 @@ use glam::Vec3;
 
 use crate::asset;
 
-#[derive(Debug, Clone, Decode, Encode)]
+#[derive(Debug, Default, Clone, Decode, Encode)]
 pub struct BoundingSphere {
     center: [f32; 3],
     radius: f32,
@@ -15,9 +15,27 @@ impl BoundingSphere {
     pub fn center(&self) -> Vec3 {
         Vec3::from_array(self.center)
     }
-
+    pub fn set_center(&mut self, center: Vec3) {
+        self.center = center.into();
+    }
+    pub fn translate(&mut self, offset: Vec3) {
+        self.center = (self.center() + offset).into();
+    }
+    pub fn normalise(&mut self, count: usize) {
+        self.center = (self.center() / (count as f32)).into();
+    }
     pub fn radius(&self) -> f32 {
         self.radius
+    }
+
+    pub fn include_point(&mut self, point: Vec3) {
+        self.candidate_radius(self.center().distance(point))
+    }
+    pub fn include_sphere(&mut self, other: &BoundingSphere) {
+        self.candidate_radius(self.center().distance(other.center()) + other.radius)
+    }
+    fn candidate_radius(&mut self, radius: f32) {
+        self.radius = self.radius.max(radius)
     }
 }
 
@@ -44,16 +62,16 @@ pub struct SubMesh {
 }
 
 impl SubMesh {
-    pub fn new(error: f32, center: Vec3, radius: f32, group: usize) -> Self {
+    pub fn new(error: f32, center: Vec3, monotonic_radius: f32, radius: f32, group: usize) -> Self {
         Self {
             indices: Vec::new(),
             tight_sphere: BoundingSphere {
                 center: center.to_array(),
-                radius,
+                radius: monotonic_radius,
             },
             saturated_sphere: BoundingSphere {
                 center: center.to_array(),
-                radius,
+                radius: radius,
             },
             error,
             debug_group: group,
@@ -79,18 +97,38 @@ impl Default for Meshlet {
 pub struct MultiResMesh {
     pub name: String,
     pub verts: Vec<[f32; 4]>,
-    pub layers: Vec<MeshLayer>,
+    pub lods: Vec<MeshLevel>,
+}
+
+#[derive(Debug, Clone, Default, Decode, Encode)]
+pub struct GroupInfo {
+    /// Partitions in LODX-1 that we were created from. Will be empty in LOD0
+    //pub child_partitions: Vec<usize>,
+    // Partitions that we created by subdividing ourselves
+    pub partitions: Vec<usize>,
+
+    pub tris: usize,
+    /// Monotonic bounds for error function of partitions. Includes bounds of all other partitions in the group,
+    /// and all partitions we are children to
+    pub monotonic_bound: BoundingSphere,
+}
+
+#[derive(Debug, Clone, Decode, Encode)]
+pub struct PartitionInfo {
+    /// Group in the previous LOD layer we have been attached to. LOD0 will have none
+    pub child_group_index: Option<usize>,
+    /// Group in this layer
+    pub group_index: usize,
+    pub tight_bound: BoundingSphere,
 }
 
 #[derive(Clone, Decode, Encode)]
-pub struct MeshLayer {
-    pub partitions: Vec<usize>,
-    pub groups: Vec<usize>,
-    /// partition -> group in previous layers
-    pub dependant_partitions: HashMap<usize, usize>,
+pub struct MeshLevel {
+    pub partition_indices: Vec<usize>,
+    pub group_indices: Vec<usize>,
+    pub partitions: Vec<PartitionInfo>,
+    pub groups: Vec<GroupInfo>,
     /// used by the layer below to tell what dependant tris means
-    /// group -> partition
-    pub partition_groups: Vec<Vec<usize>>,
     pub indices: Vec<u32>,
     pub meshlets: Vec<Meshlet>,
     pub submeshes: Vec<SubMesh>,

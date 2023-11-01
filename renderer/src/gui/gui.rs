@@ -14,7 +14,7 @@ use bevy_ecs::{
     system::{Commands, Query, Resource},
     world::World,
 };
-use common_renderer::components::camera::Camera;
+use common_renderer::components::{camera::Camera, transform::Transform};
 use egui::{Pos2, Vec2};
 use egui_node_graph::{InputParamKind, NodeResponse, NodeTemplateTrait};
 use egui_wgpu::renderer::ScreenDescriptor;
@@ -43,7 +43,7 @@ impl Gui {
         view: &wgpu::TextureView,
         mut meshes: Query<&mut MultiResMeshComponent>,
         submeshes: &Query<&SubMeshComponent>,
-        mut camera: Query<&mut Camera>,
+        mut camera: Query<(&mut Camera, &Transform)>,
         commands: &mut Commands,
     ) {
         let _delta_s = self.last_frame.elapsed();
@@ -66,7 +66,7 @@ impl Gui {
                 .min_height(100.0)
                 .min_width(100.0)
                 .show(&ctx, |ui| {
-                    for mut camera in camera.iter_mut() {
+                    for (mut camera, transform) in camera.iter_mut() {
                         ui.add(
                             egui::widgets::DragValue::new(&mut camera.part_highlight)
                                 .prefix("highlight partition: "),
@@ -90,7 +90,8 @@ impl Gui {
                                         &mut mesh.error_calc,
                                         ErrorMode::PointDistance {
                                             camera_point: Vec3::ZERO,
-                                            error_falloff: 2.0,
+                                            target_error: 2.0,
+                                            cam: Camera::new(1.0),
                                         },
                                         "Point distance",
                                     );
@@ -104,29 +105,33 @@ impl Gui {
                             match &mut mesh.error_calc {
                                 ErrorMode::PointDistance {
                                     camera_point,
-                                    error_falloff,
+                                    target_error: error_falloff,
+                                    cam,
                                 } => {
-                                    ui.add(
-                                        egui::widgets::Slider::new(&mut camera_point.x, -2.5..=2.5)
-                                            .prefix("X: "),
-                                    );
-                                    ui.add(
-                                        egui::widgets::Slider::new(&mut camera_point.y, -2.5..=2.5)
-                                            .prefix("Y: "),
-                                    );
-                                    ui.add(
-                                        egui::widgets::Slider::new(&mut camera_point.z, -2.5..=2.5)
-                                            .prefix("Z: "),
-                                    );
+                                    *camera_point = (*transform.get_pos()).into();
+                                    *cam = camera.clone();
+                                    // ui.add(
+                                    //     egui::widgets::Slider::new(&mut camera_point.x, -2.5..=2.5)
+                                    //         .prefix("X: "),
+                                    // );
+                                    // ui.add(
+                                    //     egui::widgets::Slider::new(&mut camera_point.y, -2.5..=2.5)
+                                    //         .prefix("Y: "),
+                                    // );
+                                    // ui.add(
+                                    //     egui::widgets::Slider::new(&mut camera_point.z, -2.5..=2.5)
+                                    //         .prefix("Z: "),
+                                    // );
                                     ui.add_space(10.0);
                                     ui.add(
                                         egui::widgets::Slider::new(error_falloff, 0.1..=10.0)
-                                            .prefix("falloff: "),
+                                            .prefix("Target Error: "),
                                     );
                                 }
                                 ErrorMode::MaxError { error } => {
                                     ui.add(
-                                        egui::widgets::Slider::new(error, 0.0..=1.0).prefix("X: "),
+                                        egui::widgets::Slider::new(error, 0.0..=10.0)
+                                            .prefix("MAX: "),
                                     );
                                 }
                                 ErrorMode::ExactLayer { layer } => {

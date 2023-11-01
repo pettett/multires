@@ -5,6 +5,7 @@ use std::{
 
 use bevy_ecs::{component::Component, entity::Entity, system::Query, world::World};
 use common::{asset::Asset, MultiResMesh};
+use common_renderer::components::camera::Camera;
 use glam::{Mat4, Vec3};
 use wgpu::util::DeviceExt;
 
@@ -19,10 +20,11 @@ pub struct SubMeshComponent {
     pub part: usize,
     pub error: f32,
     pub center: Vec3,
-    // Partitions in the layer above that this is not compatible with
-    pub dependences: Vec<Entity>,
-    // Partitions in the layer below (lower resolution) this is not compatible with
-    //pub dependants: Vec<Entity>,
+    pub radius: f32,
+    // Partitions in the layer below (higher resolution) that this is not compatible with
+    //pub children: Vec<Entity>,
+    // Partitions in the layer above (lower resolution) this is not compatible with
+    pub parents: Vec<Entity>,
     pub group: Vec<Entity>,
     pub model: BufferGroup<1>,
 }
@@ -32,13 +34,52 @@ impl SubMeshComponent {
         match &mesh.error_calc {
             ErrorMode::PointDistance {
                 camera_point,
-                error_falloff,
+                target_error,
+                cam,
             } => {
                 // Max error we can have before mesh is not suitable to draw
-                self.error < self.center.distance_squared(*camera_point) / error_falloff
+
+                let mut distance = self.center.distance(*camera_point);
+
+                if distance < cam.znear() {
+                    distance = cam.znear()
+                }
+                let error = self.error / distance;
+
+                error < *target_error
             }
             ErrorMode::MaxError { error } => self.error < *error,
-            ErrorMode::ExactLayer { layer } => self.layer == *layer,
+            ErrorMode::ExactLayer { layer } => self.layer <= *layer,
+        }
+    }
+
+    pub fn is_monotonic(&self, submeshes: &Query<&SubMeshComponent>, mesh: &MultiResMeshComponent) {
+        if let Some(dep) = self.parents.get(0) {
+            let parent = submeshes.get(*dep).unwrap();
+            // for dep in &self.dependences {
+            //     let o = submeshes.get(*dep).unwrap();
+            //     // How can this be true?
+            //     // Do we actually compare against the 'child'? that is a well formed item, but renders in wrong level
+            //     // children should be spread between groups no?
+            //     assert_eq!(
+            //         o.center, child.center,
+            //         "All children should be in the same group"
+            //     )
+            // }
+
+            //if self.center.distance(parent.center) + self.radius > parent.radius {
+            //    println!("WARNING: Child's bounds extends outside of parents");
+            //}
+
+            if self.radius > parent.radius {
+                println!("WARNING: Non monotonic const error detected - error within bounds when child's error is not, but child's abs error should be lower");
+            }
+
+            if !self.error_within_bounds(mesh) && parent.error_within_bounds(mesh) {
+                println!("WARNING: Non monotonic error detected - error within bounds when child's error is not, but child's projected error should be lower");
+            }
+
+            parent.is_monotonic(submeshes, mesh);
         }
     }
 
@@ -47,32 +88,56 @@ impl SubMeshComponent {
         submeshes: &Query<&SubMeshComponent>,
         mesh: &MultiResMeshComponent,
     ) -> bool {
-        let draw_child = if let Some(dep) = self.dependences.get(0) {
-            let child = submeshes.get(*dep).unwrap();
+        //TODO: Give each partition a unique parent. This parent should be a
 
-            for dep in &self.dependences {
-                let o = submeshes.get(*dep).unwrap();
+        // a partition is remeshed, then repartitioned inside the same group, so how can it have a parent?
+        // remeshing can make two partitions where there was once one
 
-                assert_eq!(
-                    o.center, child.center,
-                    "All parents should be in the same group"
-                )
+        // when grouping, each partition is assigned to a unique group that is demeshed
+        // so each partition has a parent group of partitions that form the same bound
+        // this is computed as a group such that one of the original member was us,
+
+        // Each demeshed item can look at a unique bound to compare agaisnt, maybe this is what we want
+
+        // With no parents, assume infinite error
+        let mut parent_error_too_large = self.parents.len() == 0;
+
+        for &dep in &self.parents {
+            if !submeshes.get(dep).unwrap().error_within_bounds(mesh) {
+                parent_error_too_large = true;
             }
+        }
 
-            child.error_within_bounds(mesh)
-        } else {
-            false
-        };
         //TODO: This is messy - we are drawing if *we* have too high an error, but our child does not - this should be flipped,
         // and we should draw the child
-        return !self.error_within_bounds(mesh) && draw_child;
+
+        self.error_within_bounds(mesh) && parent_error_too_large
+    }
+
+    pub fn r_should_draw(
+        &self,
+        submeshes: &Query<&SubMeshComponent>,
+        mesh: &MultiResMeshComponent,
+    ) -> bool {
+        let should_draw = self.should_draw(submeshes, mesh);
+
+        for g in &self.group {
+            if should_draw != submeshes.get(*g).unwrap().should_draw(submeshes, mesh) {
+                println!("WARNING: Not all members of a group are drawing")
+            }
+        }
+
+        self.is_monotonic(submeshes, mesh);
+
+        should_draw
     }
 }
 #[derive(Debug, PartialEq)]
 pub enum ErrorMode {
     PointDistance {
         camera_point: Vec3,
-        error_falloff: f32,
+        target_error: f32,
+        cam: Camera,
     },
     MaxError {
         error: f32,
@@ -109,7 +174,7 @@ impl MultiResMeshComponent {
         render_pass.set_pipeline(renderer.render_pipeline());
 
         for submesh in submeshes.iter() {
-            if submesh.should_draw(submeshes, self) {
+            if submesh.r_should_draw(submeshes, self) {
                 //let submesh = submeshes.get(*s).unwrap();
 
                 render_pass.set_bind_group(1, submesh.partitions.bind_group(), &[]);
@@ -122,6 +187,7 @@ impl MultiResMeshComponent {
         }
 
         // Draw bounds gizmos
+        //return;
 
         render_pass.set_vertex_buffer(0, renderer.sphere_gizmo.verts.slice(..));
 
@@ -147,10 +213,11 @@ impl MultiResMeshComponent {
 
         let mut vis = true;
         let mut submeshes = HashSet::new();
-        let mut partitions_per_layer: Vec<HashMap<usize, Entity>> = Vec::new();
+        let mut partitions_per_lod: Vec<Vec<Entity>> = Vec::new();
 
-        for (layer, r) in asset.layers.iter().enumerate() {
-            let mut submeshes_per_partition = HashMap::default();
+        for (level, r) in asset.lods.iter().enumerate() {
+            println!("Loading layer {level}:");
+            let mut partitions = Vec::new();
 
             for (part, submesh) in r.submeshes.iter().enumerate() {
                 // Map index buffer to global vertex range
@@ -166,9 +233,9 @@ impl MultiResMeshComponent {
 
                 let num_indices = submesh.indices.len() as u32;
 
-                let partitions = BufferGroup::create_plural_storage(
+                let info_buffer = BufferGroup::create_plural_storage(
                     &[
-                        &[part as i32, layer as i32, submesh.debug_group as i32],
+                        &[part as i32, level as i32, submesh.debug_group as i32],
                         &[0],
                     ],
                     instance.device(),
@@ -187,84 +254,92 @@ impl MultiResMeshComponent {
 
                 let sub = SubMeshComponent {
                     indices,
-                    partitions,
+                    partitions: info_buffer,
                     index_count: num_indices,
-                    layer,
+                    layer: level,
                     part,
-                    center: submesh.tight_sphere.center(),
-                    error: submesh.error,
+                    center: submesh.saturated_sphere.center(),
+                    error: submesh.tight_sphere.radius(),
                     model,
-                    dependences: vec![],
-                    //dependants: vec![],
+                    radius: submesh.saturated_sphere.radius(),
+                    //    children: vec![],
+                    parents: vec![],
                     group: vec![],
                 };
                 let e = world.spawn(sub).id();
                 if vis {
                     submeshes.insert(e);
                 }
-                submeshes_per_partition.insert(part, e);
+                partitions.push(e);
             }
-            partitions_per_layer.push(submeshes_per_partition);
+            partitions_per_lod.push(partitions);
             vis = false;
         }
 
         // Search for [dependencies], group members, and dependants
-        for (layer, ents) in partitions_per_layer.iter().enumerate() {
-            for (part, ent) in ents.iter() {
-                // dependancies
-                if layer > 0 {
-                    // unmap the grouping info from previous layer
+        for (level, partition_entities) in partitions_per_lod.iter().enumerate() {
+            for (i_partition, partition) in partition_entities.iter().enumerate() {
+                let i_partition_group = asset.lods[level].partitions[i_partition].group_index;
 
-                    if let Some(dep_group) = asset.layers[layer].dependant_partitions.get(part) {
-                        let dependences: Vec<_> = asset.layers[layer - 1].partition_groups
-                            [*dep_group]
-                            .iter()
-                            .map(|dep_part| partitions_per_layer[layer - 1][dep_part])
-                            .collect();
+                assert!(asset.lods[level].groups[i_partition_group]
+                    .partitions
+                    .contains(&i_partition));
 
-                        //for d in &dependences {
-                        //    world
-                        //        .get_mut::<SubMeshComponent>(*d)
-                        //        .unwrap()
-                        //        .dependants
-                        //        .push(*ent);
-                        //}
-                        world.get_mut::<SubMeshComponent>(*ent).unwrap().dependences = dependences;
-                        let e = world.get::<SubMeshComponent>(*ent).unwrap();
+                let Some(i_partition_child_group) =
+                    asset.lods[level].partitions[i_partition].child_group_index
+                else {
+                    continue;
+                };
 
-                        for d in &e.dependences {
-                            let dep = world.get::<SubMeshComponent>(*d).unwrap();
-                            // A dependancy is a higher res mesh we are derived from, it should always have a lower error
-                            assert!(dep.error < e.error);
-                        }
-                    }
+                let child_partitions: Vec<_> = asset.lods[level - 1].groups
+                    [i_partition_child_group]
+                    .partitions
+                    .iter()
+                    .map(|child_partition| partitions_per_lod[level - 1][*child_partition])
+                    .collect();
+
+                for child in &child_partitions {
+                    // only the partitions with a shared boundary should be listed as dependants
+
+                    world
+                        .get_mut::<SubMeshComponent>(*child)
+                        .unwrap()
+                        .parents
+                        .push(*partition);
                 }
+
+                //world.get_mut::<SubMeshComponent>(*ent).unwrap().dependences = dependences;
+                //let e = world.get::<SubMeshComponent>(*ent).unwrap();
+
+                //for d in &e.dependences {
+                //    let dep = world.get::<SubMeshComponent>(*d).unwrap();
+                //    // A dependancy is a higher res mesh we are derived from, it should always have a lower error
+                //    assert!(dep.error < e.error);
+                //}
             }
 
-            // Groups
-            for (group, parts) in asset.layers[layer].partition_groups.iter().enumerate() {
-                println!("{group} {parts:?}");
-
-                for part0 in parts {
-                    let ent0 = ents[part0];
-                    for part1 in parts {
-                        if part0 != part1 {
-                            let ent1 = ents[part1];
-
-                            world
-                                .get_mut::<SubMeshComponent>(ent0)
-                                .unwrap()
-                                .group
-                                .push(ent1);
-                            world
-                                .get_mut::<SubMeshComponent>(ent1)
-                                .unwrap()
-                                .group
-                                .push(ent0);
-                        }
-                    }
-                }
-            }
+            // Groups TODO:
+            //for (group, info) in asset.lods[layer].groups.iter().enumerate() {
+            //    for part0 in &info.partitions {
+            //        let ent0 = partition_entities[part0];
+            //        for part1 in &info.partitions {
+            //            if part0 != part1 {
+            //                let ent1 = partition_entities[part1];
+            //
+            //                world
+            //                    .get_mut::<SubMeshComponent>(ent0)
+            //                    .unwrap()
+            //                    .group
+            //                    .push(ent1);
+            //                world
+            //                    .get_mut::<SubMeshComponent>(ent1)
+            //                    .unwrap()
+            //                    .group
+            //                    .push(ent0);
+            //            }
+            //        }
+            //    }
+            //}
         }
 
         let vertex_buffer =

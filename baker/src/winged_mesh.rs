@@ -1,4 +1,4 @@
-use common::tri_mesh::TriMesh;
+use common::{tri_mesh::TriMesh, GroupInfo, PartitionInfo};
 use glam::{Vec3, Vec4, Vec4Swizzles};
 use idmap::IntegerId;
 use metis::{idx_t, PartitioningConfig, PartitioningError};
@@ -71,42 +71,6 @@ pub struct Face {
     pub part: usize,
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct SphereBound {
-    pub center: Vec3,
-    pub radius: f32,
-}
-
-impl SphereBound {
-    pub fn include_point(&mut self, point: Vec3) {
-        self.candidate_radius(self.center.distance(point))
-    }
-    pub fn include_sphere(&mut self, other: &SphereBound) {
-        self.candidate_radius(self.center.distance(other.center) + other.radius)
-    }
-    fn candidate_radius(&mut self, radius: f32) {
-        self.radius = self.radius.max(radius)
-    }
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct GroupInfo {
-    child_partitions: Vec<usize>,
-    tris: usize,
-    /// Monotonic bounds for error function of partitions. Includes bounds of all other partitions in the group,
-    /// and all partitions we are children to
-    pub monotonic_bound: SphereBound,
-}
-
-#[derive(Debug, Clone)]
-pub struct PartitionInfo {
-    // Group in the previous layer we have been attached to
-    pub child_group_index: Option<usize>,
-    // Part -> Group in this layer
-    pub group_index: usize,
-    pub tight_bound: SphereBound,
-}
-
 #[derive(Debug, Clone)]
 pub struct WingedMesh {
     verts: Vec<Vertex>,
@@ -121,6 +85,7 @@ pub struct EdgeIter<'a> {
     mesh: &'a WingedMesh,
     start: EdgeID,
     current: Option<EdgeID>,
+    max_iter: usize,
 }
 
 pub struct AllEdgeIter {
@@ -224,6 +189,12 @@ impl<'a> Iterator for EdgeIter<'a> {
             self.current = Some(self.mesh.edges[curr.0].edge_left_cw);
             if self.current == Some(self.start) {
                 self.current = None;
+            }
+
+            if self.max_iter == 0 {
+                panic!("Iterated too many edges for polygon mesh")
+            } else {
+                self.max_iter -= 1;
             }
         }
 
@@ -504,6 +475,7 @@ impl WingedMesh {
             mesh: self,
             start: e,
             current: Some(e),
+            max_iter: 3, // emit 3 edges and a none
         }
     }
 
@@ -663,7 +635,6 @@ impl WingedMesh {
             for e in self.iter_edge_loop(face.edge) {
                 if let Some(twin) = self[e].twin {
                     let other_face = &self.faces[self[twin].face];
-
                     graph.update_edge(nodes[face.part], nodes[other_face.part], 1);
                 }
             }
@@ -672,9 +643,9 @@ impl WingedMesh {
         // create new array of groups, and remember the old groups
         let mut old_groups = vec![
             GroupInfo {
-                child_partitions: Vec::new(),
                 tris: 0,
-                monotonic_bound: Default::default()
+                monotonic_bound: Default::default(),
+                partitions: Vec::new()
             };
             group_count
         ];
@@ -697,17 +668,19 @@ impl WingedMesh {
         };
 
         for (part, info) in self.partitions.iter().enumerate() {
-            self.groups[info.group_index].child_partitions.push(part);
+            self.groups[info.group_index].partitions.push(part);
         }
 
         for f in self.faces.values_mut() {
             let f_group_info = &mut self.groups[self.partitions[nodes[f.part].index()].group_index];
             f_group_info.tris += 1;
-            f_group_info.monotonic_bound.center += verts[self.edges[f.edge.0].vert_origin.0].xyz();
+            f_group_info
+                .monotonic_bound
+                .translate(verts[self.edges[f.edge.0].vert_origin.0].xyz());
         }
         // Take averages
         for g in &mut self.groups {
-            g.monotonic_bound.center /= g.tris as f32;
+            g.monotonic_bound.normalise(g.tris);
         }
 
         // Find radii of groups
@@ -719,22 +692,27 @@ impl WingedMesh {
                 .include_point(verts[self.edges[f.edge.0].vert_origin.0].xyz());
         }
 
-        // for g in &mut self.groups {
-        //     // SQRT each group
-        //     // Each group also must envelop all the groups it is descended from,
-        //     // as our partitions must do the same, as we base them off group info
+        println!(
+            "Including child bounds with {} old groups",
+            old_groups.len()
+        );
 
-        //     //    g.monotonic_bound.radius = g.monotonic_bound.radius.sqrt();
+        for g in &mut self.groups {
+            // SQRT each group
+            //    g.monotonic_bound.radius = g.monotonic_bound.radius.sqrt();
 
-        //     for p in &g.child_partitions {
-        //         if let Some(child_group_index) = self.partitions[*p].child_group_index {
-        //             let child_group = &old_groups[child_group_index];
-        //             // combine groups radius
-        //             g.monotonic_bound
-        //                 .include_sphere(&child_group.monotonic_bound);
-        //         }
-        //     }
-        // }
+            // Each group also must envelop all the groups it is descended from,
+            // as our partitions must do the same, as we base them off group info
+
+            for p in &g.partitions {
+                if let Some(child_group_index) = self.partitions[*p].child_group_index {
+                    let child_group = &old_groups[child_group_index];
+                    // combine groups radius
+                    g.monotonic_bound
+                        .include_sphere(&child_group.monotonic_bound);
+                }
+            }
+        }
 
         Ok(group_count)
     }
@@ -786,22 +764,27 @@ impl WingedMesh {
         // Ungrouped partitions but with a dependence on an old group
         let mut new_partitions = Vec::new();
 
-        for (graph, ids) in graphs.iter().zip(ids) {
+        for (i_group, (graph, ids)) in graphs.iter().zip(ids).enumerate() {
             // TODO: fine tune so we get 64/126 meshlets
             let parts = 2; // (graph.node_count() as u32).div_ceil(60);
 
             let part = config.partition_from_graph(parts, graph)?;
 
+            // Each new part needs to register its dependence on the group we were a part of before
+            let child_group = self.partitions[self.faces[ids[0]].part].group_index;
+
+            assert_eq!(i_group, child_group);
+
             // Update partitions of the actual triangles
             for x in 0..part.len() {
                 self.faces[ids[x]].part = new_partitions.len() + part[x] as usize;
             }
-            // Each new part needs to register its dependence on the group we were a part of before
-            let old_group = self.partitions[self.faces[ids[0]].part].group_index;
 
             for p in 0..parts {
+                //    self.groups[group].partitions.push(new_partitions.len());
+
                 new_partitions.push(PartitionInfo {
-                    child_group_index: Some(old_group),
+                    child_group_index: Some(i_group),
                     group_index: usize::MAX,
                     tight_bound: Default::default(), //TODO:
                 })
@@ -824,13 +807,13 @@ impl WingedMesh {
         }
         partition_groups
     }
+    pub fn partition_child_groups(&self) -> Vec<Option<usize>> {
+        let mut partition_groups: Vec<Option<usize>> = vec![None; self.partitions.len()];
 
-    pub fn partition_dependence(&self) -> HashMap<usize, usize> {
-        self.partitions
-            .iter()
-            .enumerate()
-            .filter_map(|(i, p)| p.child_group_index.map(|c| (i, c)))
-            .collect()
+        for face in self.faces.values() {
+            partition_groups[face.part] = self.partitions[face.part].child_group_index;
+        }
+        partition_groups
     }
 
     pub fn face_count(&self) -> usize {

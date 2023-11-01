@@ -9,6 +9,7 @@ use bevy_ecs::event::EventReader;
 use bevy_ecs::system::{Commands, NonSend, NonSendMut, Query, Res, ResMut, Resource};
 use common::tri_mesh::TriMesh;
 use common_renderer::components::camera::Camera;
+use common_renderer::components::transform::Transform;
 use winit::dpi::PhysicalSize;
 use winit::event::ElementState;
 use winit::window::Window;
@@ -328,7 +329,7 @@ pub fn render(
     meshes: Query<&mut MultiResMeshComponent>,
     submeshes: Query<&SubMeshComponent>,
     camera: Query<&CameraUniform>,
-    cameras: Query<&mut Camera>,
+    cameras: Query<(&mut Camera, &Transform)>,
     mut commands: Commands,
 ) {
     let output = renderer.instance.surface().get_current_texture().unwrap();
