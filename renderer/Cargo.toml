@@ -5,14 +5,14 @@ edition.workspace = true
 
 
 [dependencies]
-winit = "0.28"
+winit.workspace = true
 wgpu = "0.17"
 env_logger.workspace = true
 log.workspace = true
 bytemuck.workspace = true
 glam.workspace = true
-pollster = "0.3"
-bevy_ecs = "0.11"
+pollster.workspace = true
+bevy_ecs.workspace = true
 common = { path = "../common" }
 common_renderer = { path = "../common_renderer" }
 egui = "0.23.0"

@@ -4,17 +4,14 @@ use idmap::IntegerId;
 use metis::{idx_t, PartitioningConfig, PartitioningError};
 use std::collections::HashMap;
 
+use crate::{
+    mesh_iter::{AllEdgeIter, EdgeIter},
+    vertex::{VertID, Vertex},
+};
+
 //Definition 6: A cut in the DAG is a subset of the tree such that for every node Ci all ancestors
 //of Ci are in the cut as well. The front of the cut is the set of arcs that connect a node in the cut
 //to a node outside.
-
-#[derive(Default, Hash, Debug, Clone, Copy, PartialEq, Eq)]
-pub struct VertID(pub usize);
-impl Into<usize> for VertID {
-    fn into(self) -> usize {
-        self.0
-    }
-}
 
 #[derive(Default, Hash, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EdgeID(pub usize);
@@ -60,12 +57,6 @@ pub struct HalfEdge {
 }
 
 #[derive(Default, Debug, Clone)]
-pub struct Vertex {
-    /// Edge with vert_source = this id
-    pub edge: Option<EdgeID>,
-}
-
-#[derive(Default, Debug, Clone)]
 pub struct Face {
     pub edge: EdgeID,
     pub part: usize,
@@ -79,127 +70,6 @@ pub struct WingedMesh {
     edge_map: HashMap<VertID, Vec<EdgeID>>,
     pub partitions: Vec<PartitionInfo>,
     pub groups: Vec<GroupInfo>,
-}
-
-pub struct EdgeIter<'a> {
-    mesh: &'a WingedMesh,
-    start: EdgeID,
-    current: Option<EdgeID>,
-    max_iter: usize,
-}
-
-pub struct AllEdgeIter {
-    edges: Vec<HalfEdge>,
-    current: Option<usize>,
-}
-impl VertID {
-    /// Does this vertex have a complete fan of triangles surrounding it?
-    pub fn is_local_manifold(&self, mesh: &WingedMesh, is_group_manifold: bool) -> bool {
-        let Some(eid_first) = mesh.verts[self.0].edge else {
-            return false;
-        };
-
-        let mut eid = eid_first;
-
-        let mut last_e_part = None;
-
-        loop {
-            // attempt to move around the fan, by moving to our twin edge and going clockwise
-            let Some(twin) = mesh[eid].twin else {
-                return false;
-            };
-
-            let e = &mesh[twin];
-
-            // Compare against last face's partition
-            if is_group_manifold {
-                let e_part = mesh.partitions[mesh.faces[e.face].part].group_index;
-
-                if let Some(lep) = last_e_part {
-                    if e_part != lep {
-                        return false;
-                    }
-                }
-
-                last_e_part = Some(e_part);
-            }
-
-            eid = e.edge_left_cw;
-
-            if eid == eid_first {
-                return true;
-            }
-        }
-    }
-
-    pub fn incoming_edges(self, mesh: &WingedMesh) -> Vec<EdgeID> {
-        mesh.edges
-            .iter()
-            .enumerate()
-            .filter_map(|(i, e)| {
-                if e.valid && mesh[e.edge_left_cw].vert_origin == self {
-                    Some(EdgeID(i))
-                } else {
-                    None
-                }
-            })
-            .collect()
-    }
-
-    pub fn outgoing_edges(self, mesh: &WingedMesh) -> &[EdgeID] {
-        const EMPTY: &[EdgeID] = &[];
-        mesh.edge_map.get(&self).map(|v| &v[..]).unwrap_or(EMPTY)
-    }
-}
-
-impl Iterator for AllEdgeIter {
-    type Item = EdgeID;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let last = self.current;
-
-        if let Some(current) = &mut self.current {
-            loop {
-                *current += 1;
-
-                if *current >= self.edges.len() {
-                    self.current = None;
-                    break;
-                }
-
-                if !self.edges[*current].valid {
-                    continue;
-                } else {
-                    break;
-                }
-            }
-        }
-
-        last.map(|l| EdgeID(l))
-    }
-}
-
-impl<'a> Iterator for EdgeIter<'a> {
-    type Item = EdgeID;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let current = self.current;
-
-        if let Some(curr) = current {
-            self.current = Some(self.mesh.edges[curr.0].edge_left_cw);
-            if self.current == Some(self.start) {
-                self.current = None;
-            }
-
-            if self.max_iter == 0 {
-                panic!("Iterated too many edges for polygon mesh")
-            } else {
-                self.max_iter -= 1;
-            }
-        }
-
-        current
-    }
 }
 
 impl std::ops::Index<VertID> for WingedMesh {
@@ -255,12 +125,13 @@ impl WingedMesh {
     }
 
     pub fn iter_edges(&self) -> AllEdgeIter {
-        AllEdgeIter {
-            edges: self.edges.clone(),
-            current: Some(0),
-        }
+        AllEdgeIter::new(self.edges.clone(), Some(0))
     }
 
+    pub fn iter_edge_loop(&self, e: EdgeID) -> EdgeIter {
+        // emit 3 edges and a none
+        EdgeIter::new(self, e, Some(e), 3)
+    }
     pub fn assert_valid(&self) {
         for (i, f) in self.faces.iter() {
             let edges: Vec<HalfEdge> = self
@@ -468,15 +339,6 @@ impl WingedMesh {
                     .copied()
             })
             .flatten()
-    }
-
-    pub fn iter_edge_loop(&self, e: EdgeID) -> EdgeIter {
-        EdgeIter {
-            mesh: self,
-            start: e,
-            current: Some(e),
-            max_iter: 3, // emit 3 edges and a none
-        }
     }
 
     fn add_half_edge(&mut self, orig: VertID, dest: VertID, face: FaceID, cw: EdgeID, ccw: EdgeID) {
@@ -833,5 +695,13 @@ impl WingedMesh {
     }
     pub fn partition_count(&self) -> usize {
         self.partitions.len()
+    }
+
+    pub fn edge_map(&self) -> &HashMap<VertID, Vec<EdgeID>> {
+        &self.edge_map
+    }
+
+    pub fn edges(&self) -> &[HalfEdge] {
+        self.edges.as_ref()
     }
 }

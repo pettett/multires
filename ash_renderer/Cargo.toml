@@ -8,14 +8,14 @@ default = ["shaderc"]
 shaderc = ["dep:shaderc"]
 
 [dependencies]
-winit = "0.28"
+winit.workspace = true
 env_logger.workspace = true
 log.workspace = true
 bytemuck.workspace = true
 glam.workspace = true
 gltf.workspace = true
-pollster = "0.3"
-bevy_ecs = "0.11"
+pollster.workspace = true
+bevy_ecs.workspace = true
 common = { path = "../common" }
 common_renderer = { path = "../common_renderer" }
 ash = { version = "0.37", default-features = false, features = [
@@ -29,7 +29,7 @@ num = "0.4"
 image = "0.22"
 
 [build-dependencies]
-shaderc = {version = "0.8", optional = true}
+shaderc = { version = "0.8", optional = true }
 
 
 [target.'cfg(target_os = "windows")'.dependencies]
