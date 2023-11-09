@@ -100,9 +100,10 @@ pub struct MultiResMesh {
     pub lods: Vec<MeshLevel>,
 }
 
+/// Information for a group on layer n
 #[derive(Debug, Clone, Default, Decode, Encode)]
 pub struct GroupInfo {
-    /// Partitions in LODX-1 that we were created from. Will be empty in LOD0
+    /// Partitions in LOD[n-1] that we were created from. Will be empty in LOD0
     //pub child_partitions: Vec<usize>,
     // Partitions that we created by subdividing ourselves
     pub partitions: Vec<usize>,
@@ -113,11 +114,12 @@ pub struct GroupInfo {
     pub monotonic_bound: BoundingSphere,
 }
 
+/// Information for a partition on layer n
 #[derive(Debug, Clone, Decode, Encode)]
 pub struct PartitionInfo {
-    /// Group in the previous LOD layer we have been attached to. LOD0 will have none
+    /// Group in the previous LOD layer (LOD[n-1]) we have been attached to. LOD0 will have none
     pub child_group_index: Option<usize>,
-    /// Group in this layer
+    /// Group in this layer. will be usize::MAX if not yet grouped, but always valid in a loaded asset
     pub group_index: usize,
     pub tight_bound: BoundingSphere,
 }

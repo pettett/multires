@@ -132,49 +132,6 @@ impl WingedMesh {
         // emit 3 edges and a none
         EdgeIter::new(self, e, Some(e), 3)
     }
-    pub fn assert_valid(&self) {
-        for (i, f) in self.faces.iter() {
-            let edges: Vec<HalfEdge> = self
-                .iter_edge_loop(f.edge)
-                .map(|e| self[e].clone())
-                .collect();
-
-            assert_eq!(edges.len(), 3);
-            //assert_eq!(edges[0].vert_destination, edges[1].vert_origin);
-            //assert_eq!(edges[1].vert_destination, edges[2].vert_origin);
-            //assert_eq!(edges[2].vert_destination, edges[0].vert_origin);
-        }
-
-        for i in 0..self.verts.len() {
-            self.assert_vertex_valid(i);
-        }
-
-        for (k, v) in &self.edge_map {
-            for e in v {
-                assert!(
-                    self.edges[e.0].valid,
-                    "Edge valid error - Edge map is invalidated"
-                );
-                assert!(
-                    self.edges[e.0].vert_origin == *k,
-                    "Source error - Edge map is invalidated"
-                );
-            }
-        }
-    }
-    pub fn assert_vertex_valid(&self, i: usize) {
-        let v = &self.verts[i];
-        if let Some(e) = v.edge {
-            assert!(
-                self.edges[e.0].valid,
-                "Invalid vertex edge reference- Mesh made invalid on V{i}: {v:?}"
-            );
-            assert!(
-                self.edges[e.0].vert_origin.0 == i,
-                "Invalid vertex edge source loop - Mesh made invalid on V{i}: {v:?}"
-            );
-        }
-    }
 
     /// Collapse a triangle, removing it from the graph, and pulling the two triangles on non-eid edges together
     /// 	A
@@ -230,13 +187,8 @@ impl WingedMesh {
             // TODO: smarter selection of verts that require updating
             if self[v].edge.is_some() {
                 self[v].edge = v.outgoing_edges(self).get(0).copied();
-
-                //println!("Updating {v:?}");
-
-                self.assert_vertex_valid(v.0);
             }
         }
-        //self.assert_valid();
     }
 
     /// Collapse an edge so it no longer exists, the source vertex is no longer referenced,
@@ -581,6 +533,8 @@ impl WingedMesh {
 
     /// Within each group, split triangles into two completely new partitions, so as not to preserve any old seams between ancient partitions
     /// Ensures the data structure is seamless with changing seams! Yippee!
+    /// Will update the partitions list, but groups list will still refer to old partitions. To find out what group these should be in, before regrouping,
+    /// look at `child_group_index`
     pub fn partition_within_groups(
         &mut self,
         config: &PartitioningConfig,
@@ -658,26 +612,6 @@ impl WingedMesh {
         //Ok(groups)
     }
 
-    pub fn partition_groups(&self) -> Vec<Vec<usize>> {
-        let mut partition_groups: Vec<Vec<usize>> = vec![Vec::new(); self.groups.len()];
-
-        for face in self.faces.values() {
-            let v = &mut partition_groups[self.partitions[face.part].group_index];
-            if !v.contains(&face.part) {
-                v.push(face.part);
-            }
-        }
-        partition_groups
-    }
-    pub fn partition_child_groups(&self) -> Vec<Option<usize>> {
-        let mut partition_groups: Vec<Option<usize>> = vec![None; self.partitions.len()];
-
-        for face in self.faces.values() {
-            partition_groups[face.part] = self.partitions[face.part].child_group_index;
-        }
-        partition_groups
-    }
-
     pub fn face_count(&self) -> usize {
         self.faces.len()
     }
@@ -703,5 +637,151 @@ impl WingedMesh {
 
     pub fn edges(&self) -> &[HalfEdge] {
         self.edges.as_ref()
+    }
+}
+#[cfg(test)]
+pub mod test {
+    use super::*;
+    use std::error::Error;
+
+    use metis::PartitioningConfig;
+
+    use crate::winged_mesh::WingedMesh;
+
+    pub const TEST_MESH: &str =
+        "C:\\Users\\maxwe\\OneDriveC\\sync\\projects\\assets\\sphere_low.glb";
+
+    /// Extra assertion methods for test environment
+    impl WingedMesh {
+        pub fn assert_valid(&self) {
+            for (i, f) in self.faces.iter() {
+                let edges: Vec<HalfEdge> = self
+                    .iter_edge_loop(f.edge)
+                    .map(|e| self[e].clone())
+                    .collect();
+
+                assert_eq!(edges.len(), 3);
+                //assert_eq!(edges[0].vert_destination, edges[1].vert_origin);
+                //assert_eq!(edges[1].vert_destination, edges[2].vert_origin);
+                //assert_eq!(edges[2].vert_destination, edges[0].vert_origin);
+            }
+
+            for i in 0..self.verts.len() {
+                self.assert_vertex_valid(i);
+            }
+
+            for (k, v) in &self.edge_map {
+                for e in v {
+                    assert!(
+                        self.edges[e.0].valid,
+                        "Edge valid error - Edge map is invalidated"
+                    );
+                    assert!(
+                        self.edges[e.0].vert_origin == *k,
+                        "Source error - Edge map is invalidated"
+                    );
+                }
+            }
+        }
+        pub fn assert_vertex_valid(&self, i: usize) {
+            let v = &self.verts[i];
+            if let Some(e) = v.edge {
+                assert!(
+                    self.edges[e.0].valid,
+                    "Invalid vertex edge reference- Mesh made invalid on V{i}: {v:?}"
+                );
+                assert!(
+                    self.edges[e.0].vert_origin.0 == i,
+                    "Invalid vertex edge source loop - Mesh made invalid on V{i}: {v:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    pub fn test_continued_validity() -> Result<(), Box<dyn Error>> {
+        let test_config = &PartitioningConfig {
+            method: metis::PartitioningMethod::MultilevelRecursiveBisection,
+            force_contiguous_partitions: Some(true),
+            minimize_subgraph_degree: Some(true),
+            ..Default::default()
+        };
+
+        println!("Loading from gltf {:?}!", std::fs::canonicalize(TEST_MESH)?);
+        let (mut mesh, verts) = WingedMesh::from_gltf(TEST_MESH);
+
+        mesh.assert_valid();
+
+        mesh.partition(test_config, (mesh.faces().len() as u32).div_ceil(60))?;
+
+        mesh.assert_valid();
+
+        mesh.group(test_config, &verts)?;
+
+        mesh.assert_valid();
+
+        mesh.partition_within_groups(test_config)?;
+
+        mesh.assert_valid();
+
+        Ok(())
+    }
+
+    #[test]
+    pub fn test_group_repartitioning() -> Result<(), Box<dyn Error>> {
+        let test_config = &PartitioningConfig {
+            method: metis::PartitioningMethod::MultilevelRecursiveBisection,
+            force_contiguous_partitions: Some(true),
+            minimize_subgraph_degree: Some(true),
+            ..Default::default()
+        };
+
+        println!("Loading from gltf {:?}!", std::fs::canonicalize(TEST_MESH)?);
+        let (mut mesh, verts) = WingedMesh::from_gltf(TEST_MESH);
+
+        // Apply primary partition, that will define the lowest level clusterings
+        mesh.partition(test_config, (mesh.faces().len() as u32).div_ceil(60))?;
+
+        mesh.group(test_config, &verts)?;
+
+        let old_parts = mesh.partitions.clone();
+
+        mesh.partition_within_groups(test_config)?;
+
+        // assert that the group boundaries are the same
+
+        let mut new_groups = vec![Vec::new(); mesh.groups.len()];
+
+        // Old parts must have no child - there is no LOD-1
+        for p in &old_parts {
+            assert!(p.child_group_index.is_none());
+        }
+
+        // new parts must have no group - there is no grouping assigned yet
+        for p in &mesh.partitions {
+            assert_eq!(p.group_index, usize::MAX);
+            assert!(p.child_group_index.is_some());
+
+            let g_i = p.child_group_index.unwrap();
+
+            new_groups[g_i].push(p);
+        }
+
+        let avg_size =
+            (new_groups.iter().map(|l| l.len()).sum::<usize>() as f32) / (new_groups.len() as f32);
+
+        println!(
+            "Test has grouped partitions into {} groups, with {} partitions average",
+            new_groups.len(),
+            avg_size
+        );
+
+        for (gi, group) in mesh.groups.iter().enumerate() {
+            let new_parts = &new_groups[gi];
+
+            // Assert that new parts and the parts in group have the same boundary
+        }
+
+        Ok(())
     }
 }
