@@ -468,12 +468,12 @@ impl WingedMesh {
 
         // Partition -> Group
         if group_count != 1 {
-            for (part, group) in config
+            for (part, &group) in config
                 .partition_from_graph(group_count as u32, &graph)?
                 .iter()
                 .enumerate()
             {
-                self.partitions[part].group_index = *group as usize;
+                self.partitions[part].group_index = group as usize;
             }
         } else {
             for p in &mut self.partitions {
@@ -642,14 +642,27 @@ impl WingedMesh {
 #[cfg(test)]
 pub mod test {
     use super::*;
-    use std::error::Error;
+    use std::{error::Error, process};
 
     use metis::PartitioningConfig;
+    use petgraph::dot;
+    use std::fs;
 
     use crate::winged_mesh::WingedMesh;
+    pub const TEST_MESH_HIGH: &str =
+        "C:\\Users\\maxwe\\OneDriveC\\sync\\projects\\assets\\sphere.glb";
 
-    pub const TEST_MESH: &str =
+    pub const TEST_MESH_MID: &str =
         "C:\\Users\\maxwe\\OneDriveC\\sync\\projects\\assets\\sphere_low.glb";
+
+    pub const TEST_MESH_LOW: &str =
+        "C:\\Users\\maxwe\\OneDriveC\\sync\\projects\\assets\\torus.glb";
+
+    pub const DOT_OUT: &str =
+        "C:\\Users\\maxwe\\OneDriveC\\sync\\projects\\multires\\baker\\graph.dot";
+
+    pub const SVG_OUT: &str =
+        "C:\\Users\\maxwe\\OneDriveC\\sync\\projects\\multires\\baker\\graph.svg";
 
     /// Extra assertion methods for test environment
     impl WingedMesh {
@@ -707,8 +720,11 @@ pub mod test {
             ..Default::default()
         };
 
-        println!("Loading from gltf {:?}!", std::fs::canonicalize(TEST_MESH)?);
-        let (mut mesh, verts) = WingedMesh::from_gltf(TEST_MESH);
+        println!(
+            "Loading from gltf {:?}!",
+            std::fs::canonicalize(TEST_MESH_MID)?
+        );
+        let (mut mesh, verts) = WingedMesh::from_gltf(TEST_MESH_MID);
 
         mesh.assert_valid();
 
@@ -736,8 +752,11 @@ pub mod test {
             ..Default::default()
         };
 
-        println!("Loading from gltf {:?}!", std::fs::canonicalize(TEST_MESH)?);
-        let (mut mesh, verts) = WingedMesh::from_gltf(TEST_MESH);
+        println!(
+            "Loading from gltf {:?}!",
+            std::fs::canonicalize(TEST_MESH_MID)?
+        );
+        let (mut mesh, verts) = WingedMesh::from_gltf(TEST_MESH_MID);
 
         // Apply primary partition, that will define the lowest level clusterings
         mesh.partition(test_config, (mesh.faces().len() as u32).div_ceil(60))?;
@@ -781,6 +800,110 @@ pub mod test {
 
             // Assert that new parts and the parts in group have the same boundary
         }
+
+        Ok(())
+    }
+
+    #[test]
+    pub fn generate_partition_hierarchy_graph() -> Result<(), Box<dyn Error>> {
+        let test_config = &PartitioningConfig {
+            method: metis::PartitioningMethod::MultilevelRecursiveBisection,
+            force_contiguous_partitions: Some(true),
+            minimize_subgraph_degree: Some(true),
+            ..Default::default()
+        };
+
+        println!(
+            "Loading from gltf {:?}!",
+            std::fs::canonicalize(TEST_MESH_LOW)?
+        );
+        let (mut mesh, verts) = WingedMesh::from_gltf(TEST_MESH_MID);
+
+        println!("Faces: {}, Verts: {}", mesh.face_count(), mesh.verts.len());
+
+        // Apply primary partition, that will define the lowest level clusterings
+        mesh.partition(test_config, (mesh.face_count() as u32).div_ceil(60))?;
+
+        mesh.group(test_config, &verts)?;
+        let mut graph: petgraph::Graph<(), ()> = petgraph::Graph::new();
+
+        let mut old_part_nodes: Vec<_> =
+            mesh.partitions.iter().map(|o| graph.add_node(())).collect();
+
+        // Record a big colour map for node indexes, to show grouping
+        let mut colouring = HashMap::new();
+
+        let mut seen_groups = 0;
+
+        loop {
+            for (i, &n) in old_part_nodes.iter().enumerate() {
+                colouring.insert(n, mesh.partitions[i].group_index + seen_groups);
+            }
+
+            seen_groups += mesh.groups.len();
+
+            mesh.partition_within_groups(test_config)?;
+
+            let new_part_nodes: Vec<_> =
+                mesh.partitions.iter().map(|o| graph.add_node(())).collect();
+
+            for (new_p_i, new_p) in mesh.partitions.iter().enumerate() {
+                let g_i = new_p.child_group_index.unwrap();
+
+                for &old_p_i in &mesh.groups[g_i].partitions {
+                    graph.add_edge(old_part_nodes[old_p_i], new_part_nodes[new_p_i], ());
+                }
+            }
+
+            old_part_nodes = new_part_nodes;
+
+            mesh.group(test_config, &verts)?;
+
+            if mesh.partitions.len() <= 2 {
+                break;
+            }
+        }
+
+        for (i, &n) in old_part_nodes.iter().enumerate() {
+            colouring.insert(n, mesh.partitions[i].group_index + seen_groups);
+        }
+
+        let cols = [
+            "red",
+            "blue",
+            "green",
+            "aqua",
+            "cornflowerblue",
+            "darkgoldenrod1",
+            "deeppink",
+            "indigo",
+            "orchid",
+            "peru",
+        ];
+
+        fs::write(
+            DOT_OUT,
+            format!(
+                "{:?}",
+                dot::Dot::with_attr_getters(
+                    &graph,
+                    &[dot::Config::NodeNoLabel, dot::Config::EdgeNoLabel],
+                    &|_, _| "arrowhead=none".to_owned(),
+                    &|_, (n, _)| format!("shape=point, color={}", cols[colouring[&n] % cols.len()])
+                )
+            ),
+        )?;
+
+        let dot_out = process::Command::new("dot")
+            .arg("-Tsvg")
+            .arg(DOT_OUT)
+            .output()?;
+
+        fs::remove_file(DOT_OUT)?;
+
+        println!("{}", std::str::from_utf8(&dot_out.stderr)?);
+
+        fs::write(SVG_OUT, dot_out.stdout)?;
 
         Ok(())
     }
