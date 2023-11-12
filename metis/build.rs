@@ -19,5 +19,9 @@ fn main() {
         .write_to_file(out_path.join("bindings.rs"))
         .expect("couldn't write bindings!");
 
-    println!("cargo:rerun-if-changed=wrapper.h");
+    //FIXME:
+    println!("cargo:rerun-wildcard=*.h");
+    //temp code to stop rerunning - above does not work
+    //println!("cargo:rerun-if-env-changed=VERSION");
+    //println!("cargo:rustc-env=VERSION={}", 1);
 }

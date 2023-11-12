@@ -1,3 +1,4 @@
+#[allow(unused_imports)]
 use crate::{
     idx_t, mctype_et_METIS_CTYPE_RM, mctype_et_METIS_CTYPE_SHEM, miptype_et_METIS_IPTYPE_EDGE,
     miptype_et_METIS_IPTYPE_GROW, miptype_et_METIS_IPTYPE_NODE, miptype_et_METIS_IPTYPE_RANDOM,
@@ -232,10 +233,10 @@ impl<'a> PartitioningConfig<'a> {
             options[moptions_et_METIS_OPTION_UFACTOR as usize] = x as idx_t;
         }
     }
-    pub fn partition_from_graph(
+    pub fn partition_from_graph<V, E>(
         &self,
         partitions: u32,
-        graph: &petgraph::Graph<i32, i32>,
+        graph: &petgraph::graph::UnGraph<V, E>,
     ) -> Result<Vec<idx_t>, PartitioningError> {
         let mut adjacency = Vec::new();
         let mut adjacency_idx = Vec::new();
@@ -247,10 +248,9 @@ impl<'a> PartitioningConfig<'a> {
                 adjacency.push(n.index() as i32)
             }
         }
+        //adjacency_idx.push(adjacency.len() as idx_t);
 
         let adjacency_weight = vec![1; adjacency.len()];
-
-        adjacency_idx.push(adjacency.len() as idx_t);
 
         let weights = Vec::new();
 

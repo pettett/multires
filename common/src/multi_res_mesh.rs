@@ -121,6 +121,7 @@ pub struct PartitionInfo {
     pub child_group_index: Option<usize>,
     /// Group in this layer. will be usize::MAX if not yet grouped, but always valid in a loaded asset
     pub group_index: usize,
+    /// For culling purposes - smallest bounding sphere for the partition
     pub tight_bound: BoundingSphere,
 }
 

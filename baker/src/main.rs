@@ -29,9 +29,7 @@ fn main() {
     let (mut working_mesh, verts) = WingedMesh::from_gltf(mesh_name);
 
     // Apply primary partition, that will define the lowest level clusterings
-    working_mesh
-        .partition(&config, (working_mesh.faces().len() as u32).div_ceil(60))
-        .unwrap();
+    working_mesh.partition_within_groups(&config, None).unwrap();
 
     working_mesh.group(&config, &verts).unwrap();
 
@@ -46,7 +44,7 @@ fn main() {
 
         println!("Face count L{}: {}", i + 1, working_mesh.face_count());
 
-        match working_mesh.partition_within_groups(&within_group_config) {
+        match working_mesh.partition_within_groups(&within_group_config, Some(2)) {
             Ok(partition_count) => {
                 // View a snapshot of the mesh without any re-groupings applied
                 //layers.push(to_mesh_layer(&next_mesh));
