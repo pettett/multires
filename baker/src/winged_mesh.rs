@@ -367,13 +367,11 @@ impl WingedMesh {
                 if let Some(twin) = self[e].twin {
                     let other_face = &self[twin].face;
 
-                    if i != other_face {
-                        graph.update_edge(
-                            petgraph::graph::NodeIndex::new(i.0),
-                            petgraph::graph::NodeIndex::new(other_face.0),
-                            (),
-                        );
-                    }
+                    graph.update_edge(
+                        petgraph::graph::NodeIndex::new(i.0),
+                        petgraph::graph::NodeIndex::new(other_face.0),
+                        (),
+                    );
                 }
             }
         }
@@ -422,39 +420,14 @@ impl WingedMesh {
     ) -> Result<(), PartitioningError> {
         println!("Partitioning into {partitions} partitions");
 
-        let mut adjacency = Vec::new(); // adjncy
-        let mut adjacency_idx = Vec::new(); // xadj
+        let part = config.partition_from_graph(partitions, &self.generate_face_graph())?;
 
-        for f in self.faces.values() {
-            // Some faces will have already been removed
-
-            adjacency_idx.push(adjacency.len() as idx_t);
-            for e in self.iter_edge_loop(f.edge) {
-                if let Some(twin) = self[e].twin {
-                    adjacency.push(self[twin].face.0 as i32);
-                }
-            }
-        }
-
-        let adjacency_weight = vec![1; adjacency.len()]; // adjcwgt
-
-        adjacency_idx.push(adjacency.len() as idx_t);
-
-        let weights = Vec::new();
-
-        let part = config.partition_from_adj(
-            partitions,
-            self.faces.len(),
-            weights,
-            adjacency,
-            adjacency_idx,
-            adjacency_weight,
-        )?;
+        assert_eq!(part.len(), self.faces.len());
 
         let mut max_part = 0;
-        for (i, f) in self.faces.values_mut().enumerate() {
+        for (i, f) in self.faces.iter_mut() {
             // Some faces will have already been removed
-            f.part = part[i] as usize;
+            f.part = part[i.0] as usize;
             max_part = max_part.max(f.part)
         }
 
@@ -521,6 +494,7 @@ impl WingedMesh {
                 .monotonic_bound
                 .translate(verts[self.edges[f.edge.0].vert_origin.0].xyz());
         }
+
         // Take averages
         for g in &mut self.groups {
             g.monotonic_bound.normalise(g.tris);
@@ -711,7 +685,7 @@ pub mod test {
     use metis::PartitioningConfig;
     use petgraph::{
         dot,
-        visit::{IntoEdgeReferences, IntoNodeReferences},
+        visit::{EdgeRef, IntoEdgeReferences, IntoNodeReferences},
     };
     use std::fs;
 
@@ -737,8 +711,12 @@ pub mod test {
         "C:\\Users\\maxwe\\OneDriveC\\sync\\projects\\multires\\baker\\hierarchy_graph.svg";
     pub const PART_SVG_OUT: &str =
         "C:\\Users\\maxwe\\OneDriveC\\sync\\projects\\multires\\baker\\part_graph.svg";
+
     pub const FACE_SVG_OUT: &str =
         "C:\\Users\\maxwe\\OneDriveC\\sync\\projects\\multires\\baker\\face_graph.svg";
+
+    pub const FACE_SVG_OUT_2: &str =
+        "C:\\Users\\maxwe\\OneDriveC\\sync\\projects\\multires\\baker\\face_graph2.svg";
 
     const COLS: [&str; 10] = [
         "red",
@@ -997,9 +975,57 @@ pub mod test {
     }
 
     #[test]
+    pub fn test_partition_continuity() -> Result<(), Box<dyn Error>> {
+        let test_config = &PartitioningConfig {
+            method: metis::PartitioningMethod::MultilevelKWay,
+            force_contiguous_partitions: Some(true),
+            minimize_subgraph_degree: Some(true),
+            ..Default::default()
+        };
+        let (mut mesh, verts) = WingedMesh::from_gltf(TEST_MESH_PLANE);
+
+        // Apply primary partition, that will define the lowest level clusterings
+        for i in 40..50 {
+            println!("{i}");
+
+            mesh.partition_full_mesh(test_config, i)?;
+
+            println!("Partitioned");
+            let mut graph = mesh.generate_face_graph();
+
+            graph.retain_edges(|g, e| {
+                let (v1, v2) = g.edge_endpoints(e).unwrap();
+
+                let &p1 = g.node_weight(v1).unwrap();
+                let &p2 = g.node_weight(v2).unwrap();
+
+                p1 == p2
+            });
+
+            let mut work = petgraph::algo::DfsSpace::default();
+
+            println!("Testing continuity");
+
+            for i in graph.node_indices() {
+                for j in graph.node_indices() {
+                    if graph.node_weight(j) == graph.node_weight(i) {
+                        assert!(petgraph::algo::has_path_connecting(
+                            &graph,
+                            i,
+                            j,
+                            Some(&mut work)
+                        ));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
     pub fn generate_face_graph() -> Result<(), Box<dyn Error>> {
         let test_config = &PartitioningConfig {
-            method: metis::PartitioningMethod::MultilevelRecursiveBisection,
+            method: metis::PartitioningMethod::MultilevelKWay,
             force_contiguous_partitions: Some(true),
             minimize_subgraph_degree: Some(true),
             ..Default::default()
@@ -1018,9 +1044,35 @@ pub mod test {
             mesh.partitions.len()
         );
 
+        let mut graph = mesh.generate_face_graph();
+
         petgraph_to_svg(
-            &mesh.generate_face_graph(),
+            &graph,
             FACE_SVG_OUT,
+            &|_, (n, &part)| {
+                let p = FaceID(n.index()).center(&mesh, &verts);
+                format!(
+                    "shape=point, color={}, pos=\"{},{}\"",
+                    COLS[part % COLS.len()],
+                    p.x * 200.0,
+                    p.z * 200.0,
+                )
+            },
+            true,
+        )?;
+
+        graph.retain_edges(|g, e| {
+            let (v1, v2) = g.edge_endpoints(e).unwrap();
+
+            let &p1 = g.node_weight(v1).unwrap();
+            let &p2 = g.node_weight(v2).unwrap();
+
+            p1 == p2
+        });
+
+        petgraph_to_svg(
+            &graph,
+            FACE_SVG_OUT_2,
             &|_, (n, &part)| {
                 let p = FaceID(n.index()).center(&mesh, &verts);
                 format!(
@@ -1039,7 +1091,7 @@ pub mod test {
     #[test]
     pub fn generate_partition_graph() -> Result<(), Box<dyn Error>> {
         let test_config = &PartitioningConfig {
-            method: metis::PartitioningMethod::MultilevelRecursiveBisection,
+            method: metis::PartitioningMethod::MultilevelKWay,
             force_contiguous_partitions: Some(true),
             minimize_subgraph_degree: Some(true),
             ..Default::default()
@@ -1057,7 +1109,7 @@ pub mod test {
             &mesh.generate_partition_graph(),
             PART_SVG_OUT,
             &|_, _| format!("shape=point"),
-            true,
+            false,
         )?;
 
         Ok(())
