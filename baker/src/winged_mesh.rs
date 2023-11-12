@@ -56,7 +56,7 @@ pub struct HalfEdge {
     pub valid: bool,
 }
 
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug, Clone, PartialEq)]
 pub struct Face {
     pub edge: EdgeID,
     pub part: usize,
@@ -642,7 +642,7 @@ impl WingedMesh {
 #[cfg(test)]
 pub mod test {
     use super::*;
-    use std::{error::Error, process};
+    use std::{collections::HashSet, error::Error, process};
 
     use metis::PartitioningConfig;
     use petgraph::dot;
@@ -709,6 +709,24 @@ pub mod test {
                 );
             }
         }
+        /// Find the inner boundary of a set of faces. Quite simple - record all edges we have seen, and any twins for those.
+        /// Inner boundary as will not include edges from an edge of the mesh, as these have no twins.
+        pub fn face_boundary(&self, faces: &Vec<&Face>) -> HashSet<EdgeID> {
+            let mut unseen_edges = HashSet::<EdgeID>::with_capacity(faces.len() * 3);
+
+            for face in faces {
+                for edge in self.iter_edge_loop(face.edge) {
+                    if let Some(t) = self[edge].twin {
+                        unseen_edges.insert(t);
+                    }
+                }
+            }
+
+            let all_unseen_edges = unseen_edges.clone();
+            unseen_edges.retain(|&edge| !all_unseen_edges.contains(&self[edge].twin.unwrap()));
+
+            unseen_edges
+        }
     }
 
     #[test]
@@ -744,6 +762,47 @@ pub mod test {
     }
 
     #[test]
+    pub fn test_faces_boundary() -> Result<(), Box<dyn Error>> {
+        let test_config = &PartitioningConfig {
+            method: metis::PartitioningMethod::MultilevelRecursiveBisection,
+            force_contiguous_partitions: Some(true),
+            minimize_subgraph_degree: Some(true),
+            ..Default::default()
+        };
+
+        let mesh = TEST_MESH_MID;
+        println!("Loading from gltf {:?}!", std::fs::canonicalize(mesh)?);
+        let (mut mesh, verts) = WingedMesh::from_gltf(mesh);
+
+        // Apply primary partition, that will define the lowest level clusterings
+        mesh.partition(test_config, (mesh.faces().len() as u32).div_ceil(60))?;
+
+        let mut boundary_face_ratio = 0.0;
+        for pi in 0..mesh.partitions.len() {
+            // Assert that new parts and the parts in group have the same boundary
+
+            let faces = mesh.faces.values().filter(|&f| pi == f.part).collect();
+
+            let boundary = mesh.face_boundary(&faces);
+
+            for &e in &boundary {
+                assert!(
+                    !faces.contains(&&mesh.faces[mesh[e].face]),
+                    "'Boundary' contains edge inside itself"
+                )
+            }
+
+            boundary_face_ratio += faces.len() as f32 / boundary.len() as f32;
+        }
+
+        boundary_face_ratio /= mesh.partitions.len() as f32;
+
+        println!("Average partition face count / boundary length: {boundary_face_ratio}");
+
+        Ok(())
+    }
+
+    #[test]
     pub fn test_group_repartitioning() -> Result<(), Box<dyn Error>> {
         let test_config = &PartitioningConfig {
             method: metis::PartitioningMethod::MultilevelRecursiveBisection,
@@ -752,54 +811,91 @@ pub mod test {
             ..Default::default()
         };
 
-        println!(
-            "Loading from gltf {:?}!",
-            std::fs::canonicalize(TEST_MESH_MID)?
-        );
-        let (mut mesh, verts) = WingedMesh::from_gltf(TEST_MESH_MID);
+        let mesh = TEST_MESH_MID;
+        println!("Loading from gltf {:?}!", std::fs::canonicalize(mesh)?);
+        let (mut mesh, verts) = WingedMesh::from_gltf(mesh);
 
         // Apply primary partition, that will define the lowest level clusterings
         mesh.partition(test_config, (mesh.faces().len() as u32).div_ceil(60))?;
 
         mesh.group(test_config, &verts)?;
 
-        let old_parts = mesh.partitions.clone();
+        let old_faces = mesh.faces.clone();
+
+        // Old parts must have no child - there is no LOD-1
+        for p in &mesh.partitions {
+            assert!(p.child_group_index.is_none());
+        }
 
         mesh.partition_within_groups(test_config)?;
 
         // assert that the group boundaries are the same
 
-        let mut new_groups = vec![Vec::new(); mesh.groups.len()];
-
-        // Old parts must have no child - there is no LOD-1
-        for p in &old_parts {
-            assert!(p.child_group_index.is_none());
-        }
+        // Same group indices, new set of partitions per group
+        let mut new_part_groups = vec![Vec::new(); mesh.groups.len()];
 
         // new parts must have no group - there is no grouping assigned yet
-        for p in &mesh.partitions {
+        for (i, p) in mesh.partitions.iter().enumerate() {
             assert_eq!(p.group_index, usize::MAX);
             assert!(p.child_group_index.is_some());
 
             let g_i = p.child_group_index.unwrap();
 
-            new_groups[g_i].push(p);
+            new_part_groups[g_i].push(i);
         }
 
-        let avg_size =
-            (new_groups.iter().map(|l| l.len()).sum::<usize>() as f32) / (new_groups.len() as f32);
+        let avg_size = (new_part_groups.iter().map(|l| l.len()).sum::<usize>() as f32)
+            / (new_part_groups.len() as f32);
 
         println!(
             "Test has grouped partitions into {} groups, with {} partitions average",
-            new_groups.len(),
+            new_part_groups.len(),
             avg_size
         );
 
+        let mut boundary_face_ratio = 0.0;
+
         for (gi, group) in mesh.groups.iter().enumerate() {
-            let new_parts = &new_groups[gi];
+            let new_parts = &new_part_groups[gi];
+            let old_parts = &group.partitions;
 
             // Assert that new parts and the parts in group have the same boundary
+
+            let old_faces = old_faces
+                .values()
+                .filter(|&f| old_parts.contains(&f.part))
+                .collect();
+            let new_faces = mesh
+                .faces
+                .values()
+                .filter(|&f| new_parts.contains(&f.part))
+                .collect();
+
+            let old_boundary = mesh.face_boundary(&old_faces);
+            let new_boundary = mesh.face_boundary(&new_faces);
+
+            boundary_face_ratio += old_faces.len() as f32 / old_boundary.len() as f32;
+
+            assert_eq!(
+                old_faces.len(),
+                new_faces.len(),
+                "Repartitioning of group without remesh changed face count"
+            );
+            assert_eq!(
+                old_boundary.len(),
+                new_boundary.len(),
+                "Repartitioning of group changed group boundary (len)"
+            );
+
+            assert!(
+                old_boundary.iter().all(|e| new_boundary.contains(e)),
+                "Repartitioning of group changed group boundary (edgeid)"
+            );
         }
+
+        boundary_face_ratio /= mesh.groups.len() as f32;
+
+        println!("Average group face count / boundary length: {boundary_face_ratio}");
 
         Ok(())
     }
@@ -812,12 +908,9 @@ pub mod test {
             minimize_subgraph_degree: Some(true),
             ..Default::default()
         };
-
-        println!(
-            "Loading from gltf {:?}!",
-            std::fs::canonicalize(TEST_MESH_LOW)?
-        );
-        let (mut mesh, verts) = WingedMesh::from_gltf(TEST_MESH_MID);
+        let mesh = TEST_MESH_HIGH;
+        println!("Loading from gltf {:?}!", std::fs::canonicalize(mesh)?);
+        let (mut mesh, verts) = WingedMesh::from_gltf(mesh);
 
         println!("Faces: {}, Verts: {}", mesh.face_count(), mesh.verts.len());
 
