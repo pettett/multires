@@ -1,6 +1,6 @@
 pub mod mesh;
 
-use common::{MeshLevel, Meshlet, SubMesh};
+use common::{asset::Asset, MeshLevel, Meshlet, MultiResMesh, SubMesh};
 
 use glam::Vec4;
 use mesh::winged_mesh::WingedMesh;
@@ -16,6 +16,122 @@ pub fn to_mesh_layer(mesh: &WingedMesh, verts: &[Vec4]) -> MeshLevel {
         partitions: mesh.partitions.clone(),
         groups: mesh.groups.clone(),
     }
+}
+
+pub fn group_and_partition_full_res(mut working_mesh: WingedMesh, verts: &[Vec4], name: String) {
+    let config = metis::PartitioningConfig {
+        method: metis::PartitioningMethod::MultilevelKWay,
+        force_contiguous_partitions: Some(true),
+        minimize_subgraph_degree: Some(true),
+        ..Default::default()
+    };
+
+    // Apply primary partition, that will define the lowest level clusterings
+    working_mesh.partition_within_groups(&config, None).unwrap();
+
+    working_mesh.group(&config, &verts).unwrap();
+
+    let mut layers = Vec::new();
+
+    layers.push(to_mesh_layer(&working_mesh, &verts));
+
+    // Generate 2 more meshes
+    for i in 0..10 {
+        // i = index of previous mesh layer
+        //working_mesh = reduce_mesh(working_mesh);
+
+        println!("Face count L{}: {}", i + 1, working_mesh.face_count());
+
+        match working_mesh.partition_within_groups(&config, Some(2)) {
+            Ok(partition_count) => {
+                // View a snapshot of the mesh without any re-groupings applied
+                //layers.push(to_mesh_layer(&next_mesh));
+
+                println!("{partition_count} Partitions from groups");
+
+                match working_mesh.group(&config, &verts) {
+                    Ok(group_count) => {
+                        // view a snapshot of the mesh ready to create the next layer
+                        // let error = (1.0 + i as f32) / 10.0 + rng.gen_range(-0.05..0.05);
+
+                        println!("{group_count} Groups from partitions");
+
+                        layers.push(to_mesh_layer(&working_mesh, &verts));
+
+                        if group_count == 1 {
+                            println!("Finished with single group");
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("{}", e);
+                        break;
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("{}", e);
+                break;
+            }
+        }
+    }
+
+    println!("Done with partitioning");
+
+    //assert_eq!(partitions1.len() * 3, layer_1_indices.len());
+
+    MultiResMesh {
+        name,
+        verts: verts.iter().map(|v| [v.x, v.y, v.z, 1.0]).collect(),
+        // layer_1_indices: indices.clone(),
+        lods: layers,
+    }
+    .save()
+    .unwrap();
+}
+
+pub fn apply_simplification(mut working_mesh: WingedMesh, verts: &[Vec4], name: String) {
+    let config = metis::PartitioningConfig {
+        method: metis::PartitioningMethod::MultilevelKWay,
+        force_contiguous_partitions: Some(true),
+        minimize_subgraph_degree: Some(true),
+        ..Default::default()
+    };
+
+    // Apply primary partition, that will define the lowest level clusterings
+    //working_mesh.partition_within_groups(&config, None).unwrap();
+
+    working_mesh.group(&config, &verts).unwrap();
+
+    let mut layers = Vec::new();
+
+    layers.push(to_mesh_layer(&working_mesh, &verts));
+
+    let mut quads = working_mesh.create_quadrics(verts);
+
+    // Generate 2 more meshes
+    for i in 0..2 {
+        // i = index of previous mesh layer
+        println!("Face count L{}: {}", i + 1, working_mesh.face_count());
+
+        working_mesh.reduce(verts, &mut quads);
+        // View a snapshot of the mesh without any re-groupings applied
+
+        layers.push(to_mesh_layer(&working_mesh, &verts));
+    }
+
+    println!("Done with partitioning");
+
+    //assert_eq!(partitions1.len() * 3, layer_1_indices.len());
+
+    MultiResMesh {
+        name,
+        verts: verts.iter().map(|v| [v.x, v.y, v.z, 1.0]).collect(),
+        // layer_1_indices: indices.clone(),
+        lods: layers,
+    }
+    .save()
+    .unwrap();
 }
 
 pub fn grab_indicies(mesh: &WingedMesh) -> Vec<u32> {

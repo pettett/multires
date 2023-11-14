@@ -12,3 +12,4 @@ glam.workspace = true
 idmap = "0.2"
 rand = "0.8"
 bytemuck.workspace = true
+priority-queue = "1.3"

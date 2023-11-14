@@ -203,6 +203,7 @@ impl WingedMesh {
     ///  C	|  D
     ///   \	| /
     /// 	B
+    ///
     pub fn collapse_edge(&mut self, eid: EdgeID) {
         //    println!("Collapsing edge {eid:?}");
 

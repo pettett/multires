@@ -18,5 +18,4 @@ common_renderer = { path = "../common_renderer" }
 egui = "0.23.0"
 egui-wgpu = { version = "0.23", features = ["winit"] }
 egui-winit = "0.23.0"
-egui_node_graph = { path = "../vendor/egui_node_graph/egui_node_graph" }
 anyhow = "1.0"

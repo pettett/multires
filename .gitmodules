@@ -1,6 +1,3 @@
 [submodule "vendor/metis"]
 	path = vendor/metis
 	url = https://github.com/scivision/METIS
-[submodule "vendor/egui_node_graph"]
-	path = vendor/egui_node_graph
-	url = https://github.com/MarkSwanson/egui_node_graph

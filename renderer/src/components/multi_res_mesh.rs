@@ -49,7 +49,7 @@ impl SubMeshComponent {
                 error < *target_error
             }
             ErrorMode::MaxError { error } => self.error < *error,
-            ErrorMode::ExactLayer { layer } => self.layer <= *layer,
+            ErrorMode::ExactLayer { layer } => self.layer == *layer, //FIXME:
         }
     }
 
@@ -171,11 +171,18 @@ impl MultiResMeshComponent {
 
         render_pass.set_bind_group(2, self.model.bind_group(), &[]);
 
-        render_pass.set_pipeline(renderer.render_pipeline());
-
         for submesh in submeshes.iter() {
             if submesh.r_should_draw(submeshes, self) {
                 //let submesh = submeshes.get(*s).unwrap();
+
+                render_pass.set_pipeline(renderer.render_pipeline_wire());
+
+                render_pass.set_bind_group(1, submesh.partitions.bind_group(), &[]);
+                render_pass.set_index_buffer(submesh.indices.slice(..), self.index_format);
+
+                render_pass.draw_indexed(0..submesh.index_count, 0, 0..1);
+
+                render_pass.set_pipeline(renderer.render_pipeline());
 
                 render_pass.set_bind_group(1, submesh.partitions.bind_group(), &[]);
                 render_pass.set_index_buffer(submesh.indices.slice(..), self.index_format);
@@ -187,7 +194,7 @@ impl MultiResMeshComponent {
         }
 
         // Draw bounds gizmos
-        //return;
+        return;
 
         render_pass.set_vertex_buffer(0, renderer.sphere_gizmo.verts.slice(..));
 

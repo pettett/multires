@@ -96,8 +96,8 @@ impl Renderer {
         surface.configure(&device, &config);
 
         let shader = device.create_shader_module(wgpu::include_wgsl!("../shaders/shader.wgsl"));
-        //let shader_wire =
-        //    device.create_shader_module(wgpu::include_wgsl!("../shaders/shader_wire.wgsl"));
+        let shader_wire =
+            device.create_shader_module(wgpu::include_wgsl!("../shaders/shader_wire.wgsl"));
 
         let camera_bind_group_layout = BindGroupLayout::create(
             &device,
@@ -185,7 +185,7 @@ impl Renderer {
         let render_pipeline_wire = make_render_pipeline(
             &device,
             &render_pipeline_layout,
-            &shader,
+            &shader_wire,
             config.format,
             wgpu::PolygonMode::Line,
         );

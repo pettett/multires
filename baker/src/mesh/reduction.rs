@@ -1,21 +1,26 @@
+use std::cmp;
+
+use glam::Vec4;
+
 use super::{
     vertex::{VertID, Vertex},
-    winged_mesh::{Face, FaceID, WingedMesh},
+    winged_mesh::{EdgeID, Face, FaceID, WingedMesh},
 };
 
 /// The fundamental error quadric `K_p`, such that `v^T K_p v` = `sqr distance v <-> p`
 /// Properties: Additive, Symmetric.
-pub fn fundamental_error_quadric(p: glam::Vec4) -> glam::Mat4 {
+pub fn fundamental_error_quadric(p: glam::DVec4) -> glam::DMat4 {
     let (a, b, c, d) = p.into();
 
     // Do `p p^T`
-    glam::Mat4::from_cols(a * p, b * p, c * p, d * p)
+    glam::DMat4::from_cols(a * p, b * p, c * p, d * p)
 }
 
 /// Calculate error from Q and vertex, `v^T K_p v`
-pub fn quadric_error(mat: glam::Mat4, v: glam::Vec3A) -> f32 {
+pub fn quadric_error(q: glam::DMat4, v: glam::Vec3A) -> f64 {
     let v: glam::Vec4 = (v, 1.0).into();
-    v.dot(mat * v)
+    let v: glam::DVec4 = v.into();
+    v.dot(q * v)
 }
 
 impl FaceID {
@@ -42,23 +47,124 @@ impl FaceID {
 
 impl VertID {
     /// Generate error matrix Q, the sum of Kp for all planes p around this vertex.
+    /// TODO: Eventually we can also add a high penality plane if this is a vertex on a boundary, but manually checking may be easier
     #[allow(non_snake_case)]
-    pub fn generate_error_matrix(&self, mesh: &WingedMesh, verts: &[glam::Vec4]) -> glam::Mat4 {
-        let mut Q = glam::Mat4::ZERO;
+    pub fn generate_error_matrix(&self, mesh: &WingedMesh, verts: &[glam::Vec4]) -> glam::DMat4 {
+        let mut Q = glam::DMat4::ZERO;
+
         for &e in self.outgoing_edges(mesh) {
             let f = mesh[e].face;
 
             let plane = f.plane(mesh, verts);
 
-            let Kp = fundamental_error_quadric(plane);
+            let Kp = fundamental_error_quadric(plane.into());
             Q += Kp;
         }
         Q
     }
 }
 
+impl EdgeID {
+    pub fn orig_dest(self, mesh: &WingedMesh) -> (VertID, VertID) {
+        let orig = mesh[self].vert_origin;
+        let dest = mesh[mesh[self].edge_left_cw].vert_origin;
+        (orig, dest)
+    }
+
+    /// Estimate the error introduced by collapsing this edge. Does not take into account penalties from flipping triangles
+    pub fn edge_collapse_error(
+        self,
+        mesh: &WingedMesh,
+        verts: &[glam::Vec4],
+        quadric_errors: &[glam::DMat4],
+    ) -> f64 {
+        let (orig, dest) = self.orig_dest(mesh);
+        let q = quadric_errors[orig.0] + quadric_errors[dest.0];
+        // Collapsing this edge would move the origin to the destination, so we find the error of the origin at the merged point.
+        quadric_error(q, verts[orig.0].into())
+    }
+}
+#[derive(PartialOrd, PartialEq)]
+struct OrdF64(f64);
+
+impl Eq for OrdF64 {}
+
+impl Ord for OrdF64 {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        if let Some(ordering) = self.partial_cmp(other) {
+            ordering
+        } else {
+            // Choose what to do with NaNs, for example:
+            panic!("Cannot order")
+        }
+    }
+}
+
 impl WingedMesh {
-    pub fn reduce(&mut self) {}
+    pub fn create_quadrics(&self, verts: &[glam::Vec4]) -> Vec<glam::DMat4> {
+        let mut quadrics = Vec::with_capacity(verts.len());
+
+        for (i, v) in self.verts.iter().enumerate() {
+            quadrics.push(VertID(i).generate_error_matrix(&self, verts))
+        }
+
+        quadrics
+    }
+    /// Returns estimate of error introduced by halving the number of triangles
+    pub fn reduce(&mut self, verts: &[glam::Vec4], quadrics: &mut [glam::DMat4]) -> f64 {
+        // Priority queue with every vertex and their errors.
+
+        let mut pq = priority_queue::PriorityQueue::with_capacity(self.edges.len());
+        let mut new_error = 0.0;
+        for (i, e) in self.edges.iter().enumerate() {
+            if e.valid {
+                let eid = EdgeID(i);
+                pq.push(
+                    eid,
+                    cmp::Reverse(OrdF64(eid.edge_collapse_error(&self, verts, &quadrics))),
+                );
+            }
+        }
+
+        let tris = self.face_count();
+        // Need to remove half the triangles - each reduction removes 2
+        let required_reductions = tris / 4;
+
+        for i in 0..required_reductions {
+            let (eid, cmp::Reverse(OrdF64(err))) = pq.pop().unwrap();
+
+            println!("Selected edge with error: {err}");
+
+            new_error += err;
+
+            // Collapse edge, and update quadrics (update before collapsing, as vertex becomes invalid)
+
+            let (orig, dest) = eid.orig_dest(&self);
+            quadrics[dest.0] += quadrics[orig.0];
+
+            //TODO: When we collapse an edge, recalculate any effected edges.
+
+            let mut effected_edges: Vec<_> = orig.outgoing_edges(self).to_vec();
+            effected_edges.extend(orig.incoming_edges(self));
+            effected_edges.extend(dest.outgoing_edges(self));
+            effected_edges.extend(dest.incoming_edges(self));
+
+            self.collapse_edge(eid);
+
+            for e in effected_edges {
+                if self.edges[e.0].valid {
+                    pq.push(
+                        e,
+                        cmp::Reverse(OrdF64(e.edge_collapse_error(&self, verts, &quadrics))),
+                    );
+                } else {
+                    pq.remove(&e);
+                }
+            }
+        }
+
+        new_error
+    }
 }
 
 #[cfg(test)]
@@ -117,7 +223,7 @@ mod tests {
         for (i, (&fid, f)) in mesh.faces.iter().enumerate() {
             let plane = fid.plane(&mesh, &verts);
 
-            let mat = fundamental_error_quadric(plane);
+            let mat = fundamental_error_quadric(plane.into());
 
             let cols = mat.to_cols_array_2d();
 
@@ -141,7 +247,7 @@ mod tests {
             for &v in &random_points {
                 let q_error = quadric_error(mat, v);
                 let p_dist = plane_distance(plane, v);
-                let sqr_p_dist = p_dist * p_dist;
+                let sqr_p_dist = (p_dist * p_dist) as f64;
 
                 assert!(
                     q_error - sqr_p_dist < e,
@@ -158,8 +264,7 @@ mod tests {
     pub fn test_vert_quadrics() -> Result<(), Box<dyn Error>> {
         let (mesh, verts) = WingedMesh::from_gltf(TEST_MESH_HIGH);
 
-        // These operations are not especially accurate, large epsilon value, only valid for errors within around 50 units.
-        let e = 0.0001;
+        let e = 0.0000000001;
 
         for (i, v) in mesh.verts.iter().enumerate() {
             let vid = VertID(i);
