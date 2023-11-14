@@ -1,25 +1,19 @@
-use baker::{to_mesh_layer, winged_mesh::WingedMesh};
-use common::{asset::Asset, MeshLevel, Meshlet, MultiResMesh, SubMesh};
+use baker::{mesh::winged_mesh::WingedMesh, to_mesh_layer};
+use common::{asset::Asset, MultiResMesh};
 use metis::PartitioningConfig;
-use rand::Rng;
-use std::{
-    collections::{HashMap, HashSet},
-    time,
-};
 
 fn main() {
     let mesh_name = "../assets/sphere_low.glb";
-    //let mut rng = rand::thread_rng();
 
     let config = PartitioningConfig {
-        method: metis::PartitioningMethod::MultilevelRecursiveBisection,
+        method: metis::PartitioningMethod::MultilevelKWay,
         force_contiguous_partitions: Some(true),
         minimize_subgraph_degree: Some(true),
         ..Default::default()
     };
 
     let within_group_config = PartitioningConfig {
-        method: metis::PartitioningMethod::MultilevelRecursiveBisection,
+        method: metis::PartitioningMethod::MultilevelKWay,
         force_contiguous_partitions: Some(true),
         minimize_subgraph_degree: Some(true),
         ..Default::default()
@@ -35,12 +29,12 @@ fn main() {
 
     let mut layers = Vec::new();
 
-    layers.push(to_mesh_layer(&working_mesh));
+    layers.push(to_mesh_layer(&working_mesh, &verts));
 
     // Generate 2 more meshes
     for i in 0..10 {
         // i = index of previous mesh layer
-        //let mut next_mesh = reduce_mesh(&meshlets, meshes[i].clone());
+        //working_mesh = reduce_mesh(working_mesh);
 
         println!("Face count L{}: {}", i + 1, working_mesh.face_count());
 
@@ -58,7 +52,7 @@ fn main() {
 
                         println!("{group_count} Groups from partitions");
 
-                        layers.push(to_mesh_layer(&working_mesh));
+                        layers.push(to_mesh_layer(&working_mesh, &verts));
 
                         if group_count == 1 {
                             println!("Finished with single group");

@@ -1,21 +1,18 @@
-pub mod mesh_iter;
-pub mod vertex;
-pub mod winged_mesh;
+pub mod mesh;
 
 use common::{MeshLevel, Meshlet, SubMesh};
 
-use rand::Rng;
-use vertex::VertID;
+use glam::Vec4;
+use mesh::winged_mesh::WingedMesh;
+// use meshopt::VertexDataAdapter;
 
-use crate::winged_mesh::WingedMesh;
-
-pub fn to_mesh_layer(mesh: &WingedMesh) -> MeshLevel {
+pub fn to_mesh_layer(mesh: &WingedMesh, verts: &[Vec4]) -> MeshLevel {
     MeshLevel {
         partition_indices: mesh.get_partition(),
         group_indices: mesh.get_group(),
         indices: grab_indicies(&mesh),
         meshlets: vec![], //generate_meshlets(&mesh),
-        submeshes: generate_submeshes(mesh),
+        submeshes: generate_submeshes(mesh, verts),
         partitions: mesh.partitions.clone(),
         groups: mesh.groups.clone(),
     }
@@ -25,7 +22,10 @@ pub fn grab_indicies(mesh: &WingedMesh) -> Vec<u32> {
     let mut indices = Vec::with_capacity(mesh.face_count() * 3);
 
     for f in mesh.faces().values() {
-        indices.extend(mesh.triangle_from_face(f));
+        let [a, b, c] = mesh.triangle_from_face(f);
+        indices.push(a as _);
+        indices.push(b as _);
+        indices.push(c as _);
     }
 
     // Validation
@@ -81,7 +81,7 @@ pub fn generate_meshlets(mesh: &WingedMesh) -> Vec<Meshlet> {
 }
 
 /// Debug code to generate meshlets with no max size. Used for testing partition trees with no remeshing
-pub fn generate_submeshes(mesh: &WingedMesh) -> Vec<SubMesh> {
+pub fn generate_submeshes(mesh: &WingedMesh, verts: &[Vec4]) -> Vec<SubMesh> {
     println!("Generating meshlets!");
 
     let inds = 5.0 / mesh.face_count() as f32;
@@ -114,49 +114,56 @@ pub fn generate_submeshes(mesh: &WingedMesh) -> Vec<SubMesh> {
         m.error += inds;
     }
 
+    // let data = VertexDataAdapter::new(bytemuck::cast_slice(&verts), std::mem::size_of::<Vec4>(), 0)
+    //     .unwrap();
+
+    // for s in &mut submeshes {
+    //     s.indices = meshopt::simplify(&s.indices, &data, s.indices.len() / 2, 0.01);
+    // }
+
     submeshes
 }
 
-pub fn reduce_mesh(meshlets: &[Meshlet], mut mesh: WingedMesh) -> WingedMesh {
-    let mut rng = rand::thread_rng();
+// pub fn reduce_mesh(mut mesh: WingedMesh) -> WingedMesh {
+//     let mut rng = rand::thread_rng();
 
-    for (i, m) in meshlets.iter().enumerate() {
-        //println!("Reducing meshlet {i}/{}", meshlets.len());
+//     for (i, m) in mesh.groups.iter().enumerate() {
+//         //println!("Reducing meshlet {i}/{}", meshlets.len());
 
-        // reduce triangle count in meshlet by half
+//         // reduce triangle count in meshlet by half
 
-        let mut tris = m.index_count / 3;
-        let target = tris * 3 / 4;
+//         // let mut tris = m.tris;
+//         // let target = tris * 3 / 4;
 
-        let mut todo: Vec<_> = (0..m.vertex_count as usize).collect();
+//         // let mut todo: Vec<_> = (0..m.vertex_count as usize).collect();
 
-        while tris > target && todo.len() > 0 {
-            // Pick a random edge in the mesh for now
-            let i = rng.gen_range(0..todo.len());
-            let v = VertID(m.vertices[todo[i]] as usize);
-            todo.swap_remove(i);
+//         // while tris > target && todo.len() > 0 {
+//         //     // Pick a random edge in the mesh for now
+//         //     let i = rng.gen_range(0..todo.len());
+//         //     let v = VertID(m.vertices[todo[i]] as usize);
+//         //     todo.swap_remove(i);
 
-            // println!("{i} {tris}/ {target}, {v:?}");
+//         //     // println!("{i} {tris}/ {target}, {v:?}");
 
-            let Some(i) = mesh[v].edge else {
-                continue;
-            };
+//         //     let Some(i) = mesh[v].edge else {
+//         //         continue;
+//         //     };
 
-            let valid_edge = v.is_local_manifold(&mesh, true);
+//         //     let valid_edge = v.is_local_manifold(&mesh, true);
 
-            if valid_edge {
-                // all faces are within the partition, we can safely collapse one of the edges
+//         //     if valid_edge {
+//         //         // all faces are within the partition, we can safely collapse one of the edges
 
-                mesh.collapse_edge(i);
+//         //         mesh.collapse_edge(i);
 
-                tris -= 2;
+//         //         tris -= 2;
 
-                // println!("Collapsed edge {e:?}");
+//         //         // println!("Collapsed edge {e:?}");
 
-                //break;
-            }
-        }
-    }
+//         //         //break;
+//         //     }
+//         // }
+//     }
 
-    mesh
-}
+//     mesh
+// }

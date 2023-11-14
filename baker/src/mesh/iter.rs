@@ -1,4 +1,4 @@
-use crate::winged_mesh::{EdgeID, HalfEdge, WingedMesh};
+use super::winged_mesh::{EdgeID, HalfEdge, WingedMesh};
 
 pub struct EdgeIter<'a> {
     mesh: &'a WingedMesh,

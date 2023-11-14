@@ -1,4 +1,4 @@
-use crate::winged_mesh::{EdgeID, WingedMesh};
+use super::winged_mesh::{EdgeID, WingedMesh};
 
 #[derive(Default, Hash, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct VertID(pub usize);

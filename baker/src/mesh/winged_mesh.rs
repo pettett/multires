@@ -4,8 +4,8 @@ use idmap::IntegerId;
 use metis::{idx_t, PartitioningConfig, PartitioningError};
 use std::collections::HashMap;
 
-use crate::{
-    mesh_iter::{AllEdgeIter, EdgeIter},
+use super::{
+    iter::{AllEdgeIter, EdgeIter},
     vertex::{VertID, Vertex},
 };
 
@@ -75,10 +75,10 @@ pub struct Face {
 
 #[derive(Debug, Clone)]
 pub struct WingedMesh {
-    verts: Vec<Vertex>,
-    faces: idmap::DirectIdMap<FaceID, Face>,
-    edges: Vec<HalfEdge>,
-    edge_map: HashMap<VertID, Vec<EdgeID>>,
+    pub verts: Vec<Vertex>,
+    pub faces: idmap::DirectIdMap<FaceID, Face>,
+    pub edges: Vec<HalfEdge>,
+    pub edge_map: HashMap<VertID, Vec<EdgeID>>,
     pub partitions: Vec<PartitionInfo>,
     pub groups: Vec<GroupInfo>,
 }
@@ -261,13 +261,13 @@ impl WingedMesh {
             .distance_squared(verts[self.edges[e.edge_left_cw.0].vert_origin.0]);
     }
 
-    pub fn triangle_from_face(&self, face: &Face) -> [u32; 3] {
+    pub fn triangle_from_face(&self, face: &Face) -> [usize; 3] {
         let verts: Vec<usize> = self
             .iter_edge_loop(face.edge)
             .map(|e| self[e].vert_origin.into())
             .collect();
 
-        [verts[0] as _, verts[1] as _, verts[2] as _]
+        [verts[0], verts[1], verts[2]]
     }
 
     pub fn from_gltf(path: impl AsRef<std::path::Path>) -> (Self, Box<[Vec4]>) {
@@ -689,7 +689,7 @@ pub mod test {
     };
     use std::fs;
 
-    use crate::winged_mesh::WingedMesh;
+    use crate::mesh::winged_mesh::WingedMesh;
     pub const TEST_MESH_HIGH: &str =
         "C:\\Users\\maxwe\\OneDriveC\\sync\\projects\\assets\\sphere.glb";
 
@@ -799,7 +799,7 @@ pub mod test {
     #[test]
     pub fn test_continued_validity() -> Result<(), Box<dyn Error>> {
         let test_config = &PartitioningConfig {
-            method: metis::PartitioningMethod::MultilevelRecursiveBisection,
+            method: metis::PartitioningMethod::MultilevelKWay,
             force_contiguous_partitions: Some(true),
             minimize_subgraph_degree: Some(true),
             ..Default::default()
@@ -835,7 +835,7 @@ pub mod test {
     #[test]
     pub fn test_faces_boundary() -> Result<(), Box<dyn Error>> {
         let test_config = &PartitioningConfig {
-            method: metis::PartitioningMethod::MultilevelRecursiveBisection,
+            method: metis::PartitioningMethod::MultilevelKWay,
             force_contiguous_partitions: Some(true),
             minimize_subgraph_degree: Some(true),
             ..Default::default()
@@ -879,7 +879,7 @@ pub mod test {
     #[test]
     pub fn test_group_repartitioning() -> Result<(), Box<dyn Error>> {
         let test_config = &PartitioningConfig {
-            method: metis::PartitioningMethod::MultilevelRecursiveBisection,
+            method: metis::PartitioningMethod::MultilevelKWay,
             force_contiguous_partitions: Some(true),
             minimize_subgraph_degree: Some(true),
             ..Default::default()
@@ -982,10 +982,10 @@ pub mod test {
             minimize_subgraph_degree: Some(true),
             ..Default::default()
         };
-        let (mut mesh, verts) = WingedMesh::from_gltf(TEST_MESH_PLANE);
+        let (mut mesh, verts) = WingedMesh::from_gltf(TEST_MESH_LOW);
 
         // Apply primary partition, that will define the lowest level clusterings
-        for i in 40..50 {
+        for i in 9..50 {
             println!("{i}");
 
             mesh.partition_full_mesh(test_config, i)?;
@@ -1008,7 +1008,7 @@ pub mod test {
 
             for i in graph.node_indices() {
                 for j in graph.node_indices() {
-                    if graph.node_weight(j) == graph.node_weight(i) {
+                    if graph.node_weight(j) == graph.node_weight(i) && i > j {
                         assert!(petgraph::algo::has_path_connecting(
                             &graph,
                             i,
@@ -1118,7 +1118,7 @@ pub mod test {
     #[test]
     pub fn generate_partition_hierarchy_graph() -> Result<(), Box<dyn Error>> {
         let test_config = &PartitioningConfig {
-            method: metis::PartitioningMethod::MultilevelRecursiveBisection,
+            method: metis::PartitioningMethod::MultilevelKWay,
             force_contiguous_partitions: Some(true),
             minimize_subgraph_degree: Some(true),
             ..Default::default()
