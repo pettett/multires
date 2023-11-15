@@ -110,7 +110,7 @@ pub fn apply_simplification(mut working_mesh: WingedMesh, verts: &[Vec4], name: 
     let mut quads = working_mesh.create_quadrics(verts);
 
     // Generate 2 more meshes
-    for i in 0..2 {
+    for i in 0..8 {
         // i = index of previous mesh layer
         println!("Face count L{}: {}", i + 1, working_mesh.face_count());
 

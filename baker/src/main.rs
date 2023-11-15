@@ -1,7 +1,7 @@
 use baker::{apply_simplification, group_and_partition_full_res, mesh::winged_mesh::WingedMesh};
 
 fn main() {
-    let mesh_name = "../assets/monk.glb";
+    let mesh_name = "../assets/sphere.glb";
 
     println!("Loading from gltf!");
     let (working_mesh, verts) = WingedMesh::from_gltf(mesh_name);

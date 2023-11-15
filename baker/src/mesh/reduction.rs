@@ -1,6 +1,6 @@
 use std::cmp;
 
-use glam::Vec4;
+use glam::{Vec4, Vec4Swizzles};
 
 use super::{
     vertex::{VertID, Vertex},
@@ -9,6 +9,19 @@ use super::{
 
 /// Quadric type. Internally a DMat4, kept private to ensure only valid reduction operations can effect it.
 pub struct Quadric(glam::DMat4);
+
+pub fn plane_from_three_points(a: glam::Vec3A, b: glam::Vec3A, c: glam::Vec3A) -> glam::Vec4 {
+    let ab = b - a;
+    let ac = c - a;
+
+    let normal = glam::Vec3A::cross(ab, ac).normalize();
+
+    let d = -a.dot(normal);
+
+    let plane: glam::Vec4 = (normal, d).into();
+
+    plane
+}
 
 /// The fundamental error quadric `K_p`, such that `v^T K_p v` = `sqr distance v <-> p`
 /// Properties: Additive, Symmetric.
@@ -32,20 +45,7 @@ impl FaceID {
     pub fn plane(&self, mesh: &WingedMesh, verts: &[glam::Vec4]) -> glam::Vec4 {
         let [a, b, c] = mesh.triangle_from_face(&mesh.faces[self]);
 
-        let a: glam::Vec3A = verts[a].into();
-        let b: glam::Vec3A = verts[b].into();
-        let c: glam::Vec3A = verts[c].into();
-
-        let ab = b - a;
-        let ac = c - a;
-
-        let normal = glam::Vec3A::cross(ab, ac).normalize();
-
-        let d = -a.dot(normal);
-
-        let plane: glam::Vec4 = (normal, d).into();
-
-        plane
+        plane_from_three_points(verts[a].into(), verts[b].into(), verts[c].into())
     }
 }
 
@@ -85,6 +85,35 @@ impl EdgeID {
         let (orig, dest) = self.orig_dest(mesh);
         let q = Quadric(quadric_errors[orig.0].0 + quadric_errors[dest.0].0);
         // Collapsing this edge would move the origin to the destination, so we find the error of the origin at the merged point.
+
+        // Test normals of triangles before and after the swap
+
+        for &e in mesh[orig].outgoing_edges() {
+            if e == self {
+                continue;
+            }
+
+            let f = mesh[e].face;
+            let [a, b, c] = mesh.triangle_from_face(&mesh.faces[f]);
+
+            let starting_plane =
+                plane_from_three_points(verts[a].into(), verts[b].into(), verts[c].into());
+
+            let end_plane = if orig.0 == a {
+                plane_from_three_points(verts[orig.0].into(), verts[b].into(), verts[c].into())
+            } else if orig.0 == b {
+                plane_from_three_points(verts[a].into(), verts[orig.0].into(), verts[c].into())
+            } else {
+                assert_eq!(orig.0, c);
+                plane_from_three_points(verts[a].into(), verts[b].into(), verts[orig.0].into())
+            };
+
+            if starting_plane.xyz().dot(end_plane.xyz()) < 0.5 {
+                // Flipped triangle, give this a very high weight
+                return f64::MAX;
+            }
+        }
+
         q.quadric_error(verts[orig.0].into())
     }
 }
@@ -121,7 +150,7 @@ impl WingedMesh {
         let mut pq = priority_queue::PriorityQueue::with_capacity(self.edges.len());
         let mut new_error = 0.0;
         for (i, e) in self.edges.iter().enumerate() {
-            if e.valid {
+            if e.valid && self.verts.contains_key(e.vert_origin) {
                 let eid = EdgeID(i);
                 pq.push(
                     eid,
@@ -146,6 +175,15 @@ impl WingedMesh {
             // Collapse edge, and update quadrics (update before collapsing, as vertex becomes invalid)
 
             let (orig, dest) = eid.orig_dest(&self);
+
+            #[cfg(not(test))]
+            {
+                if !self.verts.contains_key(orig) || !self.verts.contains_key(dest) {
+                    println!("Warning - drawn 'valid' edge with no orig or dest");
+                    continue;
+                }
+            }
+
             quadrics[dest.0].0 += quadrics[orig.0].0;
 
             //TODO: When we collapse an edge, recalculate any effected edges.
@@ -158,24 +196,11 @@ impl WingedMesh {
             self.collapse_edge(eid);
 
             for e in effected_edges {
-                if self.edges[e.0].valid {
+                if self.edges[e.0].valid && self.verts.contains_key(self.edges[e.0].vert_origin) {
                     pq.push(
                         e,
                         cmp::Reverse(OrdF64(e.edge_collapse_error(&self, verts, &quadrics))),
                     );
-
-                    if let Some(t) = self.edges[e.0].twin {
-                        if self.edges[t.0].valid {
-                            pq.push(
-                                t,
-                                cmp::Reverse(OrdF64(
-                                    t.edge_collapse_error(&self, verts, &quadrics),
-                                )),
-                            );
-                        } else {
-                            pq.remove(&t);
-                        }
-                    }
                 } else {
                     pq.remove(&e);
                 }

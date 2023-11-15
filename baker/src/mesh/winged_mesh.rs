@@ -185,18 +185,6 @@ impl WingedMesh {
 
             self[e].valid = false;
         }
-
-        // I have no idea what this was ever for
-        // TODO: inefficient
-        // for i in 0..3 {
-        //     // Make sure vertexes are not referencing this triangle
-        //     let v = self.edges[tri[i].0].vert_origin;
-
-        //     // TODO: smarter selection of verts that require updating
-        //     // if self[v].edge.is_some() {
-        //     //     self[v].edge = v.outgoing_edges(self).get(0).copied();
-        //     // }
-        // }
     }
 
     /// Collapse an edge so it no longer exists, the source vertex is no longer referenced,
@@ -223,14 +211,12 @@ impl WingedMesh {
             self.collapse_tri(e0t);
         };
 
-        //self.verts[vb.0].edge = None;
-
         // Remove `vert_origin`
 
-        //let vert_a = self.verts.entry(va).or_insert(Vertex::default());
-
         // Main issue is a situation where triangles do not fan around the cake in both directions
-        // This will collapse an edge to have dest and source in same position
+        // This will collapse an edge to have dest and source in same position.
+        // Because of this, we need to store all ingoings and outgoings per vertex, which isn't the worst in the world
+        // Although it would save a bit of memory to just store every fan
         let b_outgoings = self.verts[vb].outgoing_edges().to_vec();
 
         for b_outgoing in b_outgoings {
