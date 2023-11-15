@@ -306,4 +306,14 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    pub fn test_reduction() -> Result<(), Box<dyn Error>> {
+        let (mut mesh, verts) = WingedMesh::from_gltf(TEST_MESH_HIGH);
+
+        let mut quadrics = mesh.create_quadrics(&verts);
+        mesh.reduce(&verts, &mut quadrics);
+
+        Ok(())
+    }
 }

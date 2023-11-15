@@ -164,12 +164,14 @@ impl WingedMesh {
 
             if let Some(xs) = self.verts.get_mut(self[t].vert_origin) {
                 xs.remove_outgoing(t);
+                xs.remove_incoming(self.edges[t.0].edge_left_ccw);
             }
 
             self[t].vert_origin = self[tri[1]].vert_origin;
 
             if let Some(xs) = self.verts.get_mut(self[t].vert_origin) {
                 xs.add_outgoing(t);
+                xs.add_incoming(self.edges[t.0].edge_left_ccw);
             }
 
             self[t].twin = self[tri[1]].twin;
@@ -178,6 +180,7 @@ impl WingedMesh {
         for &e in &tri {
             if let Some(xs) = self.verts.get_mut(self[e].vert_origin) {
                 xs.remove_outgoing(e);
+                xs.remove_incoming(self.edges[e.0].edge_left_ccw);
             }
 
             self[e].valid = false;
@@ -224,7 +227,7 @@ impl WingedMesh {
         // Remove `vert_origin`
         self.verts.remove(&vb);
 
-        let va_outgoing = self.verts.entry(va).or_insert(Vertex::default());
+        let vert_a = self.verts.entry(va).or_insert(Vertex::default());
 
         // Main issue is a situation where triangles do not fan around the cake in both directions
         // This will collapse an edge to have dest and source in same position
@@ -243,7 +246,10 @@ impl WingedMesh {
 
                 self.edges[i].vert_origin = va;
 
-                va_outgoing.add_outgoing(EdgeID(i));
+                // Moving this origin moves both the start of this edge and the dest of the previous edge
+                vert_a.add_outgoing(EdgeID(i));
+                vert_a.add_incoming(self.edges[i].edge_left_ccw);
+
                 //self.edge_map.insert(
                 //    (other_edge.vert_origin, other_edge.vert_destination),
                 //    EdgeID(i),
@@ -251,6 +257,10 @@ impl WingedMesh {
             }
         }
 
+        #[cfg(test)]
+        {
+            self.assert_valid();
+        }
         //self.assert_valid();
     }
 
@@ -319,6 +329,11 @@ impl WingedMesh {
             .entry(orig)
             .or_insert(Vertex::default())
             .add_outgoing(eid);
+
+        self.verts
+            .entry(dest)
+            .or_insert(Vertex::default())
+            .add_incoming(eid);
 
         self.edges.push(e);
     }
@@ -730,32 +745,33 @@ pub mod test {
                 //assert_eq!(edges[2].vert_destination, edges[0].vert_origin);
             }
 
-            for i in 0..self.verts.len() {
-                self.assert_vertex_valid(VertID(i));
-            }
-
-            for (k, v) in &self.verts {
-                for e in v.outgoing_edges() {
-                    assert!(
-                        self.edges[e.0].valid,
-                        "Edge valid error - Edge map is invalidated"
-                    );
-                    assert!(
-                        self.edges[e.0].vert_origin == *k,
-                        "Source error - Edge map is invalidated"
-                    );
-                }
+            for (&vid, vert) in &self.verts {
+                self.assert_vertex_valid(vid);
             }
         }
-        pub fn assert_vertex_valid(&self, i: VertID) {
-            for e in i.outgoing_edges(self) {
+        pub fn assert_vertex_valid(&self, vid: VertID) {
+            if !self.verts.contains_key(vid) {
+                return;
+            }
+
+            for e in self.verts[vid].outgoing_edges() {
                 assert!(
                     self.edges[e.0].valid,
-                    "Invalid vertex edge reference- Mesh made invalid on V{i:?} "
+                    "Invalid vertex edge reference- Mesh made invalid on V{vid:?} "
                 );
                 assert!(
-                    self.edges[e.0].vert_origin == i,
-                    "Invalid vertex edge source loop - Mesh made invalid on V{i:?} "
+                    self.edges[e.0].vert_origin == vid,
+                    "Invalid vertex edge source loop - Mesh made invalid on V{vid:?} "
+                );
+            }
+            for e in self.verts[vid].incoming_edges() {
+                assert!(
+                    self.edges[e.0].valid,
+                    "Invalid vertex edge reference- Mesh made invalid on V{vid:?} "
+                );
+                assert!(
+                    self.edges[self.edges[e.0].edge_left_cw.0].vert_origin == vid,
+                    "Invalid vertex edge dest loop - Mesh made invalid on V{vid:?} "
                 );
             }
         }
