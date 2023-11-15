@@ -26,7 +26,33 @@ impl IntegerId for VertID {
 #[derive(Default, Debug, Clone)]
 pub struct Vertex {
     // Edge with vert_source = this id
-    pub outgoing_edges: Vec<EdgeID>,
+    outgoing_edges: Vec<EdgeID>,
+    incoming_edges: Vec<EdgeID>,
+}
+
+impl Vertex {
+    pub fn remove_outgoing(&mut self, e: EdgeID) {
+        let index = self.outgoing_edges.iter().position(|&x| x == e).unwrap();
+        self.outgoing_edges.swap_remove(index);
+    }
+    pub fn remove_incoming(&mut self, e: EdgeID) {
+        let index = self.incoming_edges.iter().position(|&x| x == e).unwrap();
+        self.incoming_edges.swap_remove(index);
+    }
+    pub fn add_outgoing(&mut self, e: EdgeID) {
+        self.outgoing_edges.push(e);
+    }
+    pub fn add_incoming(&mut self, e: EdgeID) {
+        self.incoming_edges.push(e);
+    }
+
+    pub fn outgoing_edges(&self) -> &[EdgeID] {
+        self.outgoing_edges.as_ref()
+    }
+
+    pub fn incoming_edges(&self) -> &[EdgeID] {
+        self.incoming_edges.as_ref()
+    }
 }
 
 impl VertID {
