@@ -58,9 +58,10 @@ impl Vertex {
 impl VertID {
     /// Does this vertex have a complete fan of triangles surrounding it?
     pub fn is_local_manifold(&self, mesh: &WingedMesh, is_group_manifold: bool) -> bool {
-        let Some(&eid_first) = self.outgoing_edges(mesh).get(0) else {
+        let Some(vert) = mesh.verts.get(self) else {
             return false;
         };
+        let eid_first = vert.outgoing_edges()[0];
 
         let mut eid = eid_first;
 
@@ -93,27 +94,5 @@ impl VertID {
                 return true;
             }
         }
-    }
-
-    pub fn incoming_edges(self, mesh: &WingedMesh) -> Vec<EdgeID> {
-        mesh.edges()
-            .iter()
-            .enumerate()
-            .filter_map(|(i, e)| {
-                if e.valid && mesh[e.edge_left_cw].vert_origin == self {
-                    Some(EdgeID(i))
-                } else {
-                    None
-                }
-            })
-            .collect()
-    }
-
-    pub fn outgoing_edges(self, mesh: &WingedMesh) -> &[EdgeID] {
-        const EMPTY: &[EdgeID] = &[];
-        mesh.verts
-            .get(&self)
-            .map(|v| &v.outgoing_edges[..])
-            .unwrap_or(EMPTY)
     }
 }

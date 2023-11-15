@@ -56,7 +56,7 @@ impl VertID {
     pub fn generate_error_matrix(&self, mesh: &WingedMesh, verts: &[glam::Vec4]) -> Quadric {
         let mut Q = Quadric(glam::DMat4::ZERO);
 
-        for &e in self.outgoing_edges(mesh) {
+        for &e in mesh.verts[self].outgoing_edges() {
             let f = mesh[e].face;
 
             let plane = f.plane(mesh, verts);
@@ -150,10 +150,10 @@ impl WingedMesh {
 
             //TODO: When we collapse an edge, recalculate any effected edges.
 
-            let mut effected_edges: Vec<_> = orig.outgoing_edges(self).to_vec();
-            effected_edges.extend(dest.outgoing_edges(self));
-            effected_edges.extend(orig.incoming_edges(self));
-            effected_edges.extend(dest.incoming_edges(self));
+            let mut effected_edges: Vec<_> = self.verts[orig].outgoing_edges().to_vec();
+            effected_edges.extend(self.verts[dest].outgoing_edges());
+            effected_edges.extend(self.verts[orig].incoming_edges());
+            effected_edges.extend(self.verts[dest].incoming_edges());
 
             self.collapse_edge(eid);
 

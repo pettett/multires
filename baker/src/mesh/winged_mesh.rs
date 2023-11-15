@@ -186,16 +186,17 @@ impl WingedMesh {
             self[e].valid = false;
         }
 
+        // I have no idea what this was ever for
         // TODO: inefficient
-        for i in 0..3 {
-            // Make sure vertexes are not referencing this triangle
-            let v = self.edges[tri[i].0].vert_origin;
+        // for i in 0..3 {
+        //     // Make sure vertexes are not referencing this triangle
+        //     let v = self.edges[tri[i].0].vert_origin;
 
-            // TODO: smarter selection of verts that require updating
-            // if self[v].edge.is_some() {
-            //     self[v].edge = v.outgoing_edges(self).get(0).copied();
-            // }
-        }
+        //     // TODO: smarter selection of verts that require updating
+        //     // if self[v].edge.is_some() {
+        //     //     self[v].edge = v.outgoing_edges(self).get(0).copied();
+        //     // }
+        // }
     }
 
     /// Collapse an edge so it no longer exists, the source vertex is no longer referenced,
@@ -225,37 +226,25 @@ impl WingedMesh {
         //self.verts[vb.0].edge = None;
 
         // Remove `vert_origin`
-        self.verts.remove(&vb);
 
-        let vert_a = self.verts.entry(va).or_insert(Vertex::default());
+        //let vert_a = self.verts.entry(va).or_insert(Vertex::default());
 
         // Main issue is a situation where triangles do not fan around the cake in both directions
         // This will collapse an edge to have dest and source in same position
+        let b_outgoings = self.verts[vb].outgoing_edges().to_vec();
 
-        for i in 0..self.edges.len() {
+        for b_outgoing in b_outgoings {
             // Dont fix invalid edges
-            // TODO: These shouldn't appear in the iterator
-            if !self.edges[i].valid {
-                continue;
-            }
+            assert_eq!(self.edges[b_outgoing.0].vert_origin, vb);
 
-            if self.edges[i].vert_origin == vb {
-                // TODO: leaves dictionary incorrect
-                //self.edge_map
-                //    .remove(&(other_edge.vert_origin, other_edge.vert_destination));
+            self.edges[b_outgoing.0].vert_origin = va;
 
-                self.edges[i].vert_origin = va;
-
-                // Moving this origin moves both the start of this edge and the dest of the previous edge
-                vert_a.add_outgoing(EdgeID(i));
-                vert_a.add_incoming(self.edges[i].edge_left_ccw);
-
-                //self.edge_map.insert(
-                //    (other_edge.vert_origin, other_edge.vert_destination),
-                //    EdgeID(i),
-                //);
-            }
+            // Moving this origin moves both the start of this edge and the dest of the previous edge
+            self.verts[va].add_outgoing(b_outgoing);
+            self.verts[va].add_incoming(self.edges[b_outgoing.0].edge_left_ccw);
         }
+
+        self.verts.remove(&vb);
 
         #[cfg(test)]
         {
