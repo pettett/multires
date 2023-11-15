@@ -10,6 +10,13 @@ use super::{
 /// Quadric type. Internally a DMat4, kept private to ensure only valid reduction operations can effect it.
 pub struct Quadric(glam::DMat4);
 
+pub fn tri_area(a: glam::Vec3A, b: glam::Vec3A, c: glam::Vec3A) -> f32 {
+    let ab = b - a;
+    let ac = c - a;
+
+    glam::Vec3A::cross(ab, ac).length() / 2.0
+}
+
 pub fn plane_from_three_points(a: glam::Vec3A, b: glam::Vec3A, c: glam::Vec3A) -> glam::Vec4 {
     let ab = b - a;
     let ac = c - a;
@@ -86,8 +93,12 @@ impl EdgeID {
         let q = Quadric(quadric_errors[orig.0].0 + quadric_errors[dest.0].0);
         // Collapsing this edge would move the origin to the destination, so we find the error of the origin at the merged point.
 
-        // Test normals of triangles before and after the swap
+        if !orig.is_local_manifold(mesh, true) {
+            // Need this to be in the center of the mesh, cannot reduce and change the boundary shape
+            return f64::MAX;
+        }
 
+        // Test normals of triangles before and after the swap
         for &e in mesh[orig].outgoing_edges() {
             if e == self {
                 continue;
@@ -96,19 +107,22 @@ impl EdgeID {
             let f = mesh[e].face;
             let [a, b, c] = mesh.triangle_from_face(&mesh.faces[f]);
 
-            let starting_plane =
-                plane_from_three_points(verts[a].into(), verts[b].into(), verts[c].into());
+            let (v_a, v_b, v_c, new_corner) = (
+                verts[a].into(),
+                verts[b].into(),
+                verts[c].into(),
+                verts[dest.0].into(),
+            );
+            let starting_plane = plane_from_three_points(v_a, v_b, v_c);
 
-            let end_plane = if orig.0 == a {
-                plane_from_three_points(verts[orig.0].into(), verts[b].into(), verts[c].into())
-            } else if orig.0 == b {
-                plane_from_three_points(verts[a].into(), verts[orig.0].into(), verts[c].into())
-            } else {
-                assert_eq!(orig.0, c);
-                plane_from_three_points(verts[a].into(), verts[b].into(), verts[orig.0].into())
+            let end_plane = match orig.0 {
+                i if i == a => plane_from_three_points(new_corner, v_b, v_c),
+                i if i == b => plane_from_three_points(v_a, new_corner, v_c),
+                i if i == c => plane_from_three_points(v_a, v_b, new_corner),
+                _ => unreachable!(),
             };
 
-            if starting_plane.xyz().dot(end_plane.xyz()) < 0.5 {
+            if starting_plane.xyz().dot(end_plane.xyz()) < 0.9 {
                 // Flipped triangle, give this a very high weight
                 return f64::MAX;
             }
@@ -150,7 +164,7 @@ impl WingedMesh {
         let mut pq = priority_queue::PriorityQueue::with_capacity(self.edges.len());
         let mut new_error = 0.0;
         for (i, e) in self.edges.iter().enumerate() {
-            if e.valid && self.verts.contains_key(e.vert_origin) {
+            if e.valid {
                 let eid = EdgeID(i);
                 pq.push(
                     eid,
@@ -196,7 +210,7 @@ impl WingedMesh {
             self.collapse_edge(eid);
 
             for e in effected_edges {
-                if self.edges[e.0].valid && self.verts.contains_key(self.edges[e.0].vert_origin) {
+                if self.edges[e.0].valid {
                     pq.push(
                         e,
                         cmp::Reverse(OrdF64(e.edge_collapse_error(&self, verts, &quadrics))),
@@ -335,7 +349,7 @@ mod tests {
     #[test]
     pub fn test_reduction() -> Result<(), Box<dyn Error>> {
         let (mut mesh, verts) = WingedMesh::from_gltf(TEST_MESH_HIGH);
-
+        println!("Total {} tris", mesh.face_count());
         let mut quadrics = mesh.create_quadrics(&verts);
         mesh.reduce(&verts, &mut quadrics);
 
