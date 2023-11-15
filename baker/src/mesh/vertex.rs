@@ -1,3 +1,5 @@
+use idmap::IntegerId;
+
 use super::winged_mesh::{EdgeID, WingedMesh};
 
 #[derive(Default, Hash, Debug, Clone, Copy, PartialEq, Eq)]
@@ -7,17 +9,30 @@ impl Into<usize> for VertID {
         self.0
     }
 }
+impl IntegerId for VertID {
+    fn from_id(id: u64) -> Self {
+        VertID(id as usize)
+    }
+
+    fn id(&self) -> u64 {
+        self.0 as _
+    }
+
+    fn id32(&self) -> u32 {
+        self.0 as _
+    }
+}
 
 #[derive(Default, Debug, Clone)]
 pub struct Vertex {
-    /// Edge with vert_source = this id
-    pub edge: Option<EdgeID>,
+    // Edge with vert_source = this id
+    pub outgoing_edges: Vec<EdgeID>,
 }
 
 impl VertID {
     /// Does this vertex have a complete fan of triangles surrounding it?
     pub fn is_local_manifold(&self, mesh: &WingedMesh, is_group_manifold: bool) -> bool {
-        let Some(eid_first) = mesh[*self].edge else {
+        let Some(&eid_first) = self.outgoing_edges(mesh).get(0) else {
             return false;
         };
 
@@ -70,6 +85,9 @@ impl VertID {
 
     pub fn outgoing_edges(self, mesh: &WingedMesh) -> &[EdgeID] {
         const EMPTY: &[EdgeID] = &[];
-        mesh.edge_map().get(&self).map(|v| &v[..]).unwrap_or(EMPTY)
+        mesh.verts
+            .get(&self)
+            .map(|v| &v.outgoing_edges[..])
+            .unwrap_or(EMPTY)
     }
 }

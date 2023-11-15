@@ -75,10 +75,10 @@ pub struct Face {
 
 #[derive(Debug, Clone)]
 pub struct WingedMesh {
-    pub verts: Vec<Vertex>,
+    //pub verts: Vec<Vertex>,
     pub faces: idmap::DirectIdMap<FaceID, Face>,
     pub edges: Vec<HalfEdge>,
-    pub edge_map: HashMap<VertID, Vec<EdgeID>>,
+    pub verts: idmap::DirectIdMap<VertID, Vertex>,
     pub partitions: Vec<PartitionInfo>,
     pub groups: Vec<GroupInfo>,
 }
@@ -87,13 +87,13 @@ impl std::ops::Index<VertID> for WingedMesh {
     type Output = Vertex;
 
     fn index(&self, index: VertID) -> &Self::Output {
-        &self.verts[index.0]
+        &self.verts[index]
     }
 }
 
 impl std::ops::IndexMut<VertID> for WingedMesh {
     fn index_mut(&mut self, index: VertID) -> &mut Self::Output {
-        &mut self.verts[index.0]
+        &mut self.verts[index]
     }
 }
 
@@ -124,12 +124,12 @@ impl std::ops::IndexMut<EdgeID> for WingedMesh {
 impl WingedMesh {
     pub fn new(faces: usize, verts: usize) -> Self {
         Self {
-            verts: vec![Default::default(); verts],
+            //verts: vec![Default::default(); verts],
             //faces: vec![Default::default(); faces],
             faces: idmap::DirectIdMap::with_capacity_direct(faces),
             // partitions: vec![Default::default(); faces],
             edges: Default::default(),
-            edge_map: Default::default(),
+            verts: Default::default(),
             groups: vec![],
             partitions: vec![PartitionInfo {
                 child_group_index: None,
@@ -162,25 +162,25 @@ impl WingedMesh {
         if let Some(t) = self[tri[2]].twin {
             //TODO: helper function for moving origin
 
-            self.edge_map.entry(self[t].vert_origin).and_modify(|xs| {
-                let index = xs.iter().position(|x| *x == t).unwrap();
-                xs.remove(index);
-            });
+            if let Some(xs) = self.verts.get_mut(self[t].vert_origin) {
+                let index = xs.outgoing_edges.iter().position(|x| *x == t).unwrap();
+                xs.outgoing_edges.remove(index);
+            }
 
             self[t].vert_origin = self[tri[1]].vert_origin;
 
-            self.edge_map.entry(self[t].vert_origin).and_modify(|xs| {
-                xs.push(t);
-            });
+            if let Some(xs) = self.verts.get_mut(self[t].vert_origin) {
+                xs.outgoing_edges.push(t);
+            }
 
             self[t].twin = self[tri[1]].twin;
         }
 
         for e in &tri {
-            self.edge_map.entry(self[*e].vert_origin).and_modify(|xs| {
-                let index = xs.iter().position(|x| *x == *e).unwrap();
-                xs.remove(index);
-            });
+            if let Some(xs) = self.verts.get_mut(self[*e].vert_origin) {
+                let index = xs.outgoing_edges.iter().position(|x| *x == *e).unwrap();
+                xs.outgoing_edges.remove(index);
+            }
 
             self[*e].valid = false;
         }
@@ -191,9 +191,9 @@ impl WingedMesh {
             let v = self.edges[tri[i].0].vert_origin;
 
             // TODO: smarter selection of verts that require updating
-            if self[v].edge.is_some() {
-                self[v].edge = v.outgoing_edges(self).get(0).copied();
-            }
+            // if self[v].edge.is_some() {
+            //     self[v].edge = v.outgoing_edges(self).get(0).copied();
+            // }
         }
     }
 
@@ -221,12 +221,14 @@ impl WingedMesh {
             self.collapse_tri(e0t);
         };
 
-        self.verts[vb.0].edge = None;
+        //self.verts[vb.0].edge = None;
 
         // Remove `vert_origin`
-        self.edge_map.remove(&vb);
+        self.verts.remove(&vb);
 
-        let va_outgoing = self.edge_map.entry(va).or_default();
+        let va_outgoing = self.verts.entry(va).or_insert(Vertex {
+            outgoing_edges: Vec::new(),
+        });
 
         // Main issue is a situation where triangles do not fan around the cake in both directions
         // This will collapse an edge to have dest and source in same position
@@ -245,7 +247,7 @@ impl WingedMesh {
 
                 self.edges[i].vert_origin = va;
 
-                va_outgoing.push(EdgeID(i));
+                va_outgoing.outgoing_edges.push(EdgeID(i));
                 //self.edge_map.insert(
                 //    (other_edge.vert_origin, other_edge.vert_destination),
                 //    EdgeID(i),
@@ -289,10 +291,11 @@ impl WingedMesh {
     }
 
     fn find_edge(&self, a: VertID, b: VertID) -> Option<EdgeID> {
-        self.edge_map
+        self.verts
             .get(&a)
             .map(|v| {
-                v.iter()
+                v.outgoing_edges
+                    .iter()
                     .filter(|p| self[self[**p].edge_left_cw].vert_origin == b)
                     .next()
                     .copied()
@@ -316,9 +319,12 @@ impl WingedMesh {
             self.edges[te.0].twin = Some(EdgeID(self.edges.len()));
         }
 
-        self.edge_map
+        self.verts
             .entry(orig)
-            .or_default()
+            .or_insert(Vertex {
+                outgoing_edges: Vec::new(),
+            })
+            .outgoing_edges
             .push(EdgeID(self.edges.len()));
 
         self.edges.push(e);
@@ -333,17 +339,17 @@ impl WingedMesh {
         self.add_half_edge(b, c, f, iec, iea);
         self.add_half_edge(c, a, f, iea, ieb);
 
-        if self[a].edge == None {
-            self[a].edge = Some(iea);
-        }
+        // if self[a].edge == None {
+        //     self[a].edge = Some(iea);
+        // }
 
-        if self[b].edge == None {
-            self[b].edge = Some(ieb);
-        }
+        // if self[b].edge == None {
+        //     self[b].edge = Some(ieb);
+        // }
 
-        if self[c].edge == None {
-            self[c].edge = Some(iec);
-        }
+        // if self[c].edge == None {
+        //     self[c].edge = Some(iec);
+        // }
 
         self.faces.insert(f, Face { edge: iea, part: 0 });
     }
@@ -670,10 +676,6 @@ impl WingedMesh {
         self.partitions.len()
     }
 
-    pub fn edge_map(&self) -> &HashMap<VertID, Vec<EdgeID>> {
-        &self.edge_map
-    }
-
     pub fn edges(&self) -> &[HalfEdge] {
         self.edges.as_ref()
     }
@@ -748,11 +750,11 @@ pub mod test {
             }
 
             for i in 0..self.verts.len() {
-                self.assert_vertex_valid(i);
+                self.assert_vertex_valid(VertID(i));
             }
 
-            for (k, v) in &self.edge_map {
-                for e in v {
+            for (k, v) in &self.verts {
+                for e in &v.outgoing_edges {
                     assert!(
                         self.edges[e.0].valid,
                         "Edge valid error - Edge map is invalidated"
@@ -764,16 +766,15 @@ pub mod test {
                 }
             }
         }
-        pub fn assert_vertex_valid(&self, i: usize) {
-            let v = &self.verts[i];
-            if let Some(e) = v.edge {
+        pub fn assert_vertex_valid(&self, i: VertID) {
+            for e in i.outgoing_edges(self) {
                 assert!(
                     self.edges[e.0].valid,
-                    "Invalid vertex edge reference- Mesh made invalid on V{i}: {v:?}"
+                    "Invalid vertex edge reference- Mesh made invalid on V{i:?} "
                 );
                 assert!(
-                    self.edges[e.0].vert_origin.0 == i,
-                    "Invalid vertex edge source loop - Mesh made invalid on V{i}: {v:?}"
+                    self.edges[e.0].vert_origin == i,
+                    "Invalid vertex edge source loop - Mesh made invalid on V{i:?} "
                 );
             }
         }
