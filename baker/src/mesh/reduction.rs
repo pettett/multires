@@ -64,7 +64,7 @@ impl VertID {
         let mut Q = Quadric(glam::DMat4::ZERO);
 
         for &e in mesh.verts[self].outgoing_edges() {
-            let f = mesh[e].face;
+            let f = mesh.edges[e].face;
 
             let plane = f.plane(mesh, verts);
 
@@ -76,10 +76,11 @@ impl VertID {
 }
 
 impl EdgeID {
-    pub fn orig_dest(self, mesh: &WingedMesh) -> (VertID, VertID) {
-        let orig = mesh[self].vert_origin;
-        let dest = mesh[mesh[self].edge_left_cw].vert_origin;
-        (orig, dest)
+    pub fn orig_dest(&self, mesh: &WingedMesh) -> Result<(VertID, VertID), ()> {
+        let e = mesh.edges.get(self).ok_or(())?;
+        let orig = e.vert_origin;
+        let dest = mesh.edges.get(e.edge_left_cw).ok_or(())?.vert_origin;
+        Ok((orig, dest))
     }
 
     /// Estimate the error introduced by collapsing this edge. Does not take into account penalties from flipping triangles
@@ -88,23 +89,23 @@ impl EdgeID {
         mesh: &WingedMesh,
         verts: &[glam::Vec4],
         quadric_errors: &[Quadric],
-    ) -> f64 {
-        let (orig, dest) = self.orig_dest(mesh);
+    ) -> Result<Option<f64>, ()> {
+        let (orig, dest) = self.orig_dest(mesh)?;
         let q = Quadric(quadric_errors[orig.0].0 + quadric_errors[dest.0].0);
         // Collapsing this edge would move the origin to the destination, so we find the error of the origin at the merged point.
 
         if !orig.is_local_manifold(mesh, true) {
             // Need this to be in the center of the mesh, cannot reduce and change the boundary shape
-            return f64::MAX;
+            return Ok(None);
         }
 
         // Test normals of triangles before and after the swap
-        for &e in mesh[orig].outgoing_edges() {
+        for &e in mesh.verts.get(orig).ok_or(())?.outgoing_edges() {
             if e == self {
                 continue;
             }
 
-            let f = mesh[e].face;
+            let f = mesh.edges[e].face;
             let [a, b, c] = mesh.triangle_from_face(&mesh.faces[f]);
 
             let (v_a, v_b, v_c, new_corner) = (
@@ -122,13 +123,13 @@ impl EdgeID {
                 _ => unreachable!(),
             };
 
-            if starting_plane.xyz().dot(end_plane.xyz()) < 0.9 {
+            if starting_plane.xyz().dot(end_plane.xyz()) < 0.1 {
                 // Flipped triangle, give this a very high weight
-                return f64::MAX;
+                return Ok(None);
             }
         }
 
-        q.quadric_error(verts[orig.0].into())
+        Ok(Some(q.quadric_error(verts[orig.0].into())))
     }
 }
 #[derive(PartialOrd, PartialEq)]
@@ -158,19 +159,18 @@ impl WingedMesh {
         quadrics
     }
     /// Returns estimate of error introduced by halving the number of triangles
-    pub fn reduce(&mut self, verts: &[glam::Vec4], quadrics: &mut [Quadric]) -> f64 {
+    pub fn reduce(&mut self, verts: &[glam::Vec4], quadrics: &mut [Quadric]) -> Result<f64, ()> {
         // Priority queue with every vertex and their errors.
 
         let mut pq = priority_queue::PriorityQueue::with_capacity(self.edges.len());
         let mut new_error = 0.0;
-        for (i, e) in self.edges.iter().enumerate() {
-            if e.valid {
-                let eid = EdgeID(i);
-                pq.push(
-                    eid,
-                    cmp::Reverse(OrdF64(eid.edge_collapse_error(&self, verts, &quadrics))),
-                );
+        for &eid in self.edges.keys() {
+            if let Some(error) = eid.edge_collapse_error(&self, verts, &quadrics)? {
+                pq.push(eid, cmp::Reverse(OrdF64(error)));
+                continue;
             }
+
+            pq.remove(&eid);
         }
 
         let tris = self.face_count();
@@ -178,7 +178,7 @@ impl WingedMesh {
         let required_reductions = tris / 4;
 
         for i in 0..required_reductions {
-            let (eid, cmp::Reverse(OrdF64(err))) = pq.pop().unwrap();
+            let (eid, cmp::Reverse(OrdF64(err))) = pq.pop().ok_or(())?;
 
             if i % 200 == 0 {
                 println!("Selected edge {i} with error: {err}");
@@ -188,7 +188,7 @@ impl WingedMesh {
 
             // Collapse edge, and update quadrics (update before collapsing, as vertex becomes invalid)
 
-            let (orig, dest) = eid.orig_dest(&self);
+            let (orig, dest) = eid.orig_dest(&self)?;
 
             #[cfg(not(test))]
             {
@@ -209,25 +209,27 @@ impl WingedMesh {
 
             self.collapse_edge(eid);
 
-            for e in effected_edges {
-                if self.edges[e.0].valid {
-                    pq.push(
-                        e,
-                        cmp::Reverse(OrdF64(e.edge_collapse_error(&self, verts, &quadrics))),
-                    );
-                } else {
-                    pq.remove(&e);
+            for eid in effected_edges {
+                if self.edges.contains_key(eid) {
+                    if let Some(error) = eid.edge_collapse_error(&self, verts, &quadrics)? {
+                        pq.push(eid, cmp::Reverse(OrdF64(error)));
+                        continue;
+                    }
                 }
+
+                pq.remove(&eid);
             }
         }
 
-        new_error
+        Ok(new_error)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use std::error::Error;
+
+    use crate::mesh::winged_mesh::test::{TEST_MESH_PLANE, TEST_MESH_PLANE_LOW};
 
     use super::super::{
         vertex::VertID,
@@ -348,10 +350,18 @@ mod tests {
 
     #[test]
     pub fn test_reduction() -> Result<(), Box<dyn Error>> {
-        let (mut mesh, verts) = WingedMesh::from_gltf(TEST_MESH_HIGH);
+        let (mut mesh, verts) = WingedMesh::from_gltf(TEST_MESH_PLANE);
         println!("Total {} tris", mesh.face_count());
         let mut quadrics = mesh.create_quadrics(&verts);
-        mesh.reduce(&verts, &mut quadrics);
+        mesh.assert_valid();
+        mesh.reduce(&verts, &mut quadrics).unwrap();
+        mesh.assert_valid();
+        mesh.reduce(&verts, &mut quadrics).unwrap();
+        mesh.assert_valid();
+        mesh.reduce(&verts, &mut quadrics).unwrap();
+        mesh.assert_valid();
+        mesh.reduce(&verts, &mut quadrics).unwrap();
+        mesh.assert_valid();
 
         Ok(())
     }

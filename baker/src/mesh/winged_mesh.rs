@@ -5,7 +5,7 @@ use metis::{idx_t, PartitioningConfig, PartitioningError};
 use std::collections::HashMap;
 
 use super::{
-    iter::{AllEdgeIter, EdgeIter},
+    iter::EdgeIter,
     vertex::{VertID, Vertex},
 };
 
@@ -40,12 +40,25 @@ impl IntegerId for FaceID {
         self.0 as u32
     }
 }
+impl IntegerId for EdgeID {
+    fn from_id(id: u64) -> Self {
+        EdgeID(id as usize)
+    }
+
+    fn id(&self) -> u64 {
+        self.0 as u64
+    }
+
+    fn id32(&self) -> u32 {
+        self.0 as u32
+    }
+}
 impl FaceID {
     pub fn center(&self, mesh: &WingedMesh, verts: &[Vec4]) -> Vec4 {
         let mut c = Vec4::ZERO;
 
         for e in mesh.iter_edge_loop(mesh.faces[self].edge) {
-            c += verts[mesh[e].vert_origin.0];
+            c += verts[mesh.edges[e].vert_origin.0];
         }
 
         c / 3.0
@@ -64,7 +77,6 @@ pub struct HalfEdge {
     pub edge_left_ccw: EdgeID,
 
     pub twin: Option<EdgeID>,
-    pub valid: bool,
 }
 
 #[derive(Default, Debug, Clone, PartialEq)]
@@ -75,50 +87,11 @@ pub struct Face {
 
 #[derive(Debug, Clone)]
 pub struct WingedMesh {
-    //pub verts: Vec<Vertex>,
     pub faces: idmap::DirectIdMap<FaceID, Face>,
-    pub edges: Vec<HalfEdge>,
+    pub edges: idmap::DirectIdMap<EdgeID, HalfEdge>,
     pub verts: idmap::DirectIdMap<VertID, Vertex>,
     pub partitions: Vec<PartitionInfo>,
     pub groups: Vec<GroupInfo>,
-}
-
-impl std::ops::Index<VertID> for WingedMesh {
-    type Output = Vertex;
-
-    fn index(&self, index: VertID) -> &Self::Output {
-        &self.verts[index]
-    }
-}
-
-impl std::ops::IndexMut<VertID> for WingedMesh {
-    fn index_mut(&mut self, index: VertID) -> &mut Self::Output {
-        &mut self.verts[index]
-    }
-}
-
-impl std::ops::Index<EdgeID> for WingedMesh {
-    type Output = HalfEdge;
-
-    fn index(&self, index: EdgeID) -> &Self::Output {
-        assert!(
-            self.edges[index.0].valid,
-            "Attempted to index invalid edge {:?}",
-            self.edges[index.0]
-        );
-        &self.edges[index.0]
-    }
-}
-
-impl std::ops::IndexMut<EdgeID> for WingedMesh {
-    fn index_mut(&mut self, index: EdgeID) -> &mut Self::Output {
-        assert!(
-            self.edges[index.0].valid,
-            "Attempted to index invalid edge {:?}",
-            self.edges[index.0]
-        );
-        &mut self.edges[index.0]
-    }
 }
 
 impl WingedMesh {
@@ -139,118 +112,19 @@ impl WingedMesh {
         }
     }
 
-    /// Collapse a triangle, removing it from the graph, and pulling the two triangles on non-eid edges together
-    /// 	A
-    ///  	| 1
-    ///  	0  D
-    ///   	| 2
-    /// 	B
-    fn collapse_tri(&mut self, eid: EdgeID) {
-        let tri = self.iter_edge_loop(eid).collect::<Vec<_>>();
-        //println!("Collapsing triangle {tri:?}");
-        let e = self[eid].clone();
-
-        self.faces.remove(e.face);
-
-        assert_eq!(tri.len(), 3);
-        assert_eq!(tri[0], eid);
-
-        // we are pinching edge to nothing, so make the other two edges twins
-        if let Some(t) = self[tri[1]].twin {
-            self[t].twin = self[tri[2]].twin;
-        }
-        if let Some(t) = self[tri[2]].twin {
-            //TODO: helper function for moving origin
-
-            if let Some(xs) = self.verts.get_mut(self[t].vert_origin) {
-                xs.remove_outgoing(t);
-                xs.remove_incoming(self.edges[t.0].edge_left_ccw);
-            }
-
-            self[t].vert_origin = self[tri[1]].vert_origin;
-
-            if let Some(xs) = self.verts.get_mut(self[t].vert_origin) {
-                xs.add_outgoing(t);
-                xs.add_incoming(self.edges[t.0].edge_left_ccw);
-            }
-
-            self[t].twin = self[tri[1]].twin;
-        }
-
-        for &e in &tri {
-            if let Some(xs) = self.verts.get_mut(self[e].vert_origin) {
-                xs.remove_outgoing(e);
-                xs.remove_incoming(self.edges[e.0].edge_left_ccw);
-            }
-
-            self[e].valid = false;
-        }
-    }
-
-    /// Collapse an edge so it no longer exists, the source vertex is no longer referenced,
-    /// 	A
-    ///   /	^ \
-    ///  C	|  D
-    ///   \	| /
-    /// 	B
-    ///
-    pub fn collapse_edge(&mut self, eid: EdgeID) {
-        //    println!("Collapsing edge {eid:?}");
-
-        //self.assert_valid();
-
-        assert!(self[eid].valid);
-        let edge = self[eid].clone();
-
-        let vb = edge.vert_origin;
-        let va = self.edges[edge.edge_left_cw.0].vert_origin;
-
-        self.collapse_tri(eid);
-
-        if let Some(e0t) = edge.twin {
-            self.collapse_tri(e0t);
-        };
-
-        // Remove `vert_origin`
-
-        // Main issue is a situation where triangles do not fan around the cake in both directions
-        // This will collapse an edge to have dest and source in same position.
-        // Because of this, we need to store all ingoings and outgoings per vertex, which isn't the worst in the world
-        // Although it would save a bit of memory to just store every fan
-        let b_outgoings = self.verts[vb].outgoing_edges().to_vec();
-
-        for b_outgoing in b_outgoings {
-            // Dont fix invalid edges
-            assert_eq!(self.edges[b_outgoing.0].vert_origin, vb);
-
-            self.edges[b_outgoing.0].vert_origin = va;
-
-            // Moving this origin moves both the start of this edge and the dest of the previous edge
-            self.verts[va].add_outgoing(b_outgoing);
-            self.verts[va].add_incoming(self.edges[b_outgoing.0].edge_left_ccw);
-        }
-
-        self.verts.remove(&vb);
-
-        #[cfg(test)]
-        {
-            self.assert_valid();
-        }
-        //self.assert_valid();
-    }
-
     pub fn edge_sqr_length(&self, edge: EdgeID, verts: &[Vec3]) -> f32 {
-        let e = &self.edges[edge.0];
+        let e = &self.edges[edge];
         return verts[e.vert_origin.0]
-            .distance_squared(verts[self.edges[e.edge_left_cw.0].vert_origin.0]);
+            .distance_squared(verts[self.edges[e.edge_left_cw].vert_origin.0]);
     }
 
     pub fn triangle_from_face(&self, face: &Face) -> [usize; 3] {
         let verts: Vec<usize> = self
             .iter_edge_loop(face.edge)
-            .map(|e| self[e].vert_origin.into())
+            .map(|e| self.edges[e].vert_origin.into())
             .collect();
 
+        assert_eq!(verts.len(), 3);
         [verts[0], verts[1], verts[2]]
     }
 
@@ -277,27 +151,33 @@ impl WingedMesh {
             .map(|v| {
                 v.outgoing_edges()
                     .iter()
-                    .filter(|p| self[self[**p].edge_left_cw].vert_origin == b)
+                    .filter(|&&p| self.edges[self.edges[p].edge_left_cw].vert_origin == b)
                     .next()
                     .copied()
             })
             .flatten()
     }
 
-    fn add_half_edge(&mut self, orig: VertID, dest: VertID, face: FaceID, cw: EdgeID, ccw: EdgeID) {
+    fn add_half_edge(
+        &mut self,
+        orig: VertID,
+        dest: VertID,
+        face: FaceID,
+        eid: EdgeID,
+        edge_left_cw: EdgeID,
+        edge_left_ccw: EdgeID,
+    ) {
         let twin = self.find_edge(dest, orig);
         let e = HalfEdge {
             vert_origin: orig,
-            //vert_destination: dest,
             face,
-            edge_left_cw: cw,
-            edge_left_ccw: ccw,
+            edge_left_cw,
+            edge_left_ccw,
             twin,
-            valid: true,
         };
-        let eid = EdgeID(self.edges.len());
-        if let Some(te) = twin {
-            self.edges[te.0].twin = Some(eid);
+
+        if let Some(twin_eid) = twin {
+            self.edges[twin_eid].twin = Some(eid);
         }
 
         self.verts
@@ -310,19 +190,137 @@ impl WingedMesh {
             .or_insert(Vertex::default())
             .add_incoming(eid);
 
-        self.edges.push(e);
+        self.edges.insert(eid, e);
     }
 
     pub fn add_tri(&mut self, f: FaceID, a: VertID, b: VertID, c: VertID) {
-        let iea = EdgeID(self.edges.len());
-        let ieb = EdgeID(self.edges.len() + 1);
-        let iec = EdgeID(self.edges.len() + 2);
+        let iea = EdgeID(self.edges.max_id().map(|f| f as usize + 1).unwrap_or(0));
+        let ieb = EdgeID(self.edges.max_id().map(|f| f as usize + 2).unwrap_or(1));
+        let iec = EdgeID(self.edges.max_id().map(|f| f as usize + 3).unwrap_or(2));
 
-        self.add_half_edge(a, b, f, ieb, iec);
-        self.add_half_edge(b, c, f, iec, iea);
-        self.add_half_edge(c, a, f, iea, ieb);
+        self.add_half_edge(a, b, f, iea, ieb, iec);
+        self.add_half_edge(b, c, f, ieb, iec, iea);
+        self.add_half_edge(c, a, f, iec, iea, ieb);
 
         self.faces.insert(f, Face { edge: iea, part: 0 });
+    }
+
+    /// Collapse a triangle, removing it from the graph, and pulling the two triangles on non-eid edges together
+    /// 	A
+    ///  	| 1
+    ///  	0  D
+    ///   	| 2
+    /// 	B
+    fn collapse_tri(&mut self, eid: EdgeID, removed_vid: VertID, diversion_vid: VertID) {
+        assert!(self.edges.contains_key(eid));
+        assert!(
+            removed_vid == self.edges[eid].vert_origin
+                || diversion_vid == self.edges[eid].vert_origin
+        );
+
+        let tri = self.iter_edge_loop(eid).collect::<Vec<_>>();
+        //println!("Collapsing triangle {tri:?}");
+        self.faces.remove(self.edges[eid].face);
+
+        assert_eq!(tri.len(), 3);
+        assert_eq!(tri[0], eid);
+
+        // we are pinching edge to nothing, so make the other two edges twins
+        if let Some(t) = self.edges[tri[1]].twin {
+            self.edges[t].twin = self.edges[tri[2]].twin;
+        }
+        if let Some(t) = self.edges[tri[2]].twin {
+            self.edges[t].twin = self.edges[tri[1]].twin;
+        }
+
+        // Unlikely this will ever matter, but preserve consistency of mesh, as this edge is to be removed.
+        if let Some(t) = self.edges[eid].twin {
+            self.edges[t].twin = None;
+        }
+
+        for &e in &tri {
+            self.verts[self.edges[e].vert_origin].remove_outgoing(e);
+            self.verts[self.edges[e].vert_origin].remove_incoming(self.edges[e].edge_left_ccw);
+
+            if let Some(t) = self.edges[e].twin {
+                assert!(self.edges.contains_key(t));
+
+                if self.edges[t].vert_origin == removed_vid {
+                    self.edges[t].vert_origin = diversion_vid;
+
+                    self.verts[removed_vid].remove_outgoing(t);
+                    self.verts[removed_vid].remove_incoming(self.edges[t].edge_left_ccw);
+                    self.verts[diversion_vid].add_outgoing(t);
+                    self.verts[diversion_vid].add_incoming(self.edges[t].edge_left_ccw);
+                }
+            }
+
+            self.edges.remove(e);
+        }
+    }
+
+    /// Collapse an edge so it no longer exists, the source vertex is no longer referenced,
+    /// 	A
+    ///   /	^ \
+    ///  C	|  D
+    ///   \	| /
+    /// 	B
+    ///
+    pub fn collapse_edge(&mut self, eid: EdgeID) {
+        //    println!("Collapsing edge {eid:?}");
+
+        //self.assert_valid();
+
+        #[cfg(test)]
+        {
+            assert!(self.edges.contains_key(eid));
+            self.assert_valid();
+        }
+
+        let edge = self.edges[eid].clone();
+
+        let vb = edge.vert_origin;
+        let va = self.edges[edge.edge_left_cw].vert_origin;
+
+        self.collapse_tri(eid, vb, va);
+
+        #[cfg(test)]
+        {
+            self.assert_valid();
+        }
+
+        if let Some(e0t) = edge.twin {
+            self.collapse_tri(e0t, vb, va);
+        } else {
+            println!("Warning: Collapsing edge with no twin - boundary operations are not allowed")
+        };
+
+        // Remove `vert_origin`
+
+        // Main issue is a situation where triangles do not fan around the cake in both directions
+        // This will collapse an edge to have dest and source in same position.
+        // Because of this, we need to store all ingoings and outgoings per vertex, which isn't the worst in the world
+        // Although it would save a bit of memory to just store every fan
+        let b_outgoings = self.verts[vb].outgoing_edges().to_vec();
+
+        for b_outgoing in b_outgoings {
+            // Dont fix invalid edges
+            assert_eq!(self.edges[b_outgoing].vert_origin, vb);
+
+            self.edges[b_outgoing].vert_origin = va;
+
+            // Moving this origin moves both the start of this edge and the dest of the previous edge
+            self.verts[va].add_outgoing(b_outgoing);
+            self.verts[va].add_incoming(self.edges[b_outgoing].edge_left_ccw);
+        }
+
+        self.verts.remove(&vb);
+
+        #[cfg(test)]
+        {
+            self.assert_valid();
+        }
+        //self.assert_valid();
     }
 
     fn generate_face_graph(&self) -> petgraph::graph::UnGraph<usize, ()> {
@@ -342,8 +340,8 @@ impl WingedMesh {
 
         for (i, face) in self.faces().iter() {
             for e in self.iter_edge_loop(face.edge) {
-                if let Some(twin) = self[e].twin {
-                    let other_face = &self[twin].face;
+                if let Some(twin) = self.edges[e].twin {
+                    let other_face = &self.edges[twin].face;
 
                     graph.update_edge(
                         petgraph::graph::NodeIndex::new(i.0),
@@ -374,8 +372,8 @@ impl WingedMesh {
 
         for (i, face) in self.faces().iter() {
             for e in self.iter_edge_loop(face.edge) {
-                if let Some(twin) = self[e].twin {
-                    let other_face = &self.faces[self[twin].face];
+                if let Some(twin) = self.edges[e].twin {
+                    let other_face = &self.faces[self.edges[twin].face];
 
                     if face.part != other_face.part {
                         graph.update_edge(
@@ -470,7 +468,7 @@ impl WingedMesh {
             f_group_info.tris += 1;
             f_group_info
                 .monotonic_bound
-                .translate(verts[self.edges[f.edge.0].vert_origin.0].xyz());
+                .translate(verts[self.edges[f.edge].vert_origin.0].xyz());
         }
 
         // Take averages
@@ -484,7 +482,7 @@ impl WingedMesh {
 
             f_group_info
                 .monotonic_bound
-                .include_point(verts[self.edges[f.edge.0].vert_origin.0].xyz());
+                .include_point(verts[self.edges[f.edge].vert_origin.0].xyz());
         }
         println!(
             "Including child bounds with {} old groups",
@@ -546,8 +544,8 @@ impl WingedMesh {
             let g = self.partitions[face.part].group_index;
 
             for e in self.iter_edge_loop(face.edge) {
-                if let Some(twin) = self[e].twin {
-                    let other_face = self[twin].face;
+                if let Some(twin) = self.edges[e].twin {
+                    let other_face = self.edges[twin].face;
                     let o_g = self.partitions[self.faces[other_face].part].group_index;
 
                     if g == o_g {
@@ -608,15 +606,7 @@ impl WingedMesh {
     }
 
     pub fn edge_count(&self) -> usize {
-        let mut c = 0;
-
-        for f in &self.edges {
-            if f.valid {
-                c += 1
-            }
-        }
-
-        c
+        self.edges.len()
     }
 
     pub fn faces(&self) -> &idmap::DirectIdMap<FaceID, Face> {
@@ -634,10 +624,6 @@ impl WingedMesh {
             .collect()
     }
 
-    pub fn iter_edges(&self) -> AllEdgeIter {
-        AllEdgeIter::new(self.edges.clone(), Some(0))
-    }
-
     pub fn iter_edge_loop(&self, e: EdgeID) -> EdgeIter {
         // emit 3 edges and a none
         EdgeIter::new(self, e, Some(e), 3)
@@ -645,10 +631,6 @@ impl WingedMesh {
 
     pub fn partition_count(&self) -> usize {
         self.partitions.len()
-    }
-
-    pub fn edges(&self) -> &[HalfEdge] {
-        self.edges.as_ref()
     }
 }
 #[cfg(test)]
@@ -709,21 +691,41 @@ pub mod test {
     impl WingedMesh {
         pub fn assert_valid(&self) {
             for (i, f) in self.faces.iter() {
-                let edges: Vec<HalfEdge> = self
-                    .iter_edge_loop(f.edge)
-                    .map(|e| self[e].clone())
-                    .collect();
+                let tri: Vec<_> = self.iter_edge_loop(f.edge).collect();
 
-                assert_eq!(edges.len(), 3);
+                assert_eq!(tri.len(), 3);
+
+                for &e in &tri {
+                    assert!(self.edges.contains_key(e));
+
+                    if let Some(t) = self.edges[e].twin {
+                        assert!(self.edges.contains_key(t));
+                        assert!(
+                            !tri.contains(&t),
+                            "Tri neighbours itself, total tri count: {}",
+                            self.faces.len()
+                        );
+                    }
+                }
+
                 //assert_eq!(edges[0].vert_destination, edges[1].vert_origin);
                 //assert_eq!(edges[1].vert_destination, edges[2].vert_origin);
                 //assert_eq!(edges[2].vert_destination, edges[0].vert_origin);
             }
-
+            for (eid, edge) in &self.edges {
+                if let Some(t) = edge.twin {
+                    assert!(self.edges.contains_key(t));
+                }
+                assert!(self.verts.contains_key(edge.vert_origin));
+                assert!(self.verts[edge.vert_origin].outgoing_edges().contains(eid));
+                assert!(self.edges.contains_key(edge.edge_left_ccw));
+                assert!(self.edges.contains_key(edge.edge_left_cw));
+            }
             for (&vid, vert) in &self.verts {
                 self.assert_vertex_valid(vid);
             }
         }
+
         pub fn assert_vertex_valid(&self, vid: VertID) {
             if !self.verts.contains_key(vid) {
                 return;
@@ -731,21 +733,13 @@ pub mod test {
 
             for e in self.verts[vid].outgoing_edges() {
                 assert!(
-                    self.edges[e.0].valid,
-                    "Invalid vertex edge reference- Mesh made invalid on V{vid:?} "
-                );
-                assert!(
-                    self.edges[e.0].vert_origin == vid,
+                    self.edges[e].vert_origin == vid,
                     "Invalid vertex edge source loop - Mesh made invalid on V{vid:?} "
                 );
             }
             for e in self.verts[vid].incoming_edges() {
                 assert!(
-                    self.edges[e.0].valid,
-                    "Invalid vertex edge reference- Mesh made invalid on V{vid:?} "
-                );
-                assert!(
-                    self.edges[self.edges[e.0].edge_left_cw.0].vert_origin == vid,
+                    self.edges[self.edges[e].edge_left_cw].vert_origin == vid,
                     "Invalid vertex edge dest loop - Mesh made invalid on V{vid:?} "
                 );
             }
@@ -757,14 +751,15 @@ pub mod test {
 
             for face in faces {
                 for edge in self.iter_edge_loop(face.edge) {
-                    if let Some(t) = self[edge].twin {
+                    if let Some(t) = self.edges[edge].twin {
                         unseen_edges.insert(t);
                     }
                 }
             }
 
             let all_unseen_edges = unseen_edges.clone();
-            unseen_edges.retain(|&edge| !all_unseen_edges.contains(&self[edge].twin.unwrap()));
+            unseen_edges
+                .retain(|&edge| !all_unseen_edges.contains(&self.edges[edge].twin.unwrap()));
 
             unseen_edges
         }
@@ -832,7 +827,7 @@ pub mod test {
 
             for &e in &boundary {
                 assert!(
-                    !faces.contains(&&mesh.faces[mesh[e].face]),
+                    !faces.contains(&&mesh.faces[mesh.edges[e].face]),
                     "'Boundary' contains edge inside itself"
                 )
             }

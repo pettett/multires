@@ -114,7 +114,10 @@ pub fn apply_simplification(mut working_mesh: WingedMesh, verts: &[Vec4], name: 
         // i = index of previous mesh layer
         println!("Face count L{}: {}", i + 1, working_mesh.face_count());
 
-        working_mesh.reduce(verts, &mut quads);
+        let Ok(e) = working_mesh.reduce(verts, &mut quads) else {
+            println!("Experience error with reducing, exiting early with what we have");
+            break;
+        };
         // View a snapshot of the mesh without any re-groupings applied
 
         layers.push(to_mesh_layer(&working_mesh, &verts));

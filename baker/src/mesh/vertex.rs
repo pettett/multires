@@ -69,11 +69,11 @@ impl VertID {
 
         loop {
             // attempt to move around the fan, by moving to our twin edge and going clockwise
-            let Some(twin) = mesh[eid].twin else {
+            let Some(twin) = mesh.edges[eid].twin else {
                 return false;
             };
 
-            let e = &mesh[twin];
+            let e = &mesh.edges[twin];
 
             // Compare against last face's partition
             if is_group_manifold {
