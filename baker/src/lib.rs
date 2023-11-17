@@ -107,20 +107,31 @@ pub fn apply_simplification(mut working_mesh: WingedMesh, verts: &[Vec4], name: 
 
     layers.push(to_mesh_layer(&working_mesh, &verts));
 
-    let mut quads = working_mesh.create_quadrics(verts);
-
+    let mut quadrics = working_mesh.create_quadrics(verts);
+    let mut queue = working_mesh.initialise_collapse_queue(verts, &quadrics);
     // Generate 2 more meshes
     for i in 0..8 {
         // i = index of previous mesh layer
-        println!("Face count L{}: {}", i + 1, working_mesh.face_count());
+        println!(
+            "Face count LOD{}: {}, beginning generating LOD{}",
+            i,
+            working_mesh.face_count(),
+            i + 1
+        );
 
-        let Ok(e) = working_mesh.reduce(verts, &mut quads) else {
+        let Ok(e) = working_mesh.reduce(verts, &mut quadrics, &mut queue) else {
             println!("Experience error with reducing, exiting early with what we have");
             break;
         };
+
         // View a snapshot of the mesh without any re-groupings applied
 
         layers.push(to_mesh_layer(&working_mesh, &verts));
+
+        if working_mesh.face_count() < 10 {
+            println!("Reduced to low enough amount of faces, ending");
+            break;
+        }
     }
 
     println!("Done with partitioning");

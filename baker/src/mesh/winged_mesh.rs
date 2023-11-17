@@ -2,12 +2,26 @@ use common::{tri_mesh::TriMesh, BoundingSphere, GroupInfo, PartitionInfo};
 use glam::{Vec3, Vec4, Vec4Swizzles};
 use idmap::IntegerId;
 use metis::{idx_t, PartitioningConfig, PartitioningError};
-use std::collections::HashMap;
+use std::{collections::HashMap, fs};
 
 use super::{
     iter::EdgeIter,
     vertex::{VertID, Vertex},
 };
+
+#[derive(thiserror::Error, Debug)]
+pub enum MeshError {
+    #[error("Invalid edge")]
+    InvalidEdge,
+    #[error("Invalid edge")]
+    InvalidVertex,
+    #[error("Cw piece of edge is invalid")]
+    InvalidCwEdge,
+    #[error("CCw piece of edge is invalid")]
+    InvalidCCwEdge,
+    #[error("Ran out of valid edges while reducing")]
+    OutOfEdges,
+}
 
 //Definition 6: A cut in the DAG is a subset of the tree such that for every node Ci all ancestors
 //of Ci are in the cut as well. The front of the cut is the set of arcs that connect a node in the cut
@@ -101,8 +115,8 @@ impl WingedMesh {
             //faces: vec![Default::default(); faces],
             faces: idmap::DirectIdMap::with_capacity_direct(faces),
             // partitions: vec![Default::default(); faces],
-            edges: Default::default(),
-            verts: Default::default(),
+            edges: idmap::DirectIdMap::with_capacity_direct(faces * 3),
+            verts: idmap::DirectIdMap::with_capacity_direct(verts),
             groups: vec![],
             partitions: vec![PartitionInfo {
                 child_group_index: None,
@@ -129,10 +143,17 @@ impl WingedMesh {
     }
 
     pub fn from_gltf(path: impl AsRef<std::path::Path>) -> (Self, Box<[Vec4]>) {
-        let tri_mesh = TriMesh::from_gltf(path).unwrap();
+        let tri_mesh = TriMesh::from_gltf(&path).unwrap();
 
         let face_count = tri_mesh.indices.len() / 3;
         let mut mesh = WingedMesh::new(face_count, tri_mesh.verts.len());
+
+        println!(
+            "Loading GLTF {:?} with {} faces:",
+            fs::canonicalize(path).unwrap(),
+            face_count
+        );
+        let bar = indicatif::ProgressBar::new(face_count as u64);
 
         for i in 0..face_count {
             let a = tri_mesh.indices[i * 3] as usize;
@@ -140,7 +161,10 @@ impl WingedMesh {
             let c = tri_mesh.indices[i * 3 + 2] as usize;
 
             mesh.add_tri(FaceID(i), VertID(a), VertID(b), VertID(c));
+            bar.inc(1);
         }
+
+        bar.finish();
 
         (mesh, tri_mesh.verts)
     }
@@ -190,19 +214,19 @@ impl WingedMesh {
             .or_insert(Vertex::default())
             .add_incoming(eid);
 
-        self.edges.insert(eid, e);
+        assert!(self.edges.insert(eid, e).is_none());
     }
 
     pub fn add_tri(&mut self, f: FaceID, a: VertID, b: VertID, c: VertID) {
-        let iea = EdgeID(self.edges.max_id().map(|f| f as usize + 1).unwrap_or(0));
-        let ieb = EdgeID(self.edges.max_id().map(|f| f as usize + 2).unwrap_or(1));
-        let iec = EdgeID(self.edges.max_id().map(|f| f as usize + 3).unwrap_or(2));
+        let iea = EdgeID(f.0 * 3 + 0);
+        let ieb = EdgeID(f.0 * 3 + 1);
+        let iec = EdgeID(f.0 * 3 + 2);
 
         self.add_half_edge(a, b, f, iea, ieb, iec);
         self.add_half_edge(b, c, f, ieb, iec, iea);
         self.add_half_edge(c, a, f, iec, iea, ieb);
 
-        self.faces.insert(f, Face { edge: iea, part: 0 });
+        assert!(self.faces.insert(f, Face { edge: iea, part: 0 }).is_none());
     }
 
     /// Collapse a triangle, removing it from the graph, and pulling the two triangles on non-eid edges together
@@ -211,20 +235,25 @@ impl WingedMesh {
     ///  	0  D
     ///   	| 2
     /// 	B
-    fn collapse_tri(&mut self, eid: EdgeID, removed_vid: VertID, diversion_vid: VertID) {
+    /// Preconditions: A valid triangle on valid edge `eid`
+    /// Postconditions:
+    /// - `eid` no longer valid, triangle removed,
+    /// - The twins of the two non-eid edges are linked, despite not actually being opposites (invalid)
+    /// - No edges have been moved
+    ///
+    /// This function should only be called as part of an edge collapse, as leaves mesh partially invalid.
+    fn collapse_tri(&mut self, eid: EdgeID) {
         assert!(self.edges.contains_key(eid));
-        assert!(
-            removed_vid == self.edges[eid].vert_origin
-                || diversion_vid == self.edges[eid].vert_origin
-        );
+
+        #[cfg(test)]
+        {
+            self.assert_face_valid(self.edges[eid].face);
+        }
 
         let tri = self.iter_edge_loop(eid).collect::<Vec<_>>();
-        //println!("Collapsing triangle {tri:?}");
         self.faces.remove(self.edges[eid].face);
 
-        assert_eq!(tri.len(), 3);
         assert_eq!(tri[0], eid);
-
         // we are pinching edge to nothing, so make the other two edges twins
         if let Some(t) = self.edges[tri[1]].twin {
             self.edges[t].twin = self.edges[tri[2]].twin;
@@ -238,23 +267,10 @@ impl WingedMesh {
             self.edges[t].twin = None;
         }
 
+        // Remove any last references to this triangle
         for &e in &tri {
             self.verts[self.edges[e].vert_origin].remove_outgoing(e);
             self.verts[self.edges[e].vert_origin].remove_incoming(self.edges[e].edge_left_ccw);
-
-            if let Some(t) = self.edges[e].twin {
-                assert!(self.edges.contains_key(t));
-
-                if self.edges[t].vert_origin == removed_vid {
-                    self.edges[t].vert_origin = diversion_vid;
-
-                    self.verts[removed_vid].remove_outgoing(t);
-                    self.verts[removed_vid].remove_incoming(self.edges[t].edge_left_ccw);
-                    self.verts[diversion_vid].add_outgoing(t);
-                    self.verts[diversion_vid].add_incoming(self.edges[t].edge_left_ccw);
-                }
-            }
-
             self.edges.remove(e);
         }
     }
@@ -274,7 +290,6 @@ impl WingedMesh {
         #[cfg(test)]
         {
             assert!(self.edges.contains_key(eid));
-            self.assert_valid();
         }
 
         let edge = self.edges[eid].clone();
@@ -282,15 +297,16 @@ impl WingedMesh {
         let vb = edge.vert_origin;
         let va = self.edges[edge.edge_left_cw].vert_origin;
 
-        self.collapse_tri(eid, vb, va);
+        self.collapse_tri(eid);
 
         #[cfg(test)]
         {
-            self.assert_valid();
+            self.assert_vertex_valid(va);
+            self.assert_vertex_valid(vb);
         }
 
         if let Some(e0t) = edge.twin {
-            self.collapse_tri(e0t, vb, va);
+            self.collapse_tri(e0t);
         } else {
             println!("Warning: Collapsing edge with no twin - boundary operations are not allowed")
         };
@@ -318,7 +334,8 @@ impl WingedMesh {
 
         #[cfg(test)]
         {
-            self.assert_valid();
+            self.assert_vertex_valid(va);
+            //self.assert_valid();
         }
         //self.assert_valid();
     }
@@ -649,6 +666,8 @@ pub mod test {
     pub const TEST_MESH_HIGH: &str =
         "C:\\Users\\maxwe\\OneDriveC\\sync\\projects\\assets\\sphere.glb";
 
+    pub const TEST_MESH_MONK: &str =
+        "C:\\Users\\maxwe\\OneDriveC\\sync\\projects\\assets\\monk.glb";
     pub const TEST_MESH_MID: &str =
         "C:\\Users\\maxwe\\OneDriveC\\sync\\projects\\assets\\sphere_low.glb";
 
@@ -690,46 +709,56 @@ pub mod test {
     /// Extra assertion methods for test environment
     impl WingedMesh {
         pub fn assert_valid(&self) {
-            for (i, f) in self.faces.iter() {
-                let tri: Vec<_> = self.iter_edge_loop(f.edge).collect();
-
-                assert_eq!(tri.len(), 3);
-
-                for &e in &tri {
-                    assert!(self.edges.contains_key(e));
-
-                    if let Some(t) = self.edges[e].twin {
-                        assert!(self.edges.contains_key(t));
-                        assert!(
-                            !tri.contains(&t),
-                            "Tri neighbours itself, total tri count: {}",
-                            self.faces.len()
-                        );
-                    }
-                }
-
-                //assert_eq!(edges[0].vert_destination, edges[1].vert_origin);
-                //assert_eq!(edges[1].vert_destination, edges[2].vert_origin);
-                //assert_eq!(edges[2].vert_destination, edges[0].vert_origin);
+            for (&i, f) in self.faces.iter() {
+                self.assert_face_valid(i);
             }
-            for (eid, edge) in &self.edges {
-                if let Some(t) = edge.twin {
-                    assert!(self.edges.contains_key(t));
-                }
-                assert!(self.verts.contains_key(edge.vert_origin));
-                assert!(self.verts[edge.vert_origin].outgoing_edges().contains(eid));
-                assert!(self.edges.contains_key(edge.edge_left_ccw));
-                assert!(self.edges.contains_key(edge.edge_left_cw));
+            for (&eid, edge) in &self.edges {
+                self.assert_edge_valid(eid);
             }
             for (&vid, vert) in &self.verts {
                 self.assert_vertex_valid(vid);
             }
         }
 
-        pub fn assert_vertex_valid(&self, vid: VertID) {
-            if !self.verts.contains_key(vid) {
-                return;
+        pub fn assert_face_valid(&self, fid: FaceID) {
+            let f = &self.faces[fid];
+            let tri: Vec<_> = self.iter_edge_loop(f.edge).collect();
+
+            assert_eq!(tri.len(), 3);
+
+            for &e in &tri {
+                assert!(self.edges.contains_key(e));
+
+                self.assert_edge_valid(e);
+
+                if let Some(t) = self.edges[e].twin {
+                    assert!(self.edges.contains_key(t));
+                    assert!(
+                        !tri.contains(&t),
+                        "Tri neighbours itself, total tri count: {}",
+                        self.faces.len()
+                    );
+                }
             }
+        }
+
+        pub fn assert_edge_valid(&self, eid: EdgeID) {
+            let edge = &self.edges[eid];
+            if let Some(t) = edge.twin {
+                assert!(self.edges.contains_key(t));
+            }
+            assert!(self.verts.contains_key(edge.vert_origin));
+            assert!(self.verts[edge.vert_origin].outgoing_edges().contains(&eid));
+            assert!(self.edges.contains_key(edge.edge_left_ccw));
+            assert!(self.edges.contains_key(edge.edge_left_cw));
+
+            self.assert_vertex_valid(edge.vert_origin);
+            self.assert_vertex_valid(self.edges[edge.edge_left_ccw].vert_origin);
+            self.assert_vertex_valid(self.edges[edge.edge_left_cw].vert_origin);
+        }
+
+        pub fn assert_vertex_valid(&self, vid: VertID) {
+            assert!(self.verts.contains_key(vid));
 
             for e in self.verts[vid].outgoing_edges() {
                 assert!(
@@ -774,10 +803,6 @@ pub mod test {
             ..Default::default()
         };
 
-        println!(
-            "Loading from gltf {:?}!",
-            std::fs::canonicalize(TEST_MESH_MID)?
-        );
         let (mut mesh, verts) = WingedMesh::from_gltf(TEST_MESH_MID);
 
         mesh.assert_valid();
@@ -811,7 +836,6 @@ pub mod test {
         };
 
         let mesh = TEST_MESH_MID;
-        println!("Loading from gltf {:?}!", std::fs::canonicalize(mesh)?);
         let (mut mesh, verts) = WingedMesh::from_gltf(mesh);
 
         // Apply primary partition, that will define the lowest level clusterings
@@ -855,7 +879,6 @@ pub mod test {
         };
 
         let mesh = TEST_MESH_MID;
-        println!("Loading from gltf {:?}!", std::fs::canonicalize(mesh)?);
         let (mut mesh, verts) = WingedMesh::from_gltf(mesh);
 
         // Apply primary partition, that will define the lowest level clusterings
@@ -1000,7 +1023,6 @@ pub mod test {
             ..Default::default()
         };
         let mesh = TEST_MESH_PLANE_LOW;
-        println!("Loading from gltf {:?}!", std::fs::canonicalize(mesh)?);
         let (mut mesh, verts) = WingedMesh::from_gltf(mesh);
 
         // Apply primary partition, that will define the lowest level clusterings
@@ -1066,7 +1088,6 @@ pub mod test {
             ..Default::default()
         };
         let mesh = TEST_MESH_PLANE_LOW;
-        println!("Loading from gltf {:?}!", std::fs::canonicalize(mesh)?);
         let (mut mesh, verts) = WingedMesh::from_gltf(mesh);
 
         println!("Faces: {}, Verts: {}", mesh.face_count(), mesh.verts.len());
@@ -1093,7 +1114,6 @@ pub mod test {
             ..Default::default()
         };
         let mesh = TEST_MESH_LOW;
-        println!("Loading from gltf {:?}!", std::fs::canonicalize(mesh)?);
         let (mut mesh, verts) = WingedMesh::from_gltf(mesh);
 
         println!("Faces: {}, Verts: {}", mesh.face_count(), mesh.verts.len());

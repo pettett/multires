@@ -1,14 +1,34 @@
-use std::cmp;
+use std::cmp::{self, Reverse};
 
 use glam::{Vec4, Vec4Swizzles};
+use indicatif::ProgressStyle;
 
 use super::{
     vertex::{VertID, Vertex},
-    winged_mesh::{EdgeID, Face, FaceID, WingedMesh},
+    winged_mesh::{EdgeID, Face, FaceID, MeshError, WingedMesh},
 };
+use anyhow::{Context, Result};
 
 /// Quadric type. Internally a DMat4, kept private to ensure only valid reduction operations can effect it.
 pub struct Quadric(glam::DMat4);
+
+#[derive(PartialOrd, PartialEq)]
+struct OrdF64(f64);
+/// Similar to `Quadric`, this data is for internal use only.
+pub struct CollapseQueue(priority_queue::PriorityQueue<EdgeID, Reverse<OrdF64>>);
+
+impl Eq for OrdF64 {}
+
+impl Ord for OrdF64 {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        if let Some(ordering) = self.partial_cmp(other) {
+            ordering
+        } else {
+            // Choose what to do with NaNs, for example:
+            panic!("Cannot order invalid floats")
+        }
+    }
+}
 
 pub fn tri_area(a: glam::Vec3A, b: glam::Vec3A, c: glam::Vec3A) -> f32 {
     let ab = b - a;
@@ -76,10 +96,19 @@ impl VertID {
 }
 
 impl EdgeID {
-    pub fn orig_dest(&self, mesh: &WingedMesh) -> Result<(VertID, VertID), ()> {
-        let e = mesh.edges.get(self).ok_or(())?;
+    pub fn orig_dest(&self, mesh: &WingedMesh) -> Result<(VertID, VertID)> {
+        let e = mesh
+            .edges
+            .get(self)
+            .ok_or(MeshError::InvalidEdge)
+            .context("Failed to lookup origin/destination")?;
         let orig = e.vert_origin;
-        let dest = mesh.edges.get(e.edge_left_cw).ok_or(())?.vert_origin;
+        let dest = mesh
+            .edges
+            .get(e.edge_left_cw)
+            .ok_or(MeshError::InvalidCwEdge)
+            .context("Failed to lookup origin/destination")?
+            .vert_origin;
         Ok((orig, dest))
     }
 
@@ -89,7 +118,7 @@ impl EdgeID {
         mesh: &WingedMesh,
         verts: &[glam::Vec4],
         quadric_errors: &[Quadric],
-    ) -> Result<Option<f64>, ()> {
+    ) -> Result<Option<f64>> {
         let (orig, dest) = self.orig_dest(mesh)?;
         let q = Quadric(quadric_errors[orig.0].0 + quadric_errors[dest.0].0);
         // Collapsing this edge would move the origin to the destination, so we find the error of the origin at the merged point.
@@ -100,7 +129,13 @@ impl EdgeID {
         }
 
         // Test normals of triangles before and after the swap
-        for &e in mesh.verts.get(orig).ok_or(())?.outgoing_edges() {
+        for &e in mesh
+            .verts
+            .get(orig)
+            .ok_or(MeshError::InvalidVertex)
+            .context("Failed to lookup vertex for finding plane normals")?
+            .outgoing_edges()
+        {
             if e == self {
                 continue;
             }
@@ -123,28 +158,13 @@ impl EdgeID {
                 _ => unreachable!(),
             };
 
-            if starting_plane.xyz().dot(end_plane.xyz()) < 0.1 {
-                // Flipped triangle, give this a very high weight
+            if starting_plane.xyz().dot(end_plane.xyz()) < 0.0 {
+                // Flipped triangle, give this an invalid weight - discard
                 return Ok(None);
             }
         }
 
         Ok(Some(q.quadric_error(verts[orig.0].into())))
-    }
-}
-#[derive(PartialOrd, PartialEq)]
-struct OrdF64(f64);
-
-impl Eq for OrdF64 {}
-
-impl Ord for OrdF64 {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        if let Some(ordering) = self.partial_cmp(other) {
-            ordering
-        } else {
-            // Choose what to do with NaNs, for example:
-            panic!("Cannot order invalid floats")
-        }
     }
 }
 
@@ -158,31 +178,55 @@ impl WingedMesh {
 
         quadrics
     }
+
+    pub fn initialise_collapse_queue(
+        &self,
+        verts: &[glam::Vec4],
+        quadrics: &[Quadric],
+    ) -> CollapseQueue {
+        let mut pq = priority_queue::PriorityQueue::with_capacity(self.edges.len());
+
+        let bar = indicatif::ProgressBar::new(self.edges.len() as _);
+
+        for &eid in self.edges.keys() {
+            bar.inc(1);
+            if let Some(error) = eid.edge_collapse_error(&self, verts, &quadrics).unwrap() {
+                pq.push(eid, cmp::Reverse(OrdF64(error)));
+            }
+        }
+
+        bar.finish_and_clear();
+
+        CollapseQueue(pq)
+    }
+
     /// Returns estimate of error introduced by halving the number of triangles
-    pub fn reduce(&mut self, verts: &[glam::Vec4], quadrics: &mut [Quadric]) -> Result<f64, ()> {
+    pub fn reduce(
+        &mut self,
+        verts: &[glam::Vec4],
+        quadrics: &mut [Quadric],
+        collapse_queue: &mut CollapseQueue,
+    ) -> Result<f64> {
         // Priority queue with every vertex and their errors.
 
-        let mut pq = priority_queue::PriorityQueue::with_capacity(self.edges.len());
         let mut new_error = 0.0;
-        for &eid in self.edges.keys() {
-            if let Some(error) = eid.edge_collapse_error(&self, verts, &quadrics)? {
-                pq.push(eid, cmp::Reverse(OrdF64(error)));
-                continue;
-            }
-
-            pq.remove(&eid);
-        }
 
         let tris = self.face_count();
         // Need to remove half the triangles - each reduction removes 2
         let required_reductions = tris / 4;
 
-        for i in 0..required_reductions {
-            let (eid, cmp::Reverse(OrdF64(err))) = pq.pop().ok_or(())?;
+        let bar = indicatif::ProgressBar::new(required_reductions as _);
+        bar.set_style(
+            ProgressStyle::with_template("(Error:{msg}) {wide_bar} {pos}/{len} ({per_sec})")
+                .unwrap(),
+        );
 
-            if i % 200 == 0 {
-                println!("Selected edge {i} with error: {err}");
-            }
+        for i in 0..required_reductions {
+            let (eid, cmp::Reverse(OrdF64(err))) =
+                collapse_queue.0.pop().ok_or(MeshError::OutOfEdges)?;
+
+            bar.inc(1);
+            bar.set_message(format!("{err:.3e}"));
 
             new_error += err;
 
@@ -193,7 +237,7 @@ impl WingedMesh {
             #[cfg(not(test))]
             {
                 if !self.verts.contains_key(orig) || !self.verts.contains_key(dest) {
-                    println!("Warning - drawn 'valid' edge with no orig or dest");
+                    //bar.println("Warning - drawn 'valid' edge with no orig or dest");
                     continue;
                 }
             }
@@ -212,14 +256,15 @@ impl WingedMesh {
             for eid in effected_edges {
                 if self.edges.contains_key(eid) {
                     if let Some(error) = eid.edge_collapse_error(&self, verts, &quadrics)? {
-                        pq.push(eid, cmp::Reverse(OrdF64(error)));
+                        collapse_queue.0.push(eid, cmp::Reverse(OrdF64(error)));
                         continue;
                     }
                 }
 
-                pq.remove(&eid);
+                collapse_queue.0.remove(&eid);
             }
         }
+        bar.finish();
 
         Ok(new_error)
     }
@@ -229,12 +274,9 @@ impl WingedMesh {
 mod tests {
     use std::error::Error;
 
-    use crate::mesh::winged_mesh::test::{TEST_MESH_PLANE, TEST_MESH_PLANE_LOW};
+    use crate::mesh::winged_mesh::test::{TEST_MESH_MONK, TEST_MESH_PLANE, TEST_MESH_PLANE_LOW};
 
-    use super::super::{
-        vertex::VertID,
-        winged_mesh::{test::TEST_MESH_HIGH, WingedMesh},
-    };
+    use super::super::winged_mesh::{test::TEST_MESH_HIGH, WingedMesh};
 
     use super::fundamental_error_quadric;
 
@@ -350,17 +392,17 @@ mod tests {
 
     #[test]
     pub fn test_reduction() -> Result<(), Box<dyn Error>> {
-        let (mut mesh, verts) = WingedMesh::from_gltf(TEST_MESH_PLANE);
-        println!("Total {} tris", mesh.face_count());
+        let (mut mesh, verts) = WingedMesh::from_gltf(TEST_MESH_MONK);
         let mut quadrics = mesh.create_quadrics(&verts);
+        let mut queue = mesh.initialise_collapse_queue(&verts, &quadrics);
         mesh.assert_valid();
-        mesh.reduce(&verts, &mut quadrics).unwrap();
+        mesh.reduce(&verts, &mut quadrics, &mut queue).unwrap();
         mesh.assert_valid();
-        mesh.reduce(&verts, &mut quadrics).unwrap();
+        mesh.reduce(&verts, &mut quadrics, &mut queue).unwrap();
         mesh.assert_valid();
-        mesh.reduce(&verts, &mut quadrics).unwrap();
+        mesh.reduce(&verts, &mut quadrics, &mut queue).unwrap();
         mesh.assert_valid();
-        mesh.reduce(&verts, &mut quadrics).unwrap();
+        mesh.reduce(&verts, &mut quadrics, &mut queue).unwrap();
         mesh.assert_valid();
 
         Ok(())
