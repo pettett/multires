@@ -1,7 +1,10 @@
 use std::cmp::{self, Reverse};
 
 use glam::{Vec4, Vec4Swizzles};
-use indicatif::ProgressStyle;
+use indicatif::{ParallelProgressIterator, ProgressStyle};
+use rayon::iter::{
+    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator,
+};
 
 use super::{
     vertex::{VertID, Vertex},
@@ -9,6 +12,8 @@ use super::{
 };
 use anyhow::{Context, Result};
 
+#[derive(Clone, Copy)]
+pub struct Plane(glam::Vec4);
 /// Quadric type. Internally a DMat4, kept private to ensure only valid reduction operations can effect it.
 pub struct Quadric(glam::DMat4);
 
@@ -36,27 +41,37 @@ pub fn tri_area(a: glam::Vec3A, b: glam::Vec3A, c: glam::Vec3A) -> f32 {
 
     glam::Vec3A::cross(ab, ac).length() / 2.0
 }
+impl Plane {
+    pub fn from_three_points(a: glam::Vec3A, b: glam::Vec3A, c: glam::Vec3A) -> Self {
+        let ab = b - a;
+        let ac = c - a;
 
-pub fn plane_from_three_points(a: glam::Vec3A, b: glam::Vec3A, c: glam::Vec3A) -> glam::Vec4 {
-    let ab = b - a;
-    let ac = c - a;
+        let normal = glam::Vec3A::cross(ab, ac).normalize();
 
-    let normal = glam::Vec3A::cross(ab, ac).normalize();
+        Self::from_normal_and_point(normal, a)
+    }
 
-    let d = -a.dot(normal);
+    pub fn from_normal_and_point(norm: glam::Vec3A, p: glam::Vec3A) -> Self {
+        let d = -p.dot(norm);
 
-    let plane: glam::Vec4 = (normal, d).into();
+        let plane: glam::Vec4 = (norm, d).into();
 
-    plane
-}
+        Plane(plane)
+    }
 
-/// The fundamental error quadric `K_p`, such that `v^T K_p v` = `sqr distance v <-> p`
-/// Properties: Additive, Symmetric.
-pub fn fundamental_error_quadric(p: glam::DVec4) -> Quadric {
-    let (a, b, c, d) = p.into();
+    /// The fundamental error quadric `K_p`, such that `v^T K_p v` = `sqr distance v <-> p`
+    /// Properties: Additive, Symmetric.
+    pub fn fundamental_error_quadric(self) -> Quadric {
+        let p: glam::DVec4 = self.0.into();
+        let (a, b, c, d) = p.into();
 
-    // Do `p p^T`
-    Quadric(glam::DMat4::from_cols(a * p, b * p, c * p, d * p))
+        // Do `p p^T`
+        Quadric(glam::DMat4::from_cols(a * p, b * p, c * p, d * p))
+    }
+
+    pub fn normal(&self) -> glam::Vec3A {
+        self.0.into()
+    }
 }
 
 impl Quadric {
@@ -69,10 +84,10 @@ impl Quadric {
 }
 impl FaceID {
     /// Generate plane from the 3 points a,b,c on this face.
-    pub fn plane(&self, mesh: &WingedMesh, verts: &[glam::Vec4]) -> glam::Vec4 {
+    pub fn plane(&self, mesh: &WingedMesh, verts: &[glam::Vec4]) -> Plane {
         let [a, b, c] = mesh.triangle_from_face(&mesh.faces[self]);
 
-        plane_from_three_points(verts[a].into(), verts[b].into(), verts[c].into())
+        Plane::from_three_points(verts[a].into(), verts[b].into(), verts[c].into())
     }
 }
 
@@ -88,8 +103,25 @@ impl VertID {
 
             let plane = f.plane(mesh, verts);
 
-            let Kp = fundamental_error_quadric(plane.into());
+            let Kp = plane.fundamental_error_quadric();
+
             Q.0 += Kp.0;
+
+            if mesh.edges[e].twin.is_none() {
+                // Boundary edge, add a plane that stops us moving away from the boundary
+
+                // Edge Plane should have normal of Edge X plane
+                let v = e.edge_vec(mesh, verts).unwrap();
+
+                let boundary_norm = v.cross(plane.normal());
+
+                let boundary_plane = Plane::from_normal_and_point(
+                    boundary_norm,
+                    verts[mesh.edges[e].vert_origin.0].into(),
+                );
+                // Multiply squared error by large factor, as changing the boundary adds a lot of visible error
+                Q.0 += boundary_plane.fundamental_error_quadric().0 * 30.0;
+            }
         }
         Q
     }
@@ -110,6 +142,13 @@ impl EdgeID {
             .context("Failed to lookup origin/destination")?
             .vert_origin;
         Ok((orig, dest))
+    }
+
+    pub fn edge_vec(&self, mesh: &WingedMesh, verts: &[glam::Vec4]) -> Result<glam::Vec3A> {
+        let (src, dst) = self.orig_dest(mesh)?;
+        let vd: glam::Vec3A = verts[dst.0].into();
+        let vs: glam::Vec3A = verts[src.0].into();
+        Ok(vd - vs)
     }
 
     /// Estimate the error introduced by collapsing this edge. Does not take into account penalties from flipping triangles
@@ -149,16 +188,16 @@ impl EdgeID {
                 verts[c].into(),
                 verts[dest.0].into(),
             );
-            let starting_plane = plane_from_three_points(v_a, v_b, v_c);
+            let starting_plane = Plane::from_three_points(v_a, v_b, v_c);
 
             let end_plane = match orig.0 {
-                i if i == a => plane_from_three_points(new_corner, v_b, v_c),
-                i if i == b => plane_from_three_points(v_a, new_corner, v_c),
-                i if i == c => plane_from_three_points(v_a, v_b, new_corner),
+                i if i == a => Plane::from_three_points(new_corner, v_b, v_c),
+                i if i == b => Plane::from_three_points(v_a, new_corner, v_c),
+                i if i == c => Plane::from_three_points(v_a, v_b, new_corner),
                 _ => unreachable!(),
             };
 
-            if starting_plane.xyz().dot(end_plane.xyz()) < 0.0 {
+            if starting_plane.normal().dot(end_plane.normal()) < 0.0 {
                 // Flipped triangle, give this an invalid weight - discard
                 return Ok(None);
             }
@@ -171,10 +210,15 @@ impl EdgeID {
 impl WingedMesh {
     pub fn create_quadrics(&self, verts: &[glam::Vec4]) -> Vec<Quadric> {
         let mut quadrics = Vec::with_capacity(verts.len());
-
-        for (i, v) in self.verts.iter() {
-            quadrics.push(i.generate_error_matrix(&self, verts))
+        //The combination of this and the next step is completely safe, as we initialise everything.
+        unsafe {
+            quadrics.set_len(verts.len());
         }
+
+        quadrics
+            .par_iter_mut()
+            .enumerate()
+            .for_each(|(i, q)| *q = VertID(i).generate_error_matrix(&self, verts));
 
         quadrics
     }
@@ -184,6 +228,7 @@ impl WingedMesh {
         verts: &[glam::Vec4],
         quadrics: &[Quadric],
     ) -> CollapseQueue {
+        println!("Generating Collapse Queue...");
         let mut pq = priority_queue::PriorityQueue::with_capacity(self.edges.len());
 
         let bar = indicatif::ProgressBar::new(self.edges.len() as _);
@@ -237,7 +282,7 @@ impl WingedMesh {
             #[cfg(not(test))]
             {
                 if !self.verts.contains_key(orig) || !self.verts.contains_key(dest) {
-                    //bar.println("Warning - drawn 'valid' edge with no orig or dest");
+                    bar.println("Warning - drawn 'valid' edge with no orig or dest");
                     continue;
                 }
             }
@@ -276,12 +321,13 @@ mod tests {
 
     use crate::mesh::winged_mesh::test::{TEST_MESH_MONK, TEST_MESH_PLANE, TEST_MESH_PLANE_LOW};
 
-    use super::super::winged_mesh::{test::TEST_MESH_HIGH, WingedMesh};
+    use super::{
+        super::winged_mesh::{test::TEST_MESH_HIGH, WingedMesh},
+        Plane,
+    };
 
-    use super::fundamental_error_quadric;
-
-    fn plane_distance(plane: glam::Vec4, point: glam::Vec3A) -> f32 {
-        point.dot(plane.into()) + plane.w
+    fn plane_distance(plane: &Plane, point: glam::Vec3A) -> f32 {
+        point.dot(plane.0.into()) + plane.0.w
     }
     // Test that each face generates a valid plane
     #[test]
@@ -293,14 +339,14 @@ mod tests {
 
         for (i, (&fid, f)) in mesh.faces.iter().enumerate() {
             let plane = fid.plane(&mesh, &verts);
-
+            let n = plane.normal();
             assert!(
-                ((plane.x * plane.x + plane.y * plane.y + plane.z * plane.z) - 1.0).abs() < e,
+                ((n.x * n.x + n.y * n.y + n.z * n.z) - 1.0).abs() < e,
                 "Plane {i} is not normalised"
             );
 
             for v in mesh.triangle_from_face(f) {
-                let v_dist = plane_distance(plane, verts[v].into()).abs();
+                let v_dist = plane_distance(&plane, verts[v].into()).abs();
                 assert!(
                     v_dist < e,
                     "Plane invalid at index {v}, tri {i}, value {v_dist}",
@@ -324,7 +370,7 @@ mod tests {
         for (i, (&fid, f)) in mesh.faces.iter().enumerate() {
             let plane = fid.plane(&mesh, &verts);
 
-            let mat = fundamental_error_quadric(plane.into());
+            let mat = plane.fundamental_error_quadric();
 
             let cols = mat.0.to_cols_array_2d();
 
@@ -347,7 +393,7 @@ mod tests {
 
             for &v in &random_points {
                 let q_error = mat.quadric_error(v);
-                let p_dist = plane_distance(plane, v);
+                let p_dist = plane_distance(&plane, v);
                 let sqr_p_dist = (p_dist * p_dist) as f64;
 
                 assert!(
@@ -363,7 +409,7 @@ mod tests {
     // Test that each vertex generates a valid quadric matrix that returns 0 at itself.
     #[test]
     pub fn test_vert_quadrics() -> Result<(), Box<dyn Error>> {
-        let (mesh, verts) = WingedMesh::from_gltf(TEST_MESH_HIGH);
+        let (mesh, verts) = WingedMesh::from_gltf(TEST_MESH_MONK);
 
         let e = 0.0000000001;
 
@@ -394,15 +440,19 @@ mod tests {
     pub fn test_reduction() -> Result<(), Box<dyn Error>> {
         let (mut mesh, verts) = WingedMesh::from_gltf(TEST_MESH_MONK);
         let mut quadrics = mesh.create_quadrics(&verts);
-        let mut queue = mesh.initialise_collapse_queue(&verts, &quadrics);
+        let mut collapse_queue = mesh.initialise_collapse_queue(&verts, &quadrics);
         mesh.assert_valid();
-        mesh.reduce(&verts, &mut quadrics, &mut queue).unwrap();
+        mesh.reduce(&verts, &mut quadrics, &mut collapse_queue)
+            .unwrap();
         mesh.assert_valid();
-        mesh.reduce(&verts, &mut quadrics, &mut queue).unwrap();
+        mesh.reduce(&verts, &mut quadrics, &mut collapse_queue)
+            .unwrap();
         mesh.assert_valid();
-        mesh.reduce(&verts, &mut quadrics, &mut queue).unwrap();
+        mesh.reduce(&verts, &mut quadrics, &mut collapse_queue)
+            .unwrap();
         mesh.assert_valid();
-        mesh.reduce(&verts, &mut quadrics, &mut queue).unwrap();
+        mesh.reduce(&verts, &mut quadrics, &mut collapse_queue)
+            .unwrap();
         mesh.assert_valid();
 
         Ok(())

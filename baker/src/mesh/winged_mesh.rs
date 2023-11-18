@@ -2,6 +2,7 @@ use common::{tri_mesh::TriMesh, BoundingSphere, GroupInfo, PartitionInfo};
 use glam::{Vec3, Vec4, Vec4Swizzles};
 use idmap::IntegerId;
 use metis::{idx_t, PartitioningConfig, PartitioningError};
+use petgraph::Graph;
 use std::{collections::HashMap, fs};
 
 use super::{
@@ -111,10 +112,7 @@ pub struct WingedMesh {
 impl WingedMesh {
     pub fn new(faces: usize, verts: usize) -> Self {
         Self {
-            //verts: vec![Default::default(); verts],
-            //faces: vec![Default::default(); faces],
             faces: idmap::DirectIdMap::with_capacity_direct(faces),
-            // partitions: vec![Default::default(); faces],
             edges: idmap::DirectIdMap::with_capacity_direct(faces * 3),
             verts: idmap::DirectIdMap::with_capacity_direct(verts),
             groups: vec![],
@@ -291,6 +289,8 @@ impl WingedMesh {
         {
             assert!(self.edges.contains_key(eid));
         }
+        //#[cfg(test)]
+        //let previous_graph = self.generate_face_graph();
 
         let edge = self.edges[eid].clone();
 
@@ -307,9 +307,7 @@ impl WingedMesh {
 
         if let Some(e0t) = edge.twin {
             self.collapse_tri(e0t);
-        } else {
-            println!("Warning: Collapsing edge with no twin - boundary operations are not allowed")
-        };
+        }
 
         // Remove `vert_origin`
 
@@ -335,287 +333,21 @@ impl WingedMesh {
         #[cfg(test)]
         {
             self.assert_vertex_valid(va);
+
+            //Two faces removed, three linking between faces removed
+            //(removed triangles to each other, and 1/2 of the links of the neighbours that are pinched)
+            // PASSES: Do not need to test again.
+            //let new_graph = self.generate_face_graph();
+            //assert_eq!(new_graph.node_count(), previous_graph.node_count() - 2);
+            //assert_eq!(new_graph.edge_count(), previous_graph.edge_count() - 3);
+
+            //for g in self.generate_group_graphs() {
+            //    test::assert_contiguous_graph(&g);
+            //}
+
             //self.assert_valid();
         }
         //self.assert_valid();
-    }
-
-    fn generate_face_graph(&self) -> petgraph::graph::UnGraph<usize, ()> {
-        //TODO: Give lower weight to grouping partitions that have not been recently grouped, to ensure we are
-        // constantly overwriting old borders with remeshes
-
-        let mut graph = petgraph::Graph::with_capacity(
-            self.partition_count(),
-            // Estimate each partition hits roughly 3 other partitions
-            self.partition_count() * 3,
-        );
-
-        for (i, face) in self.faces().iter() {
-            // Each node should directly correspond to a partition
-            assert_eq!(i.0, graph.add_node(face.part).index());
-        }
-
-        for (i, face) in self.faces().iter() {
-            for e in self.iter_edge_loop(face.edge) {
-                if let Some(twin) = self.edges[e].twin {
-                    let other_face = &self.edges[twin].face;
-
-                    graph.update_edge(
-                        petgraph::graph::NodeIndex::new(i.0),
-                        petgraph::graph::NodeIndex::new(other_face.0),
-                        (),
-                    );
-                }
-            }
-        }
-
-        graph
-    }
-
-    fn generate_partition_graph(&self) -> petgraph::graph::UnGraph<(), ()> {
-        //TODO: Give lower weight to grouping partitions that have not been recently grouped, to ensure we are
-        // constantly overwriting old borders with remeshes
-
-        let mut graph = petgraph::Graph::with_capacity(
-            self.partition_count(),
-            // Estimate each partition hits roughly 3 other partitions
-            self.partition_count() * 3,
-        );
-
-        for p in 0..self.partition_count() {
-            // Each node should directly correspond to a partition
-            assert_eq!(p, graph.add_node(()).index());
-        }
-
-        for (i, face) in self.faces().iter() {
-            for e in self.iter_edge_loop(face.edge) {
-                if let Some(twin) = self.edges[e].twin {
-                    let other_face = &self.faces[self.edges[twin].face];
-
-                    if face.part != other_face.part {
-                        graph.update_edge(
-                            petgraph::graph::NodeIndex::new(face.part),
-                            petgraph::graph::NodeIndex::new(other_face.part),
-                            (),
-                        );
-                    }
-                }
-            }
-        }
-
-        graph
-    }
-
-    pub fn partition_full_mesh(
-        &mut self,
-        config: &PartitioningConfig,
-        partitions: u32,
-    ) -> Result<(), PartitioningError> {
-        println!("Partitioning into {partitions} partitions");
-
-        let part = config.partition_from_graph(partitions, &self.generate_face_graph())?;
-
-        assert_eq!(part.len(), self.faces.len());
-
-        let mut max_part = 0;
-        for (i, f) in self.faces.iter_mut() {
-            // Some faces will have already been removed
-            f.part = part[i.0] as usize;
-            max_part = max_part.max(f.part)
-        }
-
-        self.partitions = vec![
-            PartitionInfo {
-                child_group_index: None,
-                group_index: usize::MAX,
-                tight_bound: Default::default()
-            };
-            max_part + 1
-        ];
-
-        Ok(())
-    }
-
-    pub fn group(
-        &mut self,
-        config: &PartitioningConfig,
-        verts: &[Vec4],
-    ) -> Result<usize, PartitioningError> {
-        let group_count = self.partitions.len().div_ceil(4);
-        println!(
-            "Partitioning into {group_count} groups from {} partitions",
-            self.partitions.len()
-        );
-
-        let graph = self.generate_partition_graph();
-
-        // create new array of groups, and remember the old groups
-        let mut old_groups = vec![
-            GroupInfo {
-                tris: 0,
-                monotonic_bound: Default::default(),
-                partitions: Vec::new()
-            };
-            group_count
-        ];
-
-        std::mem::swap(&mut self.groups, &mut old_groups);
-
-        // Partition -> Group
-        if group_count != 1 {
-            for (part, &group) in config
-                .partition_from_graph(group_count as u32, &graph)?
-                .iter()
-                .enumerate()
-            {
-                self.partitions[part].group_index = group as usize;
-            }
-        } else {
-            for p in &mut self.partitions {
-                p.group_index = 0;
-            }
-        };
-
-        for (part, info) in self.partitions.iter().enumerate() {
-            self.groups[info.group_index].partitions.push(part);
-        }
-
-        for f in self.faces.values_mut() {
-            let f_group_info = &mut self.groups[self.partitions[f.part].group_index];
-            f_group_info.tris += 1;
-            f_group_info
-                .monotonic_bound
-                .translate(verts[self.edges[f.edge].vert_origin.0].xyz());
-        }
-
-        // Take averages
-        for g in &mut self.groups {
-            g.monotonic_bound.normalise(g.tris);
-        }
-
-        // Find radii of groups
-        for f in self.faces.values_mut() {
-            let f_group_info = &mut self.groups[self.partitions[f.part].group_index];
-
-            f_group_info
-                .monotonic_bound
-                .include_point(verts[self.edges[f.edge].vert_origin.0].xyz());
-        }
-        println!(
-            "Including child bounds with {} old groups",
-            old_groups.len()
-        );
-
-        for g in &mut self.groups {
-            // SQRT each group
-            //    g.monotonic_bound.radius = g.monotonic_bound.radius.sqrt();
-
-            // Each group also must envelop all the groups it is descended from,
-            // as our partitions must do the same, as we base them off group info
-
-            for p in &g.partitions {
-                if let Some(child_group_index) = self.partitions[*p].child_group_index {
-                    let child_group = &old_groups[child_group_index];
-                    // combine groups radius
-                    g.monotonic_bound
-                        .include_sphere(&child_group.monotonic_bound);
-                }
-            }
-        }
-
-        Ok(group_count)
-    }
-
-    /// Within each group, split triangles into two completely new partitions, so as not to preserve any old seams between ancient partitions
-    /// Ensures the data structure is seamless with changing seams! Yippee!
-    /// Will update the partitions list, but groups list will still refer to old partitions. To find out what group these should be in, before regrouping,
-    /// look at `child_group_index`
-    pub fn partition_within_groups(
-        &mut self,
-        config: &PartitioningConfig,
-        parts_per_group: Option<u32>,
-    ) -> Result<usize, PartitioningError> {
-        let group_count = self.groups.len().max(1);
-        println!("Partitioning {group_count} groups into sub-partitions");
-
-        let mut graphs = vec![petgraph::graph::UnGraph::<(), ()>::new_undirected(); group_count];
-
-        // Stores vecs of face IDs, which should be associated with data in graphs
-        let mut ids = vec![Vec::new(); group_count];
-        // only needs a single face map, as each face can only be part of one group
-        let mut faces = HashMap::new();
-
-        // Give every triangle a node
-        for (i, face) in self.faces().iter() {
-            let g = self.partitions[face.part].group_index;
-            let n = graphs[g].add_node(());
-
-            // indexes should correspond
-            assert_eq!(n.index(), ids[g].len());
-
-            ids[g].push(*i);
-            faces.insert(*i, n);
-        }
-        // Apply links between nodes
-        for (i, face) in self.faces().iter() {
-            let g = self.partitions[face.part].group_index;
-
-            for e in self.iter_edge_loop(face.edge) {
-                if let Some(twin) = self.edges[e].twin {
-                    let other_face = self.edges[twin].face;
-                    let o_g = self.partitions[self.faces[other_face].part].group_index;
-
-                    if g == o_g {
-                        graphs[g].update_edge(faces[i], faces[&other_face], ());
-                    }
-                }
-            }
-        }
-
-        // Ungrouped partitions but with a dependence on an old group
-        let mut new_partitions = Vec::new();
-
-        for (i_group, (graph, ids)) in graphs.iter().zip(ids).enumerate() {
-            // TODO: fine tune so we get 64/126 meshlets
-
-            let parts = if let Some(parts_per_group) = parts_per_group {
-                parts_per_group
-            } else {
-                (graph.node_count() as u32).div_ceil(60)
-            };
-
-            let part = config.partition_from_graph(parts, graph)?;
-
-            // Each new part needs to register its dependence on the group we were a part of before
-            let child_group = self.partitions[self.faces[ids[0]].part].group_index;
-
-            assert_eq!(i_group, child_group);
-
-            // Update partitions of the actual triangles
-            for x in 0..part.len() {
-                self.faces[ids[x]].part = new_partitions.len() + part[x] as usize;
-            }
-            // If we have not been grouped yet,
-            let child_group_index = if self.groups.len() == 0 {
-                None
-            } else {
-                Some(i_group)
-            };
-
-            for _ in 0..parts {
-                //    self.groups[group].partitions.push(new_partitions.len());
-
-                new_partitions.push(PartitionInfo {
-                    child_group_index,
-                    group_index: usize::MAX,
-                    tight_bound: Default::default(), //TODO:
-                })
-            }
-        }
-        self.partitions = new_partitions;
-
-        Ok(self.partitions.len())
-        //Ok(groups)
     }
 
     pub fn face_count(&self) -> usize {
@@ -662,7 +394,7 @@ pub mod test {
     };
     use std::fs;
 
-    use crate::mesh::winged_mesh::WingedMesh;
+    use crate::{group_and_partition_and_simplify, mesh::winged_mesh::WingedMesh};
     pub const TEST_MESH_HIGH: &str =
         "C:\\Users\\maxwe\\OneDriveC\\sync\\projects\\assets\\sphere.glb";
 
@@ -679,32 +411,6 @@ pub mod test {
 
     pub const TEST_MESH_PLANE_LOW: &str =
         "C:\\Users\\maxwe\\OneDriveC\\sync\\projects\\assets\\plane.glb";
-    pub const DOT_OUT: &str =
-        "C:\\Users\\maxwe\\OneDriveC\\sync\\projects\\multires\\baker\\graph.gv";
-
-    pub const HIERARCHY_SVG_OUT: &str =
-        "C:\\Users\\maxwe\\OneDriveC\\sync\\projects\\multires\\baker\\hierarchy_graph.svg";
-    pub const PART_SVG_OUT: &str =
-        "C:\\Users\\maxwe\\OneDriveC\\sync\\projects\\multires\\baker\\part_graph.svg";
-
-    pub const FACE_SVG_OUT: &str =
-        "C:\\Users\\maxwe\\OneDriveC\\sync\\projects\\multires\\baker\\face_graph.svg";
-
-    pub const FACE_SVG_OUT_2: &str =
-        "C:\\Users\\maxwe\\OneDriveC\\sync\\projects\\multires\\baker\\face_graph2.svg";
-
-    const COLS: [&str; 10] = [
-        "red",
-        "blue",
-        "green",
-        "aqua",
-        "cornflowerblue",
-        "darkgoldenrod1",
-        "deeppink",
-        "indigo",
-        "orchid",
-        "peru",
-    ];
 
     /// Extra assertion methods for test environment
     impl WingedMesh {
@@ -967,6 +673,16 @@ pub mod test {
     }
 
     #[test]
+    fn test_group_and_partition_and_simplify() {
+        println!("Loading from gltf!");
+        let (working_mesh, verts) = WingedMesh::from_gltf(TEST_MESH_HIGH);
+
+        // group_and_partition_full_res(working_mesh, &verts, mesh_name.to_owned());
+        //apply_simplification(working_mesh, &verts, mesh_name.to_owned());
+        group_and_partition_and_simplify(working_mesh, &verts, TEST_MESH_HIGH.to_owned());
+    }
+
+    #[test]
     pub fn test_partition_continuity() -> Result<(), Box<dyn Error>> {
         let test_config = &PartitioningConfig {
             method: metis::PartitioningMethod::MultilevelKWay,
@@ -1011,236 +727,6 @@ pub mod test {
                 }
             }
         }
-        Ok(())
-    }
-
-    #[test]
-    pub fn generate_face_graph() -> Result<(), Box<dyn Error>> {
-        let test_config = &PartitioningConfig {
-            method: metis::PartitioningMethod::MultilevelKWay,
-            force_contiguous_partitions: Some(true),
-            minimize_subgraph_degree: Some(true),
-            ..Default::default()
-        };
-        let mesh = TEST_MESH_PLANE_LOW;
-        let (mut mesh, verts) = WingedMesh::from_gltf(mesh);
-
-        // Apply primary partition, that will define the lowest level clusterings
-        mesh.partition_full_mesh(test_config, 9)?;
-
-        println!(
-            "Faces: {}, Verts: {}, Partitions: {}",
-            mesh.face_count(),
-            mesh.verts.len(),
-            mesh.partitions.len()
-        );
-
-        let mut graph = mesh.generate_face_graph();
-
-        petgraph_to_svg(
-            &graph,
-            FACE_SVG_OUT,
-            &|_, (n, &part)| {
-                let p = FaceID(n.index()).center(&mesh, &verts);
-                format!(
-                    "shape=point, color={}, pos=\"{},{}\"",
-                    COLS[part % COLS.len()],
-                    p.x * 200.0,
-                    p.z * 200.0,
-                )
-            },
-            true,
-        )?;
-
-        graph.retain_edges(|g, e| {
-            let (v1, v2) = g.edge_endpoints(e).unwrap();
-
-            let &p1 = g.node_weight(v1).unwrap();
-            let &p2 = g.node_weight(v2).unwrap();
-
-            p1 == p2
-        });
-
-        petgraph_to_svg(
-            &graph,
-            FACE_SVG_OUT_2,
-            &|_, (n, &part)| {
-                let p = FaceID(n.index()).center(&mesh, &verts);
-                format!(
-                    "shape=point, color={}, pos=\"{},{}\"",
-                    COLS[part % COLS.len()],
-                    p.x * 200.0,
-                    p.z * 200.0,
-                )
-            },
-            true,
-        )?;
-
-        Ok(())
-    }
-
-    #[test]
-    pub fn generate_partition_graph() -> Result<(), Box<dyn Error>> {
-        let test_config = &PartitioningConfig {
-            method: metis::PartitioningMethod::MultilevelKWay,
-            force_contiguous_partitions: Some(true),
-            minimize_subgraph_degree: Some(true),
-            ..Default::default()
-        };
-        let mesh = TEST_MESH_PLANE_LOW;
-        let (mut mesh, verts) = WingedMesh::from_gltf(mesh);
-
-        println!("Faces: {}, Verts: {}", mesh.face_count(), mesh.verts.len());
-
-        // Apply primary partition, that will define the lowest level clusterings
-        mesh.partition_within_groups(test_config, None)?;
-
-        petgraph_to_svg(
-            &mesh.generate_partition_graph(),
-            PART_SVG_OUT,
-            &|_, _| format!("shape=point"),
-            false,
-        )?;
-
-        Ok(())
-    }
-
-    #[test]
-    pub fn generate_partition_hierarchy_graph() -> Result<(), Box<dyn Error>> {
-        let test_config = &PartitioningConfig {
-            method: metis::PartitioningMethod::MultilevelKWay,
-            force_contiguous_partitions: Some(true),
-            minimize_subgraph_degree: Some(true),
-            ..Default::default()
-        };
-        let mesh = TEST_MESH_LOW;
-        let (mut mesh, verts) = WingedMesh::from_gltf(mesh);
-
-        println!("Faces: {}, Verts: {}", mesh.face_count(), mesh.verts.len());
-
-        // Apply primary partition, that will define the lowest level clusterings
-        mesh.partition_within_groups(test_config, None)?;
-
-        mesh.group(test_config, &verts)?;
-        let mut graph: petgraph::Graph<(), ()> = petgraph::Graph::new();
-
-        let mut old_part_nodes: Vec<_> =
-            mesh.partitions.iter().map(|o| graph.add_node(())).collect();
-
-        // Record a big colour map for node indexes, to show grouping
-        let mut colouring = HashMap::new();
-
-        let mut seen_groups = 0;
-
-        loop {
-            for (i, &n) in old_part_nodes.iter().enumerate() {
-                colouring.insert(n, mesh.partitions[i].group_index + seen_groups);
-            }
-
-            seen_groups += mesh.groups.len();
-
-            mesh.partition_within_groups(test_config, Some(2))?;
-
-            let new_part_nodes: Vec<_> =
-                mesh.partitions.iter().map(|o| graph.add_node(())).collect();
-
-            for (new_p_i, new_p) in mesh.partitions.iter().enumerate() {
-                let g_i = new_p.child_group_index.unwrap();
-
-                for &old_p_i in &mesh.groups[g_i].partitions {
-                    graph.add_edge(old_part_nodes[old_p_i], new_part_nodes[new_p_i], ());
-                }
-            }
-
-            old_part_nodes = new_part_nodes;
-
-            mesh.group(test_config, &verts)?;
-
-            if mesh.partitions.len() <= 2 {
-                break;
-            }
-        }
-
-        for (i, &n) in old_part_nodes.iter().enumerate() {
-            colouring.insert(n, mesh.partitions[i].group_index + seen_groups);
-        }
-
-        petgraph_to_svg(
-            &graph,
-            HIERARCHY_SVG_OUT,
-            &|_, (n, _)| format!("shape=point, color={}", COLS[colouring[&n] % COLS.len()]),
-            false,
-        )?;
-
-        Ok(())
-    }
-    use core::fmt;
-    fn petgraph_to_svg<
-        G: IntoNodeReferences
-            + IntoEdgeReferences
-            + petgraph::visit::NodeIndexable
-            + petgraph::visit::GraphProp,
-    >(
-        graph: G,
-        out: impl AsRef<path::Path>,
-        get_node_attrs: &dyn Fn(&G, G::NodeRef) -> String,
-        undirected: bool,
-    ) -> Result<(), Box<dyn Error>>
-    where
-        <G as petgraph::visit::Data>::EdgeWeight: fmt::Debug,
-        <G as petgraph::visit::Data>::NodeWeight: fmt::Debug,
-    {
-        let dot_out = if undirected {
-            fs::write(
-                DOT_OUT,
-                format!(
-                    "graph {{ \n layout=\"neato\"\n  {:?} }}",
-                    dot::Dot::with_attr_getters(
-                        &graph,
-                        &[
-                            dot::Config::GraphContentOnly,
-                            dot::Config::NodeNoLabel,
-                            dot::Config::EdgeNoLabel
-                        ],
-                        &|_, _| "arrowhead=none".to_owned(),
-                        get_node_attrs
-                    )
-                ),
-            )?;
-
-            process::Command::new("neato")
-                .arg("-n")
-                .arg(DOT_OUT)
-                .arg("-Tsvg")
-                .output()?
-        } else {
-            fs::write(
-                DOT_OUT,
-                format!(
-                    "{:?}",
-                    dot::Dot::with_attr_getters(
-                        &graph,
-                        &[dot::Config::NodeNoLabel, dot::Config::EdgeNoLabel],
-                        &|_, _| "arrowhead=none".to_owned(),
-                        get_node_attrs
-                    )
-                ),
-            )?;
-
-            process::Command::new("dot")
-                .arg(DOT_OUT)
-                .arg("-Tsvg")
-                .output()?
-        };
-
-        //fs::remove_file(DOT_OUT)?;
-
-        println!("{}", std::str::from_utf8(&dot_out.stderr)?);
-
-        assert!(dot_out.status.success());
-
-        fs::write(out, dot_out.stdout)?;
-
         Ok(())
     }
 }

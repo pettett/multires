@@ -90,6 +90,88 @@ pub fn group_and_partition_full_res(mut working_mesh: WingedMesh, verts: &[Vec4]
     .unwrap();
 }
 
+pub fn group_and_partition_and_simplify(
+    mut working_mesh: WingedMesh,
+    verts: &[Vec4],
+    name: String,
+) {
+    let config = metis::PartitioningConfig {
+        method: metis::PartitioningMethod::MultilevelKWay,
+        force_contiguous_partitions: Some(true),
+        minimize_subgraph_degree: Some(true),
+        ..Default::default()
+    };
+
+    let mut quadrics = working_mesh.create_quadrics(verts);
+    let mut queue = working_mesh.initialise_collapse_queue(verts, &quadrics);
+
+    // Apply primary partition, that will define the lowest level clusterings
+    working_mesh
+        .partition_full_mesh(&config, working_mesh.faces.len().div_ceil(60) as u32)
+        .unwrap();
+
+    working_mesh.group(&config, &verts).unwrap();
+
+    let mut layers = Vec::new();
+
+    layers.push(to_mesh_layer(&working_mesh, &verts));
+
+    // Generate 2 more meshes
+    for i in 0..10 {
+        // i = index of previous mesh layer
+        //working_mesh = reduce_mesh(working_mesh);
+
+        println!("Face count L{}: {}", i, working_mesh.face_count());
+
+        let e = match working_mesh.reduce(verts, &mut quadrics, &mut queue) {
+            Ok(e) => e,
+            Err(e) => {
+                println!(
+                    "Experience error {} with reducing, exiting early with what we have",
+                    e
+                );
+                break;
+            }
+        };
+        println!("Introduced error of {e}");
+
+        let partition_count = working_mesh
+            .partition_within_groups(&config, Some(2))
+            .unwrap();
+        // View a snapshot of the mesh without any re-groupings applied
+        //layers.push(to_mesh_layer(&next_mesh));
+
+        println!("{partition_count} Partitions from groups");
+
+        let group_count = working_mesh.group(&config, &verts).unwrap();
+
+        // view a snapshot of the mesh ready to create the next layer
+        // let error = (1.0 + i as f32) / 10.0 + rng.gen_range(-0.05..0.05);
+
+        println!("{group_count} Groups from partitions");
+
+        layers.push(to_mesh_layer(&working_mesh, &verts));
+
+        if group_count == 1 {
+            println!("Finished with single group");
+            break;
+        }
+    }
+
+    println!("Done with partitioning");
+
+    //assert_eq!(partitions1.len() * 3, layer_1_indices.len());
+
+    MultiResMesh {
+        name,
+        verts: verts.iter().map(|v| [v.x, v.y, v.z, 1.0]).collect(),
+        // layer_1_indices: indices.clone(),
+        lods: layers,
+    }
+    .save()
+    .unwrap();
+}
+
 pub fn apply_simplification(mut working_mesh: WingedMesh, verts: &[Vec4], name: String) {
     let config = metis::PartitioningConfig {
         method: metis::PartitioningMethod::MultilevelKWay,
@@ -119,9 +201,15 @@ pub fn apply_simplification(mut working_mesh: WingedMesh, verts: &[Vec4], name: 
             i + 1
         );
 
-        let Ok(e) = working_mesh.reduce(verts, &mut quadrics, &mut queue) else {
-            println!("Experience error with reducing, exiting early with what we have");
-            break;
+        let e = match working_mesh.reduce(verts, &mut quadrics, &mut queue) {
+            Ok(e) => e,
+            Err(e) => {
+                println!(
+                    "Experience error {} with reducing, exiting early with what we have",
+                    e
+                );
+                break;
+            }
         };
 
         // View a snapshot of the mesh without any re-groupings applied

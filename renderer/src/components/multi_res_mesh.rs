@@ -72,11 +72,11 @@ impl SubMeshComponent {
             //}
 
             if self.radius > parent.radius {
-                println!("WARNING: Non monotonic const error detected - error within bounds when child's error is not, but child's abs error should be lower");
+                //println!("WARNING: Non monotonic const error detected - error within bounds when child's error is not, but child's abs error should be lower");
             }
 
             if !self.error_within_bounds(mesh) && parent.error_within_bounds(mesh) {
-                println!("WARNING: Non monotonic error detected - error within bounds when child's error is not, but child's projected error should be lower");
+                //    println!("WARNING: Non monotonic error detected - error within bounds when child's error is not, but child's projected error should be lower");
             }
 
             parent.is_monotonic(submeshes, mesh);
