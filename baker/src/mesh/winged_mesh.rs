@@ -422,7 +422,7 @@ pub mod test {
                 self.assert_face_valid(i);
             }
             for (&eid, edge) in &self.edges {
-                self.assert_edge_valid(eid);
+                self.assert_edge_valid(eid, "Invalid edge in array");
             }
             for (&vid, vert) in &self.verts {
                 self.assert_vertex_valid(vid);
@@ -438,7 +438,7 @@ pub mod test {
             for &e in &tri {
                 assert!(self.edges.contains_key(e));
 
-                self.assert_edge_valid(e);
+                self.assert_edge_valid(e, "Invalid Edge in Face");
 
                 if let Some(t) = self.edges[e].twin {
                     assert!(self.edges.contains_key(t));
@@ -451,15 +451,19 @@ pub mod test {
             }
         }
 
-        pub fn assert_edge_valid(&self, eid: EdgeID) {
+        pub fn assert_edge_valid(&self, eid: EdgeID, msg: &'static str) {
             let edge = &self.edges[eid];
             if let Some(t) = edge.twin {
                 assert!(self.edges.contains_key(t));
             }
-            assert!(self.verts.contains_key(edge.vert_origin));
-            assert!(self.verts[edge.vert_origin].outgoing_edges().contains(&eid));
-            assert!(self.edges.contains_key(edge.edge_left_ccw));
-            assert!(self.edges.contains_key(edge.edge_left_cw));
+            assert!(self.verts.contains_key(edge.vert_origin), "{}", msg);
+            assert!(
+                self.verts[edge.vert_origin].outgoing_edges().contains(&eid),
+                "{}",
+                msg
+            );
+            assert!(self.edges.contains_key(edge.edge_left_ccw), "{}", msg);
+            assert!(self.edges.contains_key(edge.edge_left_cw), "{}", msg);
 
             self.assert_vertex_valid(edge.vert_origin);
             self.assert_vertex_valid(self.edges[edge.edge_left_ccw].vert_origin);
@@ -730,15 +734,15 @@ pub mod test {
     }
     #[test]
     fn test_reduce_contiguous() {
-        let (mut working_mesh, verts) = WingedMesh::from_gltf(TEST_MESH_CONE);
+        let (mut mesh, verts) = WingedMesh::from_gltf(TEST_MESH_CONE);
 
         println!("Asserting contiguous");
         // WE know the circle is contiguous
         //assert_contiguous_graph(&working_mesh.generate_face_graph());
 
-        let mut quadrics = working_mesh.create_quadrics(&verts);
-        let mut queue = working_mesh.initialise_collapse_queue(&verts, &quadrics);
-        let e = match working_mesh.reduce(&verts, &mut quadrics, &mut queue) {
+        let mut quadrics = mesh.create_quadrics(&verts);
+
+        let e = match mesh.reduce(&verts, &mut quadrics, &[mesh.face_count() / 4], |_, _| 0) {
             Ok(e) => e,
             Err(e) => {
                 panic!(
@@ -749,7 +753,7 @@ pub mod test {
         };
         println!("Asserting contiguous");
         // It should still be contiguous
-        assert_contiguous_graph(&working_mesh.generate_face_graph());
+        assert_contiguous_graph(&mesh.generate_face_graph());
     }
 
     #[test]

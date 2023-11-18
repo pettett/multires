@@ -94,11 +94,7 @@ pub fn group_and_partition_full_res(mut working_mesh: WingedMesh, verts: &[Vec4]
     .unwrap();
 }
 
-pub fn group_and_partition_and_simplify(
-    mut working_mesh: WingedMesh,
-    verts: &[Vec4],
-    name: String,
-) {
+pub fn group_and_partition_and_simplify(mut mesh: WingedMesh, verts: &[Vec4], name: String) {
     let config = metis::PartitioningConfig {
         method: metis::PartitioningMethod::MultilevelKWay,
         force_contiguous_partitions: Some(true),
@@ -106,31 +102,35 @@ pub fn group_and_partition_and_simplify(
         ..Default::default()
     };
 
-    let mut quadrics = working_mesh.create_quadrics(verts);
+    let mut quadrics = mesh.create_quadrics(verts);
 
     // Apply primary partition, that will define the lowest level clusterings
-    working_mesh
-        .partition_full_mesh(&config, working_mesh.faces.len().div_ceil(60) as u32)
+    mesh.partition_full_mesh(&config, mesh.faces.len().div_ceil(60) as u32)
         .unwrap();
 
-    working_mesh.group(&config, &verts).unwrap();
+    mesh.group(&config, &verts).unwrap();
 
     let mut layers = Vec::new();
 
-    layers.push(to_mesh_layer(&working_mesh, &verts));
+    layers.push(to_mesh_layer(&mesh, &verts));
 
     // Generate 2 more meshes
     for i in 0..7 {
         // i = index of previous mesh layer
         //working_mesh = reduce_mesh(working_mesh);
 
-        println!("Face count L{}: {}", i, working_mesh.face_count());
+        println!("Face count L{}: {}", i, mesh.face_count());
 
         // We must regenerate the queue each time, as boundaries change.
-        // TODO: Queue for each partition
-        let mut queue = working_mesh.initialise_collapse_queue(verts, &quadrics);
 
-        let e = match working_mesh.reduce(verts, &mut quadrics, &mut queue) {
+        // Each group requires half it's triangles removed
+        let collapse_reqs: Vec<usize> = mesh.groups.iter().map(|g| g.tris / 4).collect();
+
+        println!("Reducing within {} groups:", collapse_reqs.len());
+
+        let e = match mesh.reduce(verts, &mut quadrics, &collapse_reqs, |f, m| {
+            m.partitions[m.faces[f].part].group_index
+        }) {
             Ok(e) => e,
             Err(e) => {
                 println!(
@@ -144,7 +144,7 @@ pub fn group_and_partition_and_simplify(
 
         //layers.push(to_mesh_layer(&working_mesh, &verts));
 
-        let partition_count = match working_mesh.partition_within_groups(&config, Some(2)) {
+        let partition_count = match mesh.partition_within_groups(&config, Some(2)) {
             Ok(partition_count) => partition_count,
             Err(e) => {
                 println!("{}", e);
@@ -156,14 +156,14 @@ pub fn group_and_partition_and_simplify(
 
         println!("{partition_count} Partitions from groups");
 
-        let group_count = working_mesh.group(&config, &verts).unwrap();
+        let group_count = mesh.group(&config, &verts).unwrap();
 
         // view a snapshot of the mesh ready to create the next layer
         // let error = (1.0 + i as f32) / 10.0 + rng.gen_range(-0.05..0.05);
 
         println!("{group_count} Groups from partitions");
 
-        layers.push(to_mesh_layer(&working_mesh, &verts));
+        layers.push(to_mesh_layer(&mesh, &verts));
 
         if group_count == 1 {
             println!("Finished with single group");
@@ -185,14 +185,10 @@ pub fn group_and_partition_and_simplify(
     .unwrap();
 }
 
-pub fn apply_simplification(
-    mut working_mesh: WingedMesh,
-    verts: &[Vec4],
-    name: String,
-) -> WingedMesh {
+pub fn apply_simplification(mut mesh: WingedMesh, verts: &[Vec4], name: String) -> WingedMesh {
     // Apply primary partition, that will define the lowest level clusterings
 
-    working_mesh.groups = vec![
+    mesh.groups = vec![
         common::GroupInfo {
             tris: 0,
             monotonic_bound: Default::default(),
@@ -203,21 +199,20 @@ pub fn apply_simplification(
 
     let mut layers = Vec::new();
 
-    layers.push(to_mesh_layer(&working_mesh, &verts));
+    layers.push(to_mesh_layer(&mesh, &verts));
 
-    let mut quadrics = working_mesh.create_quadrics(verts);
-    let mut queue = working_mesh.initialise_collapse_queue(verts, &quadrics);
+    let mut quadrics = mesh.create_quadrics(verts);
     // Generate 2 more meshes
     for i in 0..8 {
         // i = index of previous mesh layer
         println!(
             "Face count LOD{}: {}, beginning generating LOD{}",
             i,
-            working_mesh.face_count(),
+            mesh.face_count(),
             i + 1
         );
 
-        let e = match working_mesh.reduce(verts, &mut quadrics, &mut queue) {
+        let e = match mesh.reduce(verts, &mut quadrics, &[mesh.face_count() / 4], |_, _| 0) {
             Ok(e) => e,
             Err(e) => {
                 println!(
@@ -230,9 +225,9 @@ pub fn apply_simplification(
 
         // View a snapshot of the mesh without any re-groupings applied
 
-        layers.push(to_mesh_layer(&working_mesh, &verts));
+        layers.push(to_mesh_layer(&mesh, &verts));
 
-        if working_mesh.face_count() < 10 {
+        if mesh.face_count() < 10 {
             println!("Reduced to low enough amount of faces, ending");
             break;
         }
@@ -251,7 +246,7 @@ pub fn apply_simplification(
     .save()
     .unwrap();
 
-    working_mesh
+    mesh
 }
 
 pub fn grab_indicies(mesh: &WingedMesh) -> Vec<u32> {

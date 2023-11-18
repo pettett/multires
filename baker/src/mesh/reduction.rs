@@ -17,10 +17,13 @@ pub struct Plane(glam::Vec4);
 /// Quadric type. Internally a DMat4, kept private to ensure only valid reduction operations can effect it.
 pub struct Quadric(glam::DMat4);
 
-#[derive(PartialOrd, PartialEq)]
+#[derive(PartialOrd, PartialEq, Clone, Copy)]
 struct OrdF64(f64);
 /// Similar to `Quadric`, this data is for internal use only.
-pub struct CollapseQueue(priority_queue::PriorityQueue<EdgeID, Reverse<OrdF64>>);
+#[derive(Clone)]
+pub struct CollapseQueue {
+    queue: priority_queue::PriorityQueue<EdgeID, Reverse<OrdF64>>,
+}
 
 impl Eq for OrdF64 {}
 
@@ -120,7 +123,7 @@ impl VertID {
                     verts[mesh.edges[e].vert_origin.0].into(),
                 );
                 // Multiply squared error by large factor, as changing the boundary adds a lot of visible error
-                Q.0 += boundary_plane.fundamental_error_quadric().0 * 30.0;
+                Q.0 += boundary_plane.fundamental_error_quadric().0 * 3000.0;
             }
         }
         Q
@@ -160,10 +163,11 @@ impl EdgeID {
     ) -> Result<Option<f64>> {
         let (orig, dest) = self.orig_dest(mesh)?;
 
-        // if !orig.is_local_manifold(mesh) {
-        //     // Need this to be in the center of the mesh, cannot reduce and change the boundary shape
-        //     return Ok(None);
-        // }
+        if !orig.is_local_manifold(mesh) && !dest.is_group_embedded(mesh) {
+            // If we change the boundary shape, we must move into an embedded position, or we risk separating the partition into two chunks
+            // which will break partitioning
+            return Ok(None);
+        }
 
         if !orig.is_group_embedded(mesh) {
             // Cannot move a vertex unless it is in the center of a partition
@@ -229,26 +233,35 @@ impl WingedMesh {
         quadrics
     }
 
-    pub fn initialise_collapse_queue(
+    pub fn initialise_collapse_queues(
         &self,
         verts: &[glam::Vec4],
         quadrics: &[Quadric],
-    ) -> CollapseQueue {
+        queue_count: usize,
+        queue_lookup: impl Fn(FaceID, &WingedMesh) -> usize,
+    ) -> Vec<CollapseQueue> {
         println!("Generating Collapse Queue...");
-        let mut pq = priority_queue::PriorityQueue::with_capacity(self.edges.len());
+        let mut pq = vec![
+            CollapseQueue {
+                queue: priority_queue::PriorityQueue::with_capacity(self.edges.len() / queue_count),
+            };
+            queue_count
+        ];
 
         let bar = indicatif::ProgressBar::new(self.edges.len() as _);
 
-        for &eid in self.edges.keys() {
+        for (&eid, edge) in self.edges.iter() {
             bar.inc(1);
             if let Some(error) = eid.edge_collapse_error(&self, verts, &quadrics).unwrap() {
-                pq.push(eid, cmp::Reverse(OrdF64(error)));
+                pq[queue_lookup(edge.face, self)]
+                    .queue
+                    .push(eid, cmp::Reverse(OrdF64(error)));
             }
         }
 
         bar.finish_and_clear();
 
-        CollapseQueue(pq)
+        pq
     }
 
     /// Returns estimate of error introduced by halving the number of triangles
@@ -256,73 +269,108 @@ impl WingedMesh {
         &mut self,
         verts: &[glam::Vec4],
         quadrics: &mut [Quadric],
-        collapse_queue: &mut CollapseQueue,
+        collapse_reqs: &[usize],
+        queue_lookup: impl Fn(FaceID, &WingedMesh) -> usize,
     ) -> Result<f64> {
+        let mut collapse_queue =
+            self.initialise_collapse_queues(verts, quadrics, collapse_reqs.len(), &queue_lookup);
+
+        assert_eq!(collapse_queue.len(), collapse_reqs.len());
+        assert_eq!(verts.len(), quadrics.len());
+
         // Priority queue with every vertex and their errors.
 
         let mut new_error = 0.0;
-
-        let tris = self.face_count();
-        // Need to remove half the triangles - each reduction removes 2
-        let required_reductions = (tris / 4);
-
-        let bar = indicatif::ProgressBar::new(required_reductions as _);
+        // let tris = self.face_count();
+        // // Need to remove half the triangles - each reduction removes 2
+        // let required_reductions = (tris / 4);
+        let bar = indicatif::ProgressBar::new(collapse_reqs.iter().sum::<usize>() as _);
         bar.set_style(
             ProgressStyle::with_template("(Error:{msg}) {wide_bar} {pos}/{len} ({per_sec})")
                 .unwrap(),
         );
 
-        for i in 0..required_reductions {
-            let (eid, cmp::Reverse(OrdF64(err))) = match collapse_queue.0.pop() {
-                Some(err) => err,
-                None => {
-                    // FIXME: how to handle early exits
-                    println!("Exiting early from demeshing");
-                    return Ok(new_error);
-                }
-            };
-
-            bar.inc(1);
-            bar.set_message(format!("{err:.3e}"));
-
-            new_error += err;
-
-            // Collapse edge, and update quadrics (update before collapsing, as vertex becomes invalid)
-
-            let (orig, dest) = eid.orig_dest(&self)?;
-
-            #[cfg(not(test))]
+        for qi in 0..collapse_queue.len() {
+            #[cfg(test)]
             {
-                if !self.verts.contains_key(orig) || !self.verts.contains_key(dest) {
-                    bar.println("Warning - drawn 'valid' edge with no orig or dest");
-                    continue;
+                self.assert_valid();
+                for (&q, _e) in collapse_queue[qi].queue.iter() {
+                    assert!(
+                        self.edges.contains_key(q),
+                        "Invalid edge in collapse queue {}",
+                        qi
+                    );
+                    self.assert_edge_valid(q, "Invalid edge in collapse queue ");
                 }
             }
 
-            quadrics[dest.0].0 += quadrics[orig.0].0;
+            for _ in 0..collapse_reqs[qi] {
+                let (eid, cmp::Reverse(OrdF64(err))) = match collapse_queue[qi].queue.pop() {
+                    Some(err) => err,
+                    None => {
+                        // FIXME: how to handle early exits
+                        bar.println("Exiting early from demeshing");
+                        break;
+                    }
+                };
 
-            //TODO: When we collapse an edge, recalculate any effected edges.
+                bar.inc(1);
+                bar.set_message(format!("{err:.3e}"));
 
-            let mut effected_edges: Vec<_> = self.verts[orig].outgoing_edges().to_vec();
-            effected_edges.extend(self.verts[dest].outgoing_edges());
-            effected_edges.extend(self.verts[orig].incoming_edges());
-            effected_edges.extend(self.verts[dest].incoming_edges());
+                new_error += err;
 
-            self.collapse_edge(eid);
+                // Collapse edge, and update quadrics (update before collapsing, as vertex becomes invalid)
 
-            for eid in effected_edges {
-                if self.edges.contains_key(eid) {
-                    if let Some(error) = eid.edge_collapse_error(&self, verts, &quadrics)? {
-                        collapse_queue.0.push(eid, cmp::Reverse(OrdF64(error)));
+                let (orig, dest) = eid.orig_dest(&self)?;
+
+                #[cfg(not(test))]
+                {
+                    if !self.verts.contains_key(orig) || !self.verts.contains_key(dest) {
+                        bar.println("Warning - drawn 'valid' edge with no orig or dest");
                         continue;
                     }
                 }
 
-                collapse_queue.0.remove(&eid);
+                #[cfg(test)]
+                {
+                    assert!(orig.is_group_embedded(&self));
+                }
+
+                quadrics[dest.0].0 += quadrics[orig.0].0;
+
+                //TODO: When we collapse an edge, recalculate any effected edges.
+
+                let mut effected_edges: Vec<_> = self.verts[orig].outgoing_edges().to_vec();
+                effected_edges.extend(self.verts[dest].outgoing_edges());
+                effected_edges.extend(self.verts[orig].incoming_edges());
+                effected_edges.extend(self.verts[dest].incoming_edges());
+
+                self.collapse_edge(eid);
+
+                for eid in effected_edges {
+                    if self.edges.contains_key(eid) {
+                        let edge_queue = queue_lookup(self.edges[eid].face, &self);
+
+                        if let Some(error) = eid.edge_collapse_error(&self, verts, &quadrics)? {
+                            collapse_queue[edge_queue]
+                                .queue
+                                .push(eid, cmp::Reverse(OrdF64(error)));
+                            continue;
+                        }
+                    }
+
+                    // First check in our own queue, then check in all the others if we cannot find it
+                    if collapse_queue[qi].queue.remove(&eid).is_none() {
+                        for q in &mut collapse_queue {
+                            if q.queue.remove(&eid).is_some() {
+                                break;
+                            }
+                        }
+                    }
+                }
             }
         }
         bar.finish();
-
         Ok(new_error)
     }
 }
@@ -452,19 +500,13 @@ mod tests {
     pub fn test_reduction() -> Result<(), Box<dyn Error>> {
         let (mut mesh, verts) = WingedMesh::from_gltf(TEST_MESH_MONK);
         let mut quadrics = mesh.create_quadrics(&verts);
-        let mut collapse_queue = mesh.initialise_collapse_queue(&verts, &quadrics);
-        mesh.assert_valid();
-        mesh.reduce(&verts, &mut quadrics, &mut collapse_queue)
-            .unwrap();
-        mesh.assert_valid();
-        mesh.reduce(&verts, &mut quadrics, &mut collapse_queue)
-            .unwrap();
-        mesh.assert_valid();
-        mesh.reduce(&verts, &mut quadrics, &mut collapse_queue)
-            .unwrap();
-        mesh.assert_valid();
-        mesh.reduce(&verts, &mut quadrics, &mut collapse_queue)
-            .unwrap();
+
+        for i in 0..4 {
+            mesh.assert_valid();
+            mesh.reduce(&verts, &mut quadrics, &[mesh.face_count() / 4], |_, _| 0)
+                .unwrap();
+        }
+
         mesh.assert_valid();
 
         Ok(())

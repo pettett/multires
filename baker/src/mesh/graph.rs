@@ -145,7 +145,11 @@ pub mod test {
             if !petgraph::algo::has_path_connecting(&graph, n0, i, Some(&mut dfs_space)) {
                 petgraph_to_svg(graph, ERROR_SVG_OUT, &|_, _| String::new(), false).unwrap();
 
-                assert!(false, "Graph is not contiguous");
+                assert!(
+                    false,
+                    "Graph is not contiguous. Outputted error graph to {}",
+                    ERROR_SVG_OUT
+                );
             }
         }
     }
