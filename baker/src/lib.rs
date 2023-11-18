@@ -4,6 +4,8 @@ use common::{asset::Asset, MeshLevel, Meshlet, MultiResMesh, SubMesh};
 
 use glam::Vec4;
 use mesh::winged_mesh::WingedMesh;
+
+use crate::mesh::winged_mesh::MeshError;
 // use meshopt::VertexDataAdapter;
 
 pub fn to_mesh_layer(mesh: &WingedMesh, verts: &[Vec4]) -> MeshLevel {
@@ -27,7 +29,9 @@ pub fn group_and_partition_full_res(mut working_mesh: WingedMesh, verts: &[Vec4]
     };
 
     // Apply primary partition, that will define the lowest level clusterings
-    working_mesh.partition_within_groups(&config, None).unwrap();
+    working_mesh
+        .partition_full_mesh(&config, working_mesh.verts.len().div_ceil(60) as _)
+        .unwrap();
 
     working_mesh.group(&config, &verts).unwrap();
 
@@ -103,7 +107,6 @@ pub fn group_and_partition_and_simplify(
     };
 
     let mut quadrics = working_mesh.create_quadrics(verts);
-    let mut queue = working_mesh.initialise_collapse_queue(verts, &quadrics);
 
     // Apply primary partition, that will define the lowest level clusterings
     working_mesh
@@ -117,11 +120,15 @@ pub fn group_and_partition_and_simplify(
     layers.push(to_mesh_layer(&working_mesh, &verts));
 
     // Generate 2 more meshes
-    for i in 0..10 {
+    for i in 0..7 {
         // i = index of previous mesh layer
         //working_mesh = reduce_mesh(working_mesh);
 
         println!("Face count L{}: {}", i, working_mesh.face_count());
+
+        // We must regenerate the queue each time, as boundaries change.
+        // TODO: Queue for each partition
+        let mut queue = working_mesh.initialise_collapse_queue(verts, &quadrics);
 
         let e = match working_mesh.reduce(verts, &mut quadrics, &mut queue) {
             Ok(e) => e,
@@ -135,9 +142,15 @@ pub fn group_and_partition_and_simplify(
         };
         println!("Introduced error of {e}");
 
-        let partition_count = working_mesh
-            .partition_within_groups(&config, Some(2))
-            .unwrap();
+        //layers.push(to_mesh_layer(&working_mesh, &verts));
+
+        let partition_count = match working_mesh.partition_within_groups(&config, Some(2)) {
+            Ok(partition_count) => partition_count,
+            Err(e) => {
+                println!("{}", e);
+                break;
+            }
+        };
         // View a snapshot of the mesh without any re-groupings applied
         //layers.push(to_mesh_layer(&next_mesh));
 
@@ -172,18 +185,21 @@ pub fn group_and_partition_and_simplify(
     .unwrap();
 }
 
-pub fn apply_simplification(mut working_mesh: WingedMesh, verts: &[Vec4], name: String) {
-    let config = metis::PartitioningConfig {
-        method: metis::PartitioningMethod::MultilevelKWay,
-        force_contiguous_partitions: Some(true),
-        minimize_subgraph_degree: Some(true),
-        ..Default::default()
-    };
-
+pub fn apply_simplification(
+    mut working_mesh: WingedMesh,
+    verts: &[Vec4],
+    name: String,
+) -> WingedMesh {
     // Apply primary partition, that will define the lowest level clusterings
-    //working_mesh.partition_within_groups(&config, None).unwrap();
 
-    working_mesh.group(&config, &verts).unwrap();
+    working_mesh.groups = vec![
+        common::GroupInfo {
+            tris: 0,
+            monotonic_bound: Default::default(),
+            partitions: vec![0]
+        };
+        1
+    ];
 
     let mut layers = Vec::new();
 
@@ -234,6 +250,8 @@ pub fn apply_simplification(mut working_mesh: WingedMesh, verts: &[Vec4], name: 
     }
     .save()
     .unwrap();
+
+    working_mesh
 }
 
 pub fn grab_indicies(mesh: &WingedMesh) -> Vec<u32> {

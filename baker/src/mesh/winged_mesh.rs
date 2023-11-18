@@ -385,16 +385,14 @@ impl WingedMesh {
 #[cfg(test)]
 pub mod test {
     use super::*;
-    use std::{collections::HashSet, error::Error, io, path, process};
+    use std::{collections::HashSet, error::Error};
 
     use metis::PartitioningConfig;
-    use petgraph::{
-        dot,
-        visit::{EdgeRef, IntoEdgeReferences, IntoNodeReferences},
-    };
-    use std::fs;
 
-    use crate::{group_and_partition_and_simplify, mesh::winged_mesh::WingedMesh};
+    use crate::{
+        apply_simplification, group_and_partition_and_simplify, group_and_partition_full_res,
+        mesh::{graph::test::assert_contiguous_graph, winged_mesh::WingedMesh},
+    };
     pub const TEST_MESH_HIGH: &str =
         "C:\\Users\\maxwe\\OneDriveC\\sync\\projects\\assets\\sphere.glb";
 
@@ -408,7 +406,12 @@ pub mod test {
 
     pub const TEST_MESH_PLANE: &str =
         "C:\\Users\\maxwe\\OneDriveC\\sync\\projects\\assets\\plane_high.glb";
-
+    pub const TEST_MESH_CIRC: &str =
+        "C:\\Users\\maxwe\\OneDriveC\\sync\\projects\\assets\\circle.glb";
+    pub const TEST_MESH_CIRC_LOW: &str =
+        "C:\\Users\\maxwe\\OneDriveC\\sync\\projects\\assets\\circle_low.glb";
+    pub const TEST_MESH_CONE: &str =
+        "C:\\Users\\maxwe\\OneDriveC\\sync\\projects\\assets\\cone.glb";
     pub const TEST_MESH_PLANE_LOW: &str =
         "C:\\Users\\maxwe\\OneDriveC\\sync\\projects\\assets\\plane.glb";
 
@@ -673,17 +676,99 @@ pub mod test {
     }
 
     #[test]
-    fn test_group_and_partition_and_simplify() {
-        println!("Loading from gltf!");
-        let (working_mesh, verts) = WingedMesh::from_gltf(TEST_MESH_HIGH);
+    fn mesh_stats_redout() {
+        let (mut mesh, verts) = WingedMesh::from_gltf(TEST_MESH_CONE);
 
-        // group_and_partition_full_res(working_mesh, &verts, mesh_name.to_owned());
-        //apply_simplification(working_mesh, &verts, mesh_name.to_owned());
-        group_and_partition_and_simplify(working_mesh, &verts, TEST_MESH_HIGH.to_owned());
+        let mut avg_outgoing = 0.0;
+        let mut avg_incoming = 0.0;
+
+        for (vid, v) in &mesh.verts {
+            avg_outgoing += v.outgoing_edges().len() as f32;
+            avg_incoming += v.incoming_edges().len() as f32;
+        }
+        avg_outgoing /= mesh.verts.len() as f32;
+        avg_incoming /= mesh.verts.len() as f32;
+
+        println!("Average Outgoing: {avg_outgoing}, Average Incoming: {avg_incoming}");
+        let test_config = &PartitioningConfig {
+            method: metis::PartitioningMethod::MultilevelKWay,
+            force_contiguous_partitions: Some(true),
+            minimize_subgraph_degree: Some(true),
+            ..Default::default()
+        };
+
+        mesh.partition_full_mesh(test_config, mesh.verts.len().div_ceil(60) as u32)
+            .unwrap();
+
+        let mut embed_prop = 0.0;
+
+        for (vid, v) in &mesh.verts {
+            embed_prop += if vid.is_group_embedded(&mesh) {
+                1.0
+            } else {
+                0.0
+            };
+        }
+        embed_prop /= mesh.verts.len() as f32;
+        println!("Embedded Proportion: {embed_prop}");
     }
 
     #[test]
-    pub fn test_partition_continuity() -> Result<(), Box<dyn Error>> {
+    fn test_group_and_partition_and_simplify() {
+        let (working_mesh, verts) = WingedMesh::from_gltf(TEST_MESH_CONE);
+
+        // group_and_partition_full_res(working_mesh, &verts, mesh_name.to_owned());
+        group_and_partition_and_simplify(working_mesh, &verts, TEST_MESH_CONE.to_owned());
+    }
+
+    #[test]
+    fn test_group_and_partition() {
+        let (working_mesh, verts) = WingedMesh::from_gltf(TEST_MESH_CONE);
+
+        // group_and_partition_full_res(working_mesh, &verts, mesh_name.to_owned());
+        group_and_partition_full_res(working_mesh, &verts, TEST_MESH_CONE.to_owned());
+    }
+    #[test]
+    fn test_reduce_contiguous() {
+        let (mut working_mesh, verts) = WingedMesh::from_gltf(TEST_MESH_CONE);
+
+        println!("Asserting contiguous");
+        // WE know the circle is contiguous
+        //assert_contiguous_graph(&working_mesh.generate_face_graph());
+
+        let mut quadrics = working_mesh.create_quadrics(&verts);
+        let mut queue = working_mesh.initialise_collapse_queue(&verts, &quadrics);
+        let e = match working_mesh.reduce(&verts, &mut quadrics, &mut queue) {
+            Ok(e) => e,
+            Err(e) => {
+                panic!(
+                    "Experience error {} with reducing, exiting early with what we have",
+                    e
+                );
+            }
+        };
+        println!("Asserting contiguous");
+        // It should still be contiguous
+        assert_contiguous_graph(&working_mesh.generate_face_graph());
+    }
+
+    #[test]
+    fn test_apply_simplification() {
+        let (working_mesh, verts) = WingedMesh::from_gltf(TEST_MESH_CONE);
+
+        // WE know the circle is contiguous
+        //assert_contiguous_graph(&working_mesh.generate_face_graph());
+
+        // group_and_partition_full_res(working_mesh, &verts, mesh_name.to_owned());
+        let working_mesh = apply_simplification(working_mesh, &verts, TEST_MESH_CONE.to_owned());
+
+        println!("Asserting face graph is contiguous");
+        // It should still be contiguous
+        assert_contiguous_graph(&working_mesh.generate_face_graph());
+    }
+
+    #[test]
+    pub fn test_partition_contiguity() -> Result<(), Box<dyn Error>> {
         let test_config = &PartitioningConfig {
             method: metis::PartitioningMethod::MultilevelKWay,
             force_contiguous_partitions: Some(true),
@@ -704,8 +789,8 @@ pub mod test {
             graph.retain_edges(|g, e| {
                 let (v1, v2) = g.edge_endpoints(e).unwrap();
 
-                let &p1 = g.node_weight(v1).unwrap();
-                let &p2 = g.node_weight(v2).unwrap();
+                let p1 = mesh.faces[g.node_weight(v1).unwrap()].part;
+                let p2 = mesh.faces[g.node_weight(v2).unwrap()].part;
 
                 p1 == p2
             });

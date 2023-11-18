@@ -57,7 +57,7 @@ impl Vertex {
 
 impl VertID {
     /// Does this vertex have a complete fan of triangles surrounding it?
-    pub fn is_local_manifold(&self, mesh: &WingedMesh, is_group_manifold: bool) -> bool {
+    pub fn is_local_manifold(&self, mesh: &WingedMesh) -> bool {
         let Some(vert) = mesh.verts.get(self) else {
             return false;
         };
@@ -65,7 +65,7 @@ impl VertID {
 
         let mut eid = eid_first;
 
-        let mut last_e_part = None;
+        //let mut last_e_part = None;
 
         loop {
             // attempt to move around the fan, by moving to our twin edge and going clockwise
@@ -76,17 +76,17 @@ impl VertID {
             let e = &mesh.edges[twin];
 
             // Compare against last face's partition
-            if is_group_manifold {
-                let e_part = mesh.partitions[mesh.faces()[e.face].part].group_index;
+            // if is_group_manifold {
+            //     let e_part = mesh.faces()[e.face].part;
 
-                if let Some(lep) = last_e_part {
-                    if e_part != lep {
-                        return false;
-                    }
-                }
+            //     if let Some(lep) = last_e_part {
+            //         if e_part != lep {
+            //             return false;
+            //         }
+            //     }
 
-                last_e_part = Some(e_part);
-            }
+            //     last_e_part = Some(e_part);
+            // }
 
             eid = e.edge_left_cw;
 
@@ -94,5 +94,25 @@ impl VertID {
                 return true;
             }
         }
+    }
+
+    pub fn is_group_embedded(&self, mesh: &WingedMesh) -> bool {
+        let outgoings = &mesh.verts[self].outgoing_edges;
+        let part = mesh.partitions[mesh.faces[mesh.edges[outgoings[0]].face].part].group_index;
+
+        for eid in &outgoings[1..] {
+            if part != mesh.partitions[mesh.faces[mesh.edges[eid].face].part].group_index {
+                return false;
+            }
+        }
+
+        #[cfg(test)]
+        for eid in &mesh.verts[self].incoming_edges {
+            if part != mesh.partitions[mesh.faces[mesh.edges[eid].face].part].group_index {
+                unreachable!();
+            }
+        }
+
+        return true;
     }
 }

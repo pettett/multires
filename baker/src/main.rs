@@ -4,12 +4,12 @@ use baker::{
 };
 
 fn main() {
-    let mesh_name = "../assets/sphere.glb";
+    let mesh_name = "../assets/cone.glb";
 
     println!("Loading from gltf!");
     let (working_mesh, verts) = WingedMesh::from_gltf(mesh_name);
 
-    // group_and_partition_full_res(working_mesh, &verts, mesh_name.to_owned());
+    //group_and_partition_full_res(working_mesh, &verts, mesh_name.to_owned());
     //apply_simplification(working_mesh, &verts, mesh_name.to_owned());
     group_and_partition_and_simplify(working_mesh, &verts, mesh_name.to_owned());
 }

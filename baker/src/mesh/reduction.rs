@@ -159,13 +159,19 @@ impl EdgeID {
         quadric_errors: &[Quadric],
     ) -> Result<Option<f64>> {
         let (orig, dest) = self.orig_dest(mesh)?;
-        let q = Quadric(quadric_errors[orig.0].0 + quadric_errors[dest.0].0);
-        // Collapsing this edge would move the origin to the destination, so we find the error of the origin at the merged point.
 
-        if !orig.is_local_manifold(mesh, true) {
-            // Need this to be in the center of the mesh, cannot reduce and change the boundary shape
+        // if !orig.is_local_manifold(mesh) {
+        //     // Need this to be in the center of the mesh, cannot reduce and change the boundary shape
+        //     return Ok(None);
+        // }
+
+        if !orig.is_group_embedded(mesh) {
+            // Cannot move a vertex unless it is in the center of a partition
             return Ok(None);
         }
+
+        let q = Quadric(quadric_errors[orig.0].0 + quadric_errors[dest.0].0);
+        // Collapsing this edge would move the origin to the destination, so we find the error of the origin at the merged point.
 
         // Test normals of triangles before and after the swap
         for &e in mesh
@@ -258,7 +264,7 @@ impl WingedMesh {
 
         let tris = self.face_count();
         // Need to remove half the triangles - each reduction removes 2
-        let required_reductions = tris / 4;
+        let required_reductions = (tris / 4);
 
         let bar = indicatif::ProgressBar::new(required_reductions as _);
         bar.set_style(
@@ -267,8 +273,14 @@ impl WingedMesh {
         );
 
         for i in 0..required_reductions {
-            let (eid, cmp::Reverse(OrdF64(err))) =
-                collapse_queue.0.pop().ok_or(MeshError::OutOfEdges)?;
+            let (eid, cmp::Reverse(OrdF64(err))) = match collapse_queue.0.pop() {
+                Some(err) => err,
+                None => {
+                    // FIXME: how to handle early exits
+                    println!("Exiting early from demeshing");
+                    return Ok(new_error);
+                }
+            };
 
             bar.inc(1);
             bar.set_message(format!("{err:.3e}"));

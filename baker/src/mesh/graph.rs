@@ -121,6 +121,8 @@ pub mod test {
 
     pub const FACE_SVG_OUT_2: &str =
         "C:\\Users\\maxwe\\OneDriveC\\sync\\projects\\multires\\baker\\face_graph2.svg";
+    pub const ERROR_SVG_OUT: &str =
+        "C:\\Users\\maxwe\\OneDriveC\\sync\\projects\\multires\\baker\\error.svg";
 
     const COLS: [&str; 10] = [
         "red",
@@ -134,14 +136,17 @@ pub mod test {
         "orchid",
         "peru",
     ];
-    pub fn assert_contiguous_graph<V, E>(graph: &petgraph::Graph<V, E, petgraph::Undirected>) {
+    pub fn assert_contiguous_graph<V: std::fmt::Debug, E: std::fmt::Debug>(
+        graph: &petgraph::Graph<V, E, petgraph::Undirected>,
+    ) {
         let n0 = petgraph::graph::node_index(0);
         let mut dfs_space = petgraph::algo::DfsSpace::default();
         for i in graph.node_indices() {
-            assert!(
-                petgraph::algo::has_path_connecting(&graph, n0, i, Some(&mut dfs_space)),
-                "Graph is not contiguous"
-            )
+            if !petgraph::algo::has_path_connecting(&graph, n0, i, Some(&mut dfs_space)) {
+                petgraph_to_svg(graph, ERROR_SVG_OUT, &|_, _| String::new(), false).unwrap();
+
+                assert!(false, "Graph is not contiguous");
+            }
         }
     }
     #[test]
