@@ -17,18 +17,18 @@ use anyhow::{Context, Result};
 pub struct Plane(glam::Vec4);
 /// Quadric type. Internally a DMat4, kept private to ensure only valid reduction operations can effect it.
 pub struct Quadric(glam::DMat4);
-
+/// Similar to `Quadric`, this data is for internal use only. Reverses the ordering of a float value, such that we take min values from a priority queue.
 #[derive(PartialOrd, PartialEq, Clone, Copy)]
-struct OrdF64(cmp::Reverse<f64>);
+pub struct Error(cmp::Reverse<f64>);
 /// Similar to `Quadric`, this data is for internal use only.
 #[derive(Clone)]
 pub struct CollapseQueue {
-    queue: priority_queue::PriorityQueue<EdgeID, OrdF64>,
+    queue: priority_queue::PriorityQueue<EdgeID, Error>,
 }
 
-impl Eq for OrdF64 {}
+impl Eq for Error {}
 
-impl Ord for OrdF64 {
+impl Ord for Error {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         if let Some(ordering) = self.partial_cmp(other) {
             ordering
@@ -161,7 +161,7 @@ impl EdgeID {
         mesh: &WingedMesh,
         verts: &[glam::Vec4],
         quadric_errors: &[Quadric],
-    ) -> Result<Option<f64>> {
+    ) -> Result<Option<Error>> {
         let (orig, dest) = self.orig_dest(mesh)?;
 
         if !orig.is_local_manifold(mesh) && !dest.is_group_embedded(mesh) {
@@ -214,7 +214,7 @@ impl EdgeID {
             }
         }
 
-        Ok(Some(q.quadric_error(verts[orig.0].into())))
+        Ok(Some(Error(cmp::Reverse( q.quadric_error(verts[orig.0].into())))))
     }
 }
 
@@ -257,7 +257,7 @@ impl WingedMesh {
             if let Some(error) = eid.edge_collapse_error(&self, verts, &quadrics).unwrap() {
                 pq[queue_lookup(edge.face, self)]
                     .queue
-                    .push(eid, OrdF64(cmp::Reverse(error)));
+                    .push(eid, error);
             }
         }
 		#[cfg(feature = "progress")]
@@ -309,7 +309,7 @@ impl WingedMesh {
             }
 
             for _ in 0..collapse_reqs[qi] {
-                let (eid, OrdF64(cmp::Reverse(err))) = match collapse_queue[qi].queue.pop() {
+                let (eid, Error(cmp::Reverse(err))) = match collapse_queue[qi].queue.pop() {
                     Some(err) => err,
                     None => {
                         // FIXME: how to handle early exits
@@ -362,7 +362,7 @@ impl WingedMesh {
                         if let Some(error) = eid.edge_collapse_error(&self, verts, &quadrics)? {
                             collapse_queue[edge_queue]
                                 .queue
-                                .push(eid, OrdF64(cmp::Reverse(error)));
+                                .push(eid, error);
                             continue;
                         }
                     }
