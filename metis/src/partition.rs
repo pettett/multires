@@ -14,6 +14,7 @@ use crate::{
     rstatus_et_METIS_OK, METIS_PartGraphKway, METIS_PartGraphRecursive, METIS_SetDefaultOptions,
     METIS_NOPTIONS,
 };
+use petgraph::visit::EdgeRef;
 use std::ptr::null_mut;
 use thiserror::Error;
 
@@ -247,25 +248,66 @@ impl<'a> PartitioningConfig<'a> {
 
             adjacency_idx.push(adjacency.len() as idx_t);
 
-            for n in graph.neighbors(v) {
-                adjacency.push(n.index() as idx_t)
+            for e in graph.edges(v) {
+                let other = if v == e.target() {
+                    e.source()
+                } else {
+                    e.target()
+                };
+
+                adjacency.push(other.index() as idx_t)
             }
         }
         adjacency_idx.push(adjacency.len() as idx_t);
 
         assert_eq!(adjacency_idx.len(), graph.node_count() + 1);
 
-        let adjacency_weight = vec![1; adjacency.len()];
+        self.partition_from_adj(
+            partitions,
+            graph.node_count(),
+            None,
+            adjacency,
+            adjacency_idx,
+            None,
+        )
+    }
 
-        let weights = Vec::new();
+    pub fn partition_from_weighted_graph<V>(
+        &self,
+        partitions: u32,
+        graph: &petgraph::graph::UnGraph<V, idx_t>,
+    ) -> Result<Vec<idx_t>, PartitioningError> {
+        let mut adjacency = Vec::with_capacity(graph.edge_count());
+        let mut adjacency_weight = Vec::with_capacity(graph.edge_count());
+        let mut adjacency_idx = Vec::with_capacity(graph.node_count());
+        //TODO: It may be possible for the neighbours to be duplicated, investigate
+        for v in graph.node_indices() {
+            assert_eq!(v.index(), adjacency_idx.len());
+
+            adjacency_idx.push(adjacency.len() as idx_t);
+
+            for e in graph.edges(v) {
+                let other = if v == e.target() {
+                    e.source()
+                } else {
+                    e.target()
+                };
+
+                adjacency.push(other.index() as idx_t);
+                adjacency_weight.push(*e.weight());
+            }
+        }
+        adjacency_idx.push(adjacency.len() as idx_t);
+
+        assert_eq!(adjacency_idx.len(), graph.node_count() + 1);
 
         self.partition_from_adj(
             partitions,
             graph.node_count(),
-            weights,
+            None,
             adjacency,
             adjacency_idx,
-            adjacency_weight,
+            Some(adjacency_weight),
         )
     }
 
@@ -273,10 +315,10 @@ impl<'a> PartitioningConfig<'a> {
         &self,
         partitions: u32,
         nodes: usize,
-        mut weights: Vec<f32>,
-        mut adjacency: Vec<i32>,
-        mut adjacency_idx: Vec<i32>,
-        mut adjacency_weight: Vec<i32>,
+        weights: Option<Vec<real_t>>,
+        mut adjacency: Vec<idx_t>,
+        mut adjacency_idx: Vec<idx_t>,
+        adjacency_weight: Option<Vec<idx_t>>,
     ) -> Result<Vec<idx_t>, PartitioningError> {
         if adjacency.len() == 0 {
             return Ok(vec![]);
@@ -303,12 +345,16 @@ impl<'a> PartitioningConfig<'a> {
                     adjacency.as_mut_ptr(),
                     null_mut(),
                     null_mut(),
-                    adjacency_weight.as_mut_ptr(),
-                    &mut nparts,
-                    if weights.is_empty() {
-                        null_mut()
+                    if let Some(mut w) = adjacency_weight {
+                        w.as_mut_ptr()
                     } else {
-                        weights.as_mut_ptr()
+                        null_mut()
+                    },
+                    &mut nparts,
+                    if let Some(mut w) = weights {
+                        w.as_mut_ptr()
+                    } else {
+                        null_mut()
                     },
                     null_mut(),
                     options.as_mut_ptr(),
@@ -325,12 +371,16 @@ impl<'a> PartitioningConfig<'a> {
                     adjacency.as_mut_ptr(),
                     null_mut(),
                     null_mut(),
-                    adjacency_weight.as_mut_ptr(),
-                    &mut nparts,
-                    if weights.is_empty() {
-                        null_mut()
+                    if let Some(mut w) = adjacency_weight {
+                        w.as_mut_ptr()
                     } else {
-                        weights.as_mut_ptr()
+                        null_mut()
+                    },
+                    &mut nparts,
+                    if let Some(mut w) = weights {
+                        w.as_mut_ptr()
+                    } else {
+                        null_mut()
                     },
                     null_mut(),
                     options.as_mut_ptr(),
@@ -339,6 +389,66 @@ impl<'a> PartitioningConfig<'a> {
                 )
             }
         };
+
+        // 5.8 Graph partitioning routines
+        // int METIS PartGraphRecursive(idx t *nvtxs, idx t *ncon, idx t *xadj, idx t *adjncy,
+        // idx t *vwgt, idx t *vsize, idx t *adjwgt, idx t *nparts, real t *tpwgts,
+        // real t ubvec, idx t *options, idx t *objval, idx t *part)
+        // int METIS PartGraphKway(idx t *nvtxs, idx t *ncon, idx t *xadj, idx t *adjncy,
+        // idx t *vwgt, idx t *vsize, idx t *adjwgt, idx t *nparts, real t *tpwgts,
+        // real t ubvec, idx t *options, idx t *objval, idx t *part)
+        // Description
+        // Is used to partition a graph into k parts using either multilevel recursive bisection or multilevel k-way partitioning.
+        // -- Parameters
+        // nvtxs
+        //				The number of vertices in the graph.
+        // ncon
+        //				The number of balancing constraints. It should be at least 1.
+        // xadj, adjncy
+        //				The adjacency structure of the graph as described in Section 5.5.
+        // vwgt (NULL)
+        //				The weights of the vertices as described in Section 5.5.
+        // vsize (NULL)
+        //				The size of the vertices for computing the total communication volume as described in Section 5.7.
+        // adjwgt (NULL)
+        //				The weights of the edges as described in Section 5.5.
+        // nparts
+        //				The number of parts to partition the graph.
+        // tpwgts (NULL)
+        //				This is an array of size nparts×ncon that specifies the desired weight for each partition and constraint.
+        // 				The target partition weight for the ith partition and jth constraint is specified at tpwgts[i*ncon+j]
+        // 				(the numbering for both partitions and constraints starts from 0). For each constraint, the sum of the
+        // 				tpwgts[] entries must be 1.0 (i.e., ∑i tpwgts[i ∗ ncon + j] = 1.0).
+        // 				A NULL value can be passed to indicate that the graph should be equally divided among the partitions.
+        // ubvec (NULL)
+        // 				This is an array of size ncon that specifies the allowed load imbalance tolerance for each constraint.
+        // 				For the ith partition and jth constraint the allowed weight is the ubvec[j]*tpwgts[i*ncon+j] fraction
+        // 				of the jth’s constraint total weight. The load imbalances must be greater than 1.0.
+        // 				A NULL value can be passed indicating that the load imbalance tolerance for each constraint should
+        // 				be 1.001 (for ncon=1) or 1.01 (for ncon¿1).
+        // options (NULL)
+        // 				This is the array of options as described in Section 5.4.
+        // 				The following options are valid for METIS PartGraphRecursive:
+        // 				METIS_OPTION_CTYPE, METIS_OPTION_IPTYPE, METIS_OPTION_RTYPE,
+        // 				METIS_OPTION_NO2HOP, METIS_OPTION_NCUTS, METIS_OPTION_NITER,
+        // 				METIS_OPTION_SEED, METIS_OPTION_UFACTOR, METIS_OPTION_NUMBERING,
+        // 				METIS_OPTION_DBGLVL
+        // 				The following options are valid for METIS PartGraphKway:
+        // 				METIS_OPTION_OBJTYPE, METIS_OPTION_CTYPE, METIS_OPTION_IPTYPE,
+        // 				METIS_OPTION_RTYPE, METIS_OPTION_NO2HOP, METIS_OPTION_NCUTS,
+        // 				METIS_OPTION_NITER, METIS_OPTION_UFACTOR, METIS_OPTION_MINCONN,
+        // 				METIS_OPTION_CONTIG, METIS_OPTION_SEED, METIS_OPTION_NUMBERING,
+        // 				METIS_OPTION_DBGLVL
+        // objval Upon successful completion, this variable stores the edge-cut or the total communication volume of
+        // 				the partitioning solution. The value returned depends on the partitioning’s objective function.
+        // 				part This is a vector of size nvtxs that upon successful completion stores the partition vector of the graph.
+        // 				The numbering of this vector starts from either 0 or 1, depending on the value of
+        // 				options[METIS OPTION NUMBERING].
+        // Returns
+        // 				METIS OK Indicates that the function returned normally.
+        // 				METIS ERROR INPUT Indicates an input error.
+        // 				METIS ERROR MEMORY Indicates that it could not allocate the required memory.
+        // 				METIS ERROR Indicates some other type of error.
 
         match status {
             rstatus_et_METIS_OK => Ok(part),

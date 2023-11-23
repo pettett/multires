@@ -25,3 +25,6 @@ petgraph = "0.6"
 bevy_ecs = "0.12"
 winit = "0.28"
 pollster = "0.3"
+
+[profile.release]
+debug = true

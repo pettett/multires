@@ -151,6 +151,7 @@ impl WingedMesh {
             fs::canonicalize(path).unwrap(),
             face_count
         );
+		#[cfg(feature = "progress")]
         let bar = indicatif::ProgressBar::new(face_count as u64);
 
         for i in 0..face_count {
@@ -159,9 +160,10 @@ impl WingedMesh {
             let c = tri_mesh.indices[i * 3 + 2] as usize;
 
             mesh.add_tri(FaceID(i), VertID(a), VertID(b), VertID(c));
+			#[cfg(feature = "progress")]
             bar.inc(1);
         }
-
+		#[cfg(feature = "progress")]
         bar.finish();
 
         (mesh, tri_mesh.verts)
