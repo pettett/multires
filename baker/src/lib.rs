@@ -23,7 +23,7 @@ pub fn to_mesh_layer(mesh: &WingedMesh, verts: &[Vec4]) -> MeshLevel {
 pub fn group_and_partition_full_res(mut working_mesh: WingedMesh, verts: &[Vec4], name: String) {
     let config = metis::PartitioningConfig {
         method: metis::PartitioningMethod::MultilevelKWay,
-        force_contiguous_partitions: Some(true),
+        force_contiguous_partitions: true,
         minimize_subgraph_degree: Some(true),
         ..Default::default()
     };
@@ -97,7 +97,7 @@ pub fn group_and_partition_full_res(mut working_mesh: WingedMesh, verts: &[Vec4]
 pub fn group_and_partition_and_simplify(mut mesh: WingedMesh, verts: &[Vec4], name: String) {
     let config = metis::PartitioningConfig {
         method: metis::PartitioningMethod::MultilevelKWay,
-        force_contiguous_partitions: Some(true),
+        force_contiguous_partitions: true,
         minimize_subgraph_degree: Some(true),
         ..Default::default()
     };
@@ -128,6 +128,8 @@ pub fn group_and_partition_and_simplify(mut mesh: WingedMesh, verts: &[Vec4], na
 
         println!("Reducing within {} groups:", collapse_reqs.len());
 
+        mesh.age();
+
         let e = match mesh.reduce(verts, &mut quadrics, &collapse_reqs, |f, m| {
             m.partitions[m.faces[f].part].group_index
         }) {
@@ -140,7 +142,11 @@ pub fn group_and_partition_and_simplify(mut mesh: WingedMesh, verts: &[Vec4], na
                 break;
             }
         };
-        println!("Introduced error of {e}");
+        println!(
+            "Introduced error of {e}. Average edge age: {}, Mean: {}",
+            mesh.max_edge_age(),
+            mesh.avg_edge_age(),
+        );
 
         //layers.push(to_mesh_layer(&working_mesh, &verts));
 

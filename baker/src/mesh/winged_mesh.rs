@@ -91,6 +91,8 @@ pub struct HalfEdge {
     /// Edge connecting into the origin vert
     pub edge_left_ccw: EdgeID,
 
+    pub age: u32,
+
     pub twin: Option<EdgeID>,
 }
 
@@ -151,7 +153,7 @@ impl WingedMesh {
             fs::canonicalize(path).unwrap(),
             face_count
         );
-		#[cfg(feature = "progress")]
+        #[cfg(feature = "progress")]
         let bar = indicatif::ProgressBar::new(face_count as u64);
 
         for i in 0..face_count {
@@ -160,10 +162,10 @@ impl WingedMesh {
             let c = tri_mesh.indices[i * 3 + 2] as usize;
 
             mesh.add_tri(FaceID(i), VertID(a), VertID(b), VertID(c));
-			#[cfg(feature = "progress")]
+            #[cfg(feature = "progress")]
             bar.inc(1);
         }
-		#[cfg(feature = "progress")]
+        #[cfg(feature = "progress")]
         bar.finish();
 
         (mesh, tri_mesh.verts)
@@ -198,6 +200,7 @@ impl WingedMesh {
             edge_left_cw,
             edge_left_ccw,
             twin,
+            age: 0,
         };
 
         if let Some(twin_eid) = twin {
@@ -323,11 +326,17 @@ impl WingedMesh {
             // Dont fix invalid edges
             assert_eq!(self.edges[b_outgoing].vert_origin, vb);
 
+            let b_outgoing_ccw = self.edges[b_outgoing].edge_left_ccw;
+
             self.edges[b_outgoing].vert_origin = va;
 
             // Moving this origin moves both the start of this edge and the dest of the previous edge
             self.verts[va].add_outgoing(b_outgoing);
-            self.verts[va].add_incoming(self.edges[b_outgoing].edge_left_ccw);
+            self.verts[va].add_incoming(b_outgoing_ccw);
+
+            // Reset their ages, as moved
+            self.edges[b_outgoing].age = 0;
+            self.edges[b_outgoing_ccw].age = 0;
         }
 
         self.verts.remove(&vb);
@@ -382,6 +391,15 @@ impl WingedMesh {
 
     pub fn partition_count(&self) -> usize {
         self.partitions.len()
+    }
+    pub fn age(&mut self) {
+        self.edges.values_mut().for_each(|e| e.age += 1)
+    }
+    pub fn max_edge_age(&self) -> u32 {
+        self.edges.values().map(|e| e.age).max().unwrap()
+    }
+    pub fn avg_edge_age(&self) -> f32 {
+        self.edges.values().map(|e| e.age).sum::<u32>() as f32 / self.edges.len() as f32
     }
 }
 #[cfg(test)]
@@ -513,7 +531,7 @@ pub mod test {
     pub fn test_continued_validity() -> Result<(), Box<dyn Error>> {
         let test_config = &PartitioningConfig {
             method: metis::PartitioningMethod::MultilevelKWay,
-            force_contiguous_partitions: Some(true),
+            force_contiguous_partitions: true,
             minimize_subgraph_degree: Some(true),
             ..Default::default()
         };
@@ -545,7 +563,7 @@ pub mod test {
     pub fn test_faces_boundary() -> Result<(), Box<dyn Error>> {
         let test_config = &PartitioningConfig {
             method: metis::PartitioningMethod::MultilevelKWay,
-            force_contiguous_partitions: Some(true),
+            force_contiguous_partitions: true,
             minimize_subgraph_degree: Some(true),
             ..Default::default()
         };
@@ -588,7 +606,7 @@ pub mod test {
     pub fn test_group_repartitioning() -> Result<(), Box<dyn Error>> {
         let test_config = &PartitioningConfig {
             method: metis::PartitioningMethod::MultilevelKWay,
-            force_contiguous_partitions: Some(true),
+            force_contiguous_partitions: true,
             minimize_subgraph_degree: Some(true),
             ..Default::default()
         };
@@ -698,7 +716,7 @@ pub mod test {
         println!("Average Outgoing: {avg_outgoing}, Average Incoming: {avg_incoming}");
         let test_config = &PartitioningConfig {
             method: metis::PartitioningMethod::MultilevelKWay,
-            force_contiguous_partitions: Some(true),
+            force_contiguous_partitions: true,
             minimize_subgraph_degree: Some(true),
             ..Default::default()
         };
@@ -777,7 +795,7 @@ pub mod test {
     pub fn test_partition_contiguity() -> Result<(), Box<dyn Error>> {
         let test_config = &PartitioningConfig {
             method: metis::PartitioningMethod::MultilevelKWay,
-            force_contiguous_partitions: Some(true),
+            force_contiguous_partitions: true,
             minimize_subgraph_degree: Some(true),
             ..Default::default()
         };

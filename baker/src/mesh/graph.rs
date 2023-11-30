@@ -108,21 +108,15 @@ impl WingedMesh {
 }
 #[cfg(test)]
 pub mod test {
-    pub const DOT_OUT: &str =
-        "C:\\Users\\maxwe\\OneDriveC\\sync\\projects\\multires\\baker\\graph.gv";
+    pub const DOT_OUT: &str = "baker\\graph.gv";
 
-    pub const HIERARCHY_SVG_OUT: &str =
-        "C:\\Users\\maxwe\\OneDriveC\\sync\\projects\\multires\\baker\\hierarchy_graph.svg";
-    pub const PART_SVG_OUT: &str =
-        "C:\\Users\\maxwe\\OneDriveC\\sync\\projects\\multires\\baker\\part_graph.svg";
+    pub const HIERARCHY_SVG_OUT: &str = "baker\\hierarchy_graph.svg";
+    pub const PART_SVG_OUT: &str = "baker\\part_graph.svg";
 
-    pub const FACE_SVG_OUT: &str =
-        "C:\\Users\\maxwe\\OneDriveC\\sync\\projects\\multires\\baker\\face_graph.svg";
+    pub const FACE_SVG_OUT: &str = "baker\\face_graph.svg";
 
-    pub const FACE_SVG_OUT_2: &str =
-        "C:\\Users\\maxwe\\OneDriveC\\sync\\projects\\multires\\baker\\face_graph2.svg";
-    pub const ERROR_SVG_OUT: &str =
-        "C:\\Users\\maxwe\\OneDriveC\\sync\\projects\\multires\\baker\\error.svg";
+    pub const FACE_SVG_OUT_2: &str = "baker\\face_graph2.svg";
+    pub const ERROR_SVG_OUT: &str = "baker\\error.svg";
 
     const COLS: [&str; 10] = [
         "red",
@@ -143,7 +137,13 @@ pub mod test {
         let mut dfs_space = petgraph::algo::DfsSpace::default();
         for i in graph.node_indices() {
             if !petgraph::algo::has_path_connecting(&graph, n0, i, Some(&mut dfs_space)) {
-                petgraph_to_svg(graph, ERROR_SVG_OUT, &|_, _| String::new(), false).unwrap();
+                metis::petgraph_to_svg(
+                    graph,
+                    ERROR_SVG_OUT,
+                    &|_, _| String::new(),
+                    metis::GraphSVGRender::Directed,
+                )
+                .unwrap();
 
                 assert!(
                     false,
@@ -157,7 +157,7 @@ pub mod test {
     pub fn generate_face_graph() -> Result<(), Box<dyn error::Error>> {
         let test_config = &metis::PartitioningConfig {
             method: metis::PartitioningMethod::MultilevelKWay,
-            force_contiguous_partitions: Some(true),
+            force_contiguous_partitions: true,
             minimize_subgraph_degree: Some(true),
             ..Default::default()
         };
@@ -176,7 +176,7 @@ pub mod test {
 
         let mut graph = mesh.generate_face_graph();
 
-        petgraph_to_svg(
+        metis::petgraph_to_svg(
             &graph,
             FACE_SVG_OUT,
             &|_, (n, &fid)| {
@@ -189,7 +189,7 @@ pub mod test {
                     p.z * 200.0,
                 )
             },
-            true,
+            metis::GraphSVGRender::Undirected { positions: true },
         )?;
 
         graph.retain_edges(|g, e| {
@@ -201,7 +201,7 @@ pub mod test {
             p1 == p2
         });
 
-        petgraph_to_svg(
+        metis::petgraph_to_svg(
             &graph,
             FACE_SVG_OUT_2,
             &|_, (n, &fid)| {
@@ -214,7 +214,7 @@ pub mod test {
                     p.z * 200.0,
                 )
             },
-            true,
+            metis::GraphSVGRender::Undirected { positions: true },
         )?;
 
         Ok(())
@@ -224,7 +224,7 @@ pub mod test {
     pub fn generate_partition_graph() -> Result<(), Box<dyn error::Error>> {
         let test_config = &metis::PartitioningConfig {
             method: metis::PartitioningMethod::MultilevelKWay,
-            force_contiguous_partitions: Some(true),
+            force_contiguous_partitions: true,
             minimize_subgraph_degree: Some(true),
             ..Default::default()
         };
@@ -236,11 +236,11 @@ pub mod test {
         // Apply primary partition, that will define the lowest level clusterings
         mesh.partition_within_groups(test_config, None)?;
 
-        petgraph_to_svg(
+        metis::petgraph_to_svg(
             &mesh.generate_partition_graph(),
             PART_SVG_OUT,
             &|_, _| format!("shape=point"),
-            false,
+            metis::GraphSVGRender::Directed,
         )?;
 
         Ok(())
@@ -250,7 +250,7 @@ pub mod test {
     pub fn generate_partition_hierarchy_graph() -> Result<(), Box<dyn error::Error>> {
         let test_config = &metis::PartitioningConfig {
             method: metis::PartitioningMethod::MultilevelKWay,
-            force_contiguous_partitions: Some(true),
+            force_contiguous_partitions: true,
             minimize_subgraph_degree: Some(true),
             ..Default::default()
         };
@@ -306,90 +306,20 @@ pub mod test {
             colouring.insert(n, mesh.partitions[i].group_index + seen_groups);
         }
 
-        petgraph_to_svg(
+        metis::petgraph_to_svg(
             &graph,
             HIERARCHY_SVG_OUT,
             &|_, (n, _)| format!("shape=point, color={}", COLS[colouring[&n] % COLS.len()]),
-            false,
+            metis::GraphSVGRender::Directed,
         )?;
 
         Ok(())
     }
-    use core::fmt;
-    use std::{collections::HashMap, error, fs, path, process};
 
-    use petgraph::dot;
+    use std::{collections::HashMap, error};
 
     use crate::mesh::winged_mesh::{
         test::{TEST_MESH_LOW, TEST_MESH_PLANE_LOW},
         WingedMesh,
     };
-    fn petgraph_to_svg<
-        G: petgraph::visit::IntoNodeReferences
-            + petgraph::visit::IntoEdgeReferences
-            + petgraph::visit::NodeIndexable
-            + petgraph::visit::GraphProp,
-    >(
-        graph: G,
-        out: impl AsRef<path::Path>,
-        get_node_attrs: &dyn Fn(&G, G::NodeRef) -> String,
-        undirected: bool,
-    ) -> Result<(), Box<dyn error::Error>>
-    where
-        <G as petgraph::visit::Data>::EdgeWeight: fmt::Debug,
-        <G as petgraph::visit::Data>::NodeWeight: fmt::Debug,
-    {
-        let dot_out = if undirected {
-            fs::write(
-                DOT_OUT,
-                format!(
-                    "graph {{ \n layout=\"neato\"\n  {:?} }}",
-                    dot::Dot::with_attr_getters(
-                        &graph,
-                        &[
-                            dot::Config::GraphContentOnly,
-                            dot::Config::NodeNoLabel,
-                            dot::Config::EdgeNoLabel
-                        ],
-                        &|_, _| "arrowhead=none".to_owned(),
-                        get_node_attrs
-                    )
-                ),
-            )?;
-
-            process::Command::new("neato")
-                .arg("-n")
-                .arg(DOT_OUT)
-                .arg("-Tsvg")
-                .output()?
-        } else {
-            fs::write(
-                DOT_OUT,
-                format!(
-                    "{:?}",
-                    dot::Dot::with_attr_getters(
-                        &graph,
-                        &[dot::Config::NodeNoLabel, dot::Config::EdgeNoLabel],
-                        &|_, _| "arrowhead=none".to_owned(),
-                        get_node_attrs
-                    )
-                ),
-            )?;
-
-            process::Command::new("dot")
-                .arg(DOT_OUT)
-                .arg("-Tsvg")
-                .output()?
-        };
-
-        //fs::remove_file(DOT_OUT)?;
-
-        println!("{}", std::str::from_utf8(&dot_out.stderr)?);
-
-        assert!(dot_out.status.success());
-
-        fs::write(out, dot_out.stdout)?;
-
-        Ok(())
-    }
 }

@@ -14,73 +14,82 @@ use crate::{
     rstatus_et_METIS_OK, METIS_PartGraphKway, METIS_PartGraphRecursive, METIS_SetDefaultOptions,
     METIS_NOPTIONS,
 };
+use crate::{
+    mdbglvl_et_METIS_DBG_INFO, miptype_et_METIS_IPTYPE_METISRB, moptions_et_METIS_OPTION_DBGLVL,
+    mptype_et_METIS_PTYPE_KWAY, mptype_et_METIS_PTYPE_RB,
+};
 use petgraph::visit::EdgeRef;
 use std::ptr::null_mut;
 use thiserror::Error;
 
 /// Specifies the used algorithm.
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
+#[repr(i32)]
 pub enum PartitioningMethod {
     /// Multilevel k-way partitioning
     /// `METIS_PartGraphKway`
-    MultilevelKWay,
+    MultilevelKWay = mptype_et_METIS_PTYPE_KWAY,
     /// Multilevel recursive bisection
     /// `METIS_PartGraphRecursive`
-    MultilevelRecursiveBisection,
+    MultilevelRecursiveBisection = mptype_et_METIS_PTYPE_RB,
 }
 
 /// Specifies the matching scheme to be used during coarsening
 /// `METIS_OPTION_CTYPE`
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
+#[repr(i32)]
 pub enum CoarseningScheme {
     /// Random matching
     /// `METIS_CTYPE_RM`
-    RandomMatching,
+    RandomMatching = mctype_et_METIS_CTYPE_RM,
     /// Sorted heavy-edge matching
     /// `METIS_CTYPE_SHEM`
-    SortedHeavyEdgeMatching,
+    SortedHeavyEdgeMatching = mctype_et_METIS_CTYPE_SHEM,
 }
 
 /// Specifies the algorithm used during initial partitioning
 /// `METIS_OPTION_IPTYPE`
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
+#[repr(i32)]
 pub enum InitialPartitioningAlgorithm {
     /// Grows a bisection using a greedy strategy
     /// `METIS_IPTYPE_GROW`
-    GreedyGrow,
+    GreedyGrow = miptype_et_METIS_IPTYPE_GROW,
     /// Computes a bisection at random followed by a refinement
     /// `METIS_IPTYPE_RANDOM`
-    RandomRefined,
+    RandomRefined = miptype_et_METIS_IPTYPE_RANDOM,
     /// Derives a separator from an edge cut
     /// `METIS_IPTYPE_EDGE`
-    EdgeSeparator,
+    EdgeSeparator = miptype_et_METIS_IPTYPE_EDGE,
     /// Grow a bisection using a greedy node-based strategy
     /// `METIS_IPTYPE_NODE`
-    GreedyNode,
+    GreedyNode = miptype_et_METIS_IPTYPE_NODE,
+    RB = miptype_et_METIS_IPTYPE_METISRB,
 }
 
 /// Specifies the algorithm used for refinement
 /// `METIS_OPTION_RTYPE`
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
+#[repr(i32)]
 pub enum RefinementAlgorithm {
     /// FM-based cut refinement
     /// `METIS_RTYPE_FM`
-    Fm,
+    Fm = mrtype_et_METIS_RTYPE_FM,
     /// Greedy-based cut and volume refinement
     /// `METIS_RTYPE_GREEDY`
-    Greedy,
+    Greedy = mrtype_et_METIS_RTYPE_GREEDY,
     /// Two-sided node FM refinement
     /// `METIS_RTYPE_SEP2SIDED`
-    TwoSidedFm,
+    TwoSidedFm = mrtype_et_METIS_RTYPE_SEP2SIDED,
     /// One-sided node FM refinement
     /// `METIS_RTYPE_SEP1SIDED`
-    OneSidedFm,
+    OneSidedFm = mrtype_et_METIS_RTYPE_SEP1SIDED,
 }
 
 /// Configuration for METIS graph partitioning.
 /// Used to select an algorithm and configure METIS options.
 /// [`None`] values correspond to the default METIS option.
-pub struct PartitioningConfig<'a> {
+pub struct PartitioningConfig {
     /// Specifies the used algorithm.
     pub method: PartitioningMethod,
     /// Specifies the matching scheme to be used during coarsening
@@ -88,7 +97,7 @@ pub struct PartitioningConfig<'a> {
     pub coarsening: Option<CoarseningScheme>,
     /// Specifies the algorithm used during initial partitioning
     /// `METIS_OPTION_IPTYPE`
-    pub initial_partitioning: Option<InitialPartitioningAlgorithm>,
+    pub initial_partitioning: InitialPartitioningAlgorithm,
     /// Specifies the algorithm used for refinement
     /// `METIS_OPTION_RTYPE`
     pub refinement: Option<RefinementAlgorithm>,
@@ -113,11 +122,11 @@ pub struct PartitioningConfig<'a> {
     /// Specifies that the coarsening will not perform any 2–hop matchings when the standard matching approach fails to
     /// sufficiently coarsen the graph. The 2–hop matching is very effective for graphs with power-law degree distributions.
     /// `METIS_OPTION_NO2HOP`
-    pub no_two_hop_matching: Option<bool>,
+    pub two_hop_matching: Option<bool>,
     /// Specifies that the partitioning routines should try to produce partitions that are contiguous.
     /// Note that if the input graph is not connected this option is ignored.
     /// `METIS_OPTION_CONTIG`
-    pub force_contiguous_partitions: Option<bool>,
+    pub force_contiguous_partitions: bool,
     /// Specifies that the graph should be compressed by combining together vertices that have identical adjacency lists.
     /// `METIS_OPTION_COMPRESS`
     pub compress_graph: Option<bool>,
@@ -130,93 +139,70 @@ pub struct PartitioningConfig<'a> {
     /// Specifies the maximum allowed load imbalance among the partitions. (See manual.pdf for details)
     /// `METIS_OPTION_UFACTOR`
     pub u_factor: Option<i32>,
-    /// Weights for the partitions.
-    pub weights: Option<&'a [f32]>,
 }
 
-impl<'a> Default for PartitioningConfig<'a> {
+impl Default for PartitioningConfig {
     fn default() -> Self {
         Self {
             method: PartitioningMethod::MultilevelKWay,
             coarsening: None,
-            initial_partitioning: None,
+            initial_partitioning: InitialPartitioningAlgorithm::GreedyGrow,
             refinement: None,
             partitioning_attempts: None,
             separator_attempts: None,
             refinement_iterations: None,
             rng_seed: None,
             minimize_subgraph_degree: None,
-            no_two_hop_matching: None,
-            force_contiguous_partitions: None,
+            two_hop_matching: None,
+            force_contiguous_partitions: false,
             compress_graph: Some(false),
             order_contiguous_components: None,
             p_factor: None,
             u_factor: None,
-            weights: None,
         }
     }
 }
 
-impl<'a> PartitioningConfig<'a> {
+impl PartitioningConfig {
     fn apply(&self, options: &mut [idx_t]) {
         assert_eq!(options.len(), METIS_NOPTIONS as usize);
 
         if let Some(x) = self.coarsening {
-            options[moptions_et_METIS_OPTION_CTYPE as usize] = match x {
-                CoarseningScheme::RandomMatching => mctype_et_METIS_CTYPE_RM as idx_t,
-                CoarseningScheme::SortedHeavyEdgeMatching => mctype_et_METIS_CTYPE_SHEM as idx_t,
-            };
+            options[moptions_et_METIS_OPTION_CTYPE as usize] = x as _;
         }
 
-        if let Some(x) = self.initial_partitioning {
-            options[moptions_et_METIS_OPTION_IPTYPE as usize] = match x {
-                InitialPartitioningAlgorithm::GreedyGrow => miptype_et_METIS_IPTYPE_GROW as idx_t,
-                InitialPartitioningAlgorithm::RandomRefined => {
-                    miptype_et_METIS_IPTYPE_RANDOM as idx_t
-                }
-                InitialPartitioningAlgorithm::EdgeSeparator => {
-                    miptype_et_METIS_IPTYPE_EDGE as idx_t
-                }
-                InitialPartitioningAlgorithm::GreedyNode => miptype_et_METIS_IPTYPE_NODE as idx_t,
-            }
-        }
+        options[moptions_et_METIS_OPTION_IPTYPE as usize] = self.initial_partitioning as _;
 
         if let Some(x) = self.refinement {
-            options[moptions_et_METIS_OPTION_RTYPE as usize] = match x {
-                RefinementAlgorithm::Fm => mrtype_et_METIS_RTYPE_FM as idx_t,
-                RefinementAlgorithm::Greedy => mrtype_et_METIS_RTYPE_GREEDY as idx_t,
-                RefinementAlgorithm::TwoSidedFm => mrtype_et_METIS_RTYPE_SEP2SIDED as idx_t,
-                RefinementAlgorithm::OneSidedFm => mrtype_et_METIS_RTYPE_SEP1SIDED as idx_t,
-            }
+            options[moptions_et_METIS_OPTION_RTYPE as usize] = x as _;
         }
 
         if let Some(x) = self.partitioning_attempts {
-            options[moptions_et_METIS_OPTION_NCUTS as usize] = x as idx_t;
+            options[moptions_et_METIS_OPTION_NCUTS as usize] = x as _;
         }
 
         if let Some(x) = self.separator_attempts {
-            options[moptions_et_METIS_OPTION_NSEPS as usize] = x as idx_t;
+            options[moptions_et_METIS_OPTION_NSEPS as usize] = x as _;
         }
 
         if let Some(x) = self.refinement_iterations {
-            options[moptions_et_METIS_OPTION_NITER as usize] = x as idx_t;
+            options[moptions_et_METIS_OPTION_NITER as usize] = x as _;
         }
 
         if let Some(x) = self.rng_seed {
-            options[moptions_et_METIS_OPTION_SEED as usize] = x as idx_t;
+            options[moptions_et_METIS_OPTION_SEED as usize] = x as _;
         }
 
         if let Some(x) = self.minimize_subgraph_degree {
             options[moptions_et_METIS_OPTION_MINCONN as usize] = idx_t::from(x);
         }
 
-        if let Some(x) = self.no_two_hop_matching {
+        if let Some(x) = self.two_hop_matching {
             options[moptions_et_METIS_OPTION_NO2HOP as usize] = idx_t::from(x);
         }
 
-        if let Some(x) = self.force_contiguous_partitions {
-            options[moptions_et_METIS_OPTION_CONTIG as usize] = idx_t::from(x);
-        }
+        options[moptions_et_METIS_OPTION_CONTIG as usize] =
+            idx_t::from(self.force_contiguous_partitions);
 
         if let Some(x) = self.compress_graph {
             options[moptions_et_METIS_OPTION_COMPRESS as usize] = idx_t::from(x);
@@ -227,12 +213,14 @@ impl<'a> PartitioningConfig<'a> {
         }
 
         if let Some(x) = self.p_factor {
-            options[moptions_et_METIS_OPTION_PFACTOR as usize] = x as idx_t;
+            options[moptions_et_METIS_OPTION_PFACTOR as usize] = x as _;
         }
 
         if let Some(x) = self.u_factor {
-            options[moptions_et_METIS_OPTION_UFACTOR as usize] = x as idx_t;
+            options[moptions_et_METIS_OPTION_UFACTOR as usize] = x as _;
         }
+
+        options[moptions_et_METIS_OPTION_DBGLVL as usize] = mdbglvl_et_METIS_DBG_INFO;
     }
 
     pub fn partition_from_graph<V, E>(
@@ -265,14 +253,13 @@ impl<'a> PartitioningConfig<'a> {
         self.partition_from_adj(
             partitions,
             graph.node_count(),
-            None,
             adjacency,
             adjacency_idx,
             None,
         )
     }
 
-    pub fn partition_from_weighted_graph<V>(
+    pub fn partition_from_edge_weighted_graph<V>(
         &self,
         partitions: u32,
         graph: &petgraph::graph::UnGraph<V, idx_t>,
@@ -300,11 +287,12 @@ impl<'a> PartitioningConfig<'a> {
         adjacency_idx.push(adjacency.len() as idx_t);
 
         assert_eq!(adjacency_idx.len(), graph.node_count() + 1);
+        assert_eq!(adjacency.len(), 2 * graph.edge_count());
+        assert_eq!(adjacency_weight.len(), 2 * graph.edge_count());
 
         self.partition_from_adj(
             partitions,
             graph.node_count(),
-            None,
             adjacency,
             adjacency_idx,
             Some(adjacency_weight),
@@ -315,7 +303,6 @@ impl<'a> PartitioningConfig<'a> {
         &self,
         partitions: u32,
         nodes: usize,
-        weights: Option<Vec<real_t>>,
         mut adjacency: Vec<idx_t>,
         mut adjacency_idx: Vec<idx_t>,
         adjacency_weight: Option<Vec<idx_t>>,
@@ -330,11 +317,14 @@ impl<'a> PartitioningConfig<'a> {
         let mut nparts = partitions as idx_t;
         let mut num_constraints = 1 as idx_t;
 
-        let mut options = [0 as idx_t; METIS_NOPTIONS as usize];
+        let mut options = [-1 as idx_t; METIS_NOPTIONS as usize];
         unsafe {
             METIS_SetDefaultOptions(&mut options as *mut idx_t);
         }
+        let o = options.clone();
         self.apply(&mut options);
+
+        println!("{:?} \n {:?}", o, options);
 
         let status = if self.method == PartitioningMethod::MultilevelKWay {
             unsafe {
@@ -351,11 +341,7 @@ impl<'a> PartitioningConfig<'a> {
                         null_mut()
                     },
                     &mut nparts,
-                    if let Some(mut w) = weights {
-                        w.as_mut_ptr()
-                    } else {
-                        null_mut()
-                    },
+                    null_mut(),
                     null_mut(),
                     options.as_mut_ptr(),
                     &mut edge_cut,
@@ -377,11 +363,7 @@ impl<'a> PartitioningConfig<'a> {
                         null_mut()
                     },
                     &mut nparts,
-                    if let Some(mut w) = weights {
-                        w.as_mut_ptr()
-                    } else {
-                        null_mut()
-                    },
+                    null_mut(),
                     null_mut(),
                     options.as_mut_ptr(),
                     &mut edge_cut,
@@ -392,11 +374,11 @@ impl<'a> PartitioningConfig<'a> {
 
         // 5.8 Graph partitioning routines
         // int METIS PartGraphRecursive(idx t *nvtxs, idx t *ncon, idx t *xadj, idx t *adjncy,
-        // idx t *vwgt, idx t *vsize, idx t *adjwgt, idx t *nparts, real t *tpwgts,
-        // real t ubvec, idx t *options, idx t *objval, idx t *part)
+        // 								idx t *vwgt, idx t *vsize, idx t *adjwgt, idx t *nparts, real t *tpwgts,
+        // 								real t ubvec, idx t *options, idx t *objval, idx t *part)
         // int METIS PartGraphKway(idx t *nvtxs, idx t *ncon, idx t *xadj, idx t *adjncy,
-        // idx t *vwgt, idx t *vsize, idx t *adjwgt, idx t *nparts, real t *tpwgts,
-        // real t ubvec, idx t *options, idx t *objval, idx t *part)
+        // 					i		dx t *vwgt, idx t *vsize, idx t *adjwgt, idx t *nparts, real t *tpwgts,
+        // 							real t ubvec, idx t *options, idx t *objval, idx t *part)
         // Description
         // Is used to partition a graph into k parts using either multilevel recursive bisection or multilevel k-way partitioning.
         // -- Parameters
@@ -439,7 +421,8 @@ impl<'a> PartitioningConfig<'a> {
         // 				METIS_OPTION_NITER, METIS_OPTION_UFACTOR, METIS_OPTION_MINCONN,
         // 				METIS_OPTION_CONTIG, METIS_OPTION_SEED, METIS_OPTION_NUMBERING,
         // 				METIS_OPTION_DBGLVL
-        // objval Upon successful completion, this variable stores the edge-cut or the total communication volume of
+        // objval
+        //				Upon successful completion, this variable stores the edge-cut or the total communication volume of
         // 				the partitioning solution. The value returned depends on the partitioning’s objective function.
         // 				part This is a vector of size nvtxs that upon successful completion stores the partition vector of the graph.
         // 				The numbering of this vector starts from either 0 or 1, depending on the value of
