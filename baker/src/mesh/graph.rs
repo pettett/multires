@@ -137,11 +137,11 @@ pub mod test {
         let mut dfs_space = petgraph::algo::DfsSpace::default();
         for i in graph.node_indices() {
             if !petgraph::algo::has_path_connecting(&graph, n0, i, Some(&mut dfs_space)) {
-                metis::petgraph_to_svg(
+                graph::petgraph_to_svg(
                     graph,
                     ERROR_SVG_OUT,
                     &|_, _| String::new(),
-                    metis::GraphSVGRender::Directed,
+                    graph::GraphSVGRender::Directed,
                 )
                 .unwrap();
 
@@ -176,7 +176,7 @@ pub mod test {
 
         let mut graph = mesh.generate_face_graph();
 
-        metis::petgraph_to_svg(
+        graph::petgraph_to_svg(
             &graph,
             FACE_SVG_OUT,
             &|_, (n, &fid)| {
@@ -189,7 +189,7 @@ pub mod test {
                     p.z * 200.0,
                 )
             },
-            metis::GraphSVGRender::Undirected { positions: true },
+            graph::GraphSVGRender::Undirected { positions: true },
         )?;
 
         graph.retain_edges(|g, e| {
@@ -201,7 +201,7 @@ pub mod test {
             p1 == p2
         });
 
-        metis::petgraph_to_svg(
+        graph::petgraph_to_svg(
             &graph,
             FACE_SVG_OUT_2,
             &|_, (n, &fid)| {
@@ -214,7 +214,7 @@ pub mod test {
                     p.z * 200.0,
                 )
             },
-            metis::GraphSVGRender::Undirected { positions: true },
+            graph::GraphSVGRender::Undirected { positions: true },
         )?;
 
         Ok(())
@@ -236,11 +236,11 @@ pub mod test {
         // Apply primary partition, that will define the lowest level clusterings
         mesh.partition_within_groups(test_config, None)?;
 
-        metis::petgraph_to_svg(
+        graph::petgraph_to_svg(
             &mesh.generate_partition_graph(),
             PART_SVG_OUT,
             &|_, _| format!("shape=point"),
-            metis::GraphSVGRender::Directed,
+            graph::GraphSVGRender::Directed,
         )?;
 
         Ok(())
@@ -306,17 +306,19 @@ pub mod test {
             colouring.insert(n, mesh.partitions[i].group_index + seen_groups);
         }
 
-        metis::petgraph_to_svg(
+        graph::petgraph_to_svg(
             &graph,
             HIERARCHY_SVG_OUT,
             &|_, (n, _)| format!("shape=point, color={}", COLS[colouring[&n] % COLS.len()]),
-            metis::GraphSVGRender::Directed,
+            graph::GraphSVGRender::Directed,
         )?;
 
         Ok(())
     }
 
     use std::{collections::HashMap, error};
+
+    use common::graph;
 
     use crate::mesh::winged_mesh::{
         test::{TEST_MESH_LOW, TEST_MESH_PLANE_LOW},
