@@ -5,6 +5,7 @@ use crate::components::debug_mesh::DebugMesh;
 use crate::components::multi_res_mesh::{MultiResMeshComponent, SubMeshComponent};
 use crate::gui::gui::Gui;
 use crate::vertex::Vertex;
+use bevy_ecs::entity::Entity;
 use bevy_ecs::event::EventReader;
 use bevy_ecs::system::{Commands, NonSend, NonSendMut, Query, Res, ResMut, Resource};
 use common::tri_mesh::TriMesh;
@@ -327,7 +328,7 @@ pub fn render(
     ctx: NonSend<egui::Context>,
     mut state: NonSendMut<egui_winit::State>,
     meshes: Query<&mut MultiResMeshComponent>,
-    submeshes: Query<&SubMeshComponent>,
+    submeshes: Query<(Entity, &SubMeshComponent)>,
     camera: Query<&CameraUniform>,
     cameras: Query<(&mut Camera, &Transform)>,
     mut commands: Commands,

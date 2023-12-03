@@ -1,4 +1,4 @@
-use std::{collections::HashMap, time::Instant};
+use std::{collections::HashMap, thread, time::Instant};
 
 use crate::{
     components::multi_res_mesh::{ErrorMode, MultiResMeshComponent, SubMeshComponent},
@@ -10,6 +10,7 @@ use bevy_ecs::{
     system::{Commands, Query, Resource},
     world::World,
 };
+use common::graph::petgraph_to_svg;
 use common_renderer::components::{camera::Camera, transform::Transform};
 use egui::{Pos2, Vec2};
 use egui_wgpu::renderer::ScreenDescriptor;
@@ -31,7 +32,7 @@ impl Gui {
         encoder: &mut wgpu::CommandEncoder,
         view: &wgpu::TextureView,
         mut meshes: Query<&mut MultiResMeshComponent>,
-        submeshes: &Query<&SubMeshComponent>,
+        submeshes: &Query<(Entity, &SubMeshComponent)>,
         mut camera: Query<(&mut Camera, &Transform)>,
         commands: &mut Commands,
     ) {
@@ -67,6 +68,8 @@ impl Gui {
                                     .prefix("focus partition: "),
                             );
 
+                            ui.add(egui::widgets::Checkbox::new(&mut mesh.freeze, "Freeze"));
+
                             egui::ComboBox::from_label("Mode ")
                                 .selected_text(format!("{:?}", &mut mesh.error_calc))
                                 .show_ui(ui, |ui| {
@@ -91,14 +94,18 @@ impl Gui {
                                     );
                                 });
 
+                            let freeze = mesh.freeze;
+
                             match &mut mesh.error_calc {
                                 ErrorMode::PointDistance {
                                     camera_point,
-                                    target_error: error_falloff,
+                                    target_error,
                                     cam,
                                 } => {
-                                    *camera_point = (*transform.get_pos()).into();
-                                    *cam = camera.clone();
+                                    if !freeze {
+                                        *camera_point = (*transform.get_pos()).into();
+                                        *cam = camera.clone();
+                                    }
                                     // ui.add(
                                     //     egui::widgets::Slider::new(&mut camera_point.x, -2.5..=2.5)
                                     //         .prefix("X: "),
@@ -113,7 +120,7 @@ impl Gui {
                                     // );
                                     ui.add_space(10.0);
                                     ui.add(
-                                        egui::widgets::Slider::new(error_falloff, 0.1..=10.0)
+                                        egui::widgets::Slider::new(target_error, 0.1..=10.0)
                                             .prefix("Target Error: "),
                                     );
                                 }
@@ -128,6 +135,32 @@ impl Gui {
                                         egui::widgets::Slider::new(layer, 0..=10).prefix("Layer: "),
                                     );
                                 }
+                            }
+
+                            if ui.button("Snapshot Error Graph").clicked() {
+                                let g = mesh.submesh_error_graph(submeshes);
+                                let e_calc = mesh.error_calc.clone();
+
+                                thread::spawn(move || {
+                                    petgraph_to_svg(
+                                        &g,
+                                        "svg/error.svg",
+                                        &|_, (_, &e)| match e_calc {
+                                            ErrorMode::PointDistance { target_error, .. } => {
+                                                if e < target_error {
+                                                    "color=green".to_owned()
+                                                } else {
+                                                    "color=red".to_owned()
+                                                }
+                                            }
+                                            _ => String::new(),
+                                        },
+                                        common::graph::GraphSVGRender::Directed {
+                                            node_label: common::graph::Label::Weight,
+                                        },
+                                    )
+                                    .unwrap();
+                                });
                             }
                         }
                     }

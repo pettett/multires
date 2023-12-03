@@ -141,7 +141,9 @@ pub mod test {
                     graph,
                     ERROR_SVG_OUT,
                     &|_, _| String::new(),
-                    graph::GraphSVGRender::Directed,
+                    graph::GraphSVGRender::Directed {
+                        node_label: common::graph::Label::None,
+                    },
                 )
                 .unwrap();
 
@@ -240,7 +242,9 @@ pub mod test {
             &mesh.generate_partition_graph(),
             PART_SVG_OUT,
             &|_, _| format!("shape=point"),
-            graph::GraphSVGRender::Directed,
+            graph::GraphSVGRender::Directed {
+                node_label: common::graph::Label::None,
+            },
         )?;
 
         Ok(())
@@ -310,7 +314,9 @@ pub mod test {
             &graph,
             HIERARCHY_SVG_OUT,
             &|_, (n, _)| format!("shape=point, color={}", COLS[colouring[&n] % COLS.len()]),
-            graph::GraphSVGRender::Directed,
+            graph::GraphSVGRender::Directed {
+                node_label: common::graph::Label::None,
+            },
         )?;
 
         Ok(())

@@ -52,10 +52,11 @@ pub struct Meshlet {
 pub struct SubMesh {
     pub indices: Vec<u32>,
     // Bounding sphere for the submesh
+    // TODO: bounding sphere radii
+    // Will only be used for culling, so uncomment later
+    //pub tight_sphere: BoundingSphere,
     // Similarly, the bounding sphere must be enlarged to enclose the bounding spheres of all its children in the DAG,
     // in order to ensure a monotonic view-dependent error function.
-    // TODO: bounding sphere radii
-    pub tight_sphere: BoundingSphere,
     pub saturated_sphere: BoundingSphere,
     pub debug_group: usize,
     pub error: f32,
@@ -65,13 +66,13 @@ impl SubMesh {
     pub fn new(error: f32, center: Vec3, monotonic_radius: f32, radius: f32, group: usize) -> Self {
         Self {
             indices: Vec::new(),
-            tight_sphere: BoundingSphere {
-                center: center.to_array(),
-                radius: monotonic_radius,
-            },
+            // tight_sphere: BoundingSphere {
+            //     center: center.to_array(),
+            //     radius: radius,
+            // },
             saturated_sphere: BoundingSphere {
                 center: center.to_array(),
-                radius: radius,
+                radius: monotonic_radius,
             },
             error,
             debug_group: group,

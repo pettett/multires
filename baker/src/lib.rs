@@ -328,8 +328,10 @@ pub fn generate_submeshes(mesh: &WingedMesh, verts: &[Vec4]) -> Vec<SubMesh> {
         .map(|part| {
             let gi = mesh.partitions[part].group_index;
             let g = &mesh.groups[gi];
+
             SubMesh::new(
-                0.0,
+                //TODO: Connect to quadric error or something
+                1.0,
                 g.monotonic_bound.center(),
                 g.monotonic_bound.radius(),
                 mesh.partitions[part].tight_bound.radius(),

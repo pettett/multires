@@ -60,8 +60,13 @@ pub fn generate_triangle_plane<const N: usize, const M: usize, E>(
     graph
 }
 
+pub enum Label {
+    Index,
+    Weight,
+    None,
+}
 pub enum GraphSVGRender {
-    Directed,
+    Directed { node_label: Label },
     Undirected { positions: bool },
 }
 pub const COLS: [&str; 10] = [
@@ -94,14 +99,18 @@ where
     let dot_out_path = path::Path::new(OUT).join("svg\\dot.gv");
     let out_path = path::Path::new(OUT).join(out);
 
-    match render {
-        GraphSVGRender::Directed => fs::write(
+    match &render {
+        GraphSVGRender::Directed { node_label } => fs::write(
             &dot_out_path,
             format!(
                 "{:?}",
                 dot::Dot::with_attr_getters(
                     &graph,
-                    &[dot::Config::NodeNoLabel, dot::Config::EdgeNoLabel],
+                    match node_label {
+                        Label::Index => &[dot::Config::NodeIndexLabel, dot::Config::EdgeNoLabel],
+                        Label::Weight => &[dot::Config::EdgeNoLabel],
+                        Label::None => &[dot::Config::NodeNoLabel, dot::Config::EdgeNoLabel],
+                    },
                     &|_, _| "arrowhead=none".to_owned(),
                     get_node_attrs
                 )
@@ -122,7 +131,7 @@ where
     };
 
     let dot_out = match render {
-        GraphSVGRender::Directed => {
+        GraphSVGRender::Directed { .. } => {
             let mut c = process::Command::new("dot");
             c.arg(dot_out_path);
             c
@@ -146,7 +155,9 @@ where
 
     assert!(dot_out.status.success());
 
-    fs::write(out_path, dot_out.stdout)?;
+    fs::write(&out_path, dot_out.stdout)?;
+
+    open::that(out_path).unwrap();
 
     Ok(())
 }

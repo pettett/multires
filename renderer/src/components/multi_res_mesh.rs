@@ -1,5 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
+    fmt::Debug,
     sync::Arc,
 };
 
@@ -26,10 +27,44 @@ pub struct SubMeshComponent {
     // Partitions in the layer above (lower resolution) this is not compatible with
     pub parents: Vec<Entity>,
     pub group: Vec<Entity>,
+    pub co_parent: Option<Entity>,
     pub model: BufferGroup<1>,
 }
 
 impl SubMeshComponent {
+    pub fn co_error(
+        &self,
+        submeshes: &Query<(Entity, &SubMeshComponent)>,
+        mesh: &MultiResMeshComponent,
+    ) -> f32 {
+        self.error(mesh).min(match self.co_parent {
+            Some(co_parent) => submeshes.get(co_parent).unwrap().1.error(mesh),
+            None => f32::MAX, // Leaf nodes have no co parent, as have no children
+        })
+    }
+
+    pub fn error(&self, mesh: &MultiResMeshComponent) -> f32 {
+        match &mesh.error_calc {
+            ErrorMode::PointDistance {
+                camera_point, cam, ..
+            } => {
+                // Max error we can have before mesh is not suitable to draw
+
+                let distance = self.center.distance(*camera_point).max(cam.znear());
+
+                self.error * self.radius / distance
+            }
+            ErrorMode::MaxError { error } => self.error,
+            ErrorMode::ExactLayer { layer } => self.layer as _, //FIXME:
+        }
+    }
+
+    // Issue - parents of a group may dissagree on if to draw, if they have differing errors due to being in different groups.
+
+    // Solution Idea - merge the parents into a single node after calculating view dependant error,
+    // taking the smaller of the two's errors to ensure other things in the group can still be drawn at the exact same time.
+    // (Group != siblings, but everything in a group and every sibling must *both* be in agreement on weather to draw)
+
     pub fn error_within_bounds(&self, mesh: &MultiResMeshComponent) -> bool {
         match &mesh.error_calc {
             ErrorMode::PointDistance {
@@ -39,12 +74,9 @@ impl SubMeshComponent {
             } => {
                 // Max error we can have before mesh is not suitable to draw
 
-                let mut distance = self.center.distance(*camera_point);
+                let distance = self.center.distance(*camera_point).max(cam.znear());
 
-                if distance < cam.znear() {
-                    distance = cam.znear()
-                }
-                let error = self.error / distance;
+                let error = self.error * self.radius / distance;
 
                 error < *target_error
             }
@@ -53,39 +85,40 @@ impl SubMeshComponent {
         }
     }
 
-    pub fn is_monotonic(&self, submeshes: &Query<&SubMeshComponent>, mesh: &MultiResMeshComponent) {
-        if let Some(dep) = self.parents.get(0) {
-            let parent = submeshes.get(*dep).unwrap();
-            // for dep in &self.dependences {
-            //     let o = submeshes.get(*dep).unwrap();
-            //     // How can this be true?
-            //     // Do we actually compare against the 'child'? that is a well formed item, but renders in wrong level
-            //     // children should be spread between groups no?
-            //     assert_eq!(
-            //         o.center, child.center,
-            //         "All children should be in the same group"
-            //     )
-            // }
+    //FIXME:
+    // pub fn is_monotonic(&self, submeshes: &Query<&SubMeshComponent>, mesh: &MultiResMeshComponent) {
+    //     if let Some(dep) = self.parents.get(0) {
+    //         let parent = submeshes.get(*dep).unwrap();
+    //         // for dep in &self.dependences {
+    //         //     let o = submeshes.get(*dep).unwrap();
+    //         //     // How can this be true?
+    //         //     // Do we actually compare against the 'child'? that is a well formed item, but renders in wrong level
+    //         //     // children should be spread between groups no?
+    //         //     assert_eq!(
+    //         //         o.center, child.center,
+    //         //         "All children should be in the same group"
+    //         //     )
+    //         // }
 
-            //if self.center.distance(parent.center) + self.radius > parent.radius {
-            //    println!("WARNING: Child's bounds extends outside of parents");
-            //}
+    //         //if self.center.distance(parent.center) + self.radius > parent.radius {
+    //         //    println!("WARNING: Child's bounds extends outside of parents");
+    //         //}
 
-            if self.radius > parent.radius {
-                //println!("WARNING: Non monotonic const error detected - error within bounds when child's error is not, but child's abs error should be lower");
-            }
+    //         if self.radius > parent.radius {
+    //             //println!("WARNING: Non monotonic const error detected - error within bounds when child's error is not, but child's abs error should be lower");
+    //         }
 
-            if !self.error_within_bounds(mesh) && parent.error_within_bounds(mesh) {
-                //    println!("WARNING: Non monotonic error detected - error within bounds when child's error is not, but child's projected error should be lower");
-            }
+    //         if !self.error_within_bounds(mesh) && parent.error_within_bounds(mesh) {
+    //             //    println!("WARNING: Non monotonic error detected - error within bounds when child's error is not, but child's projected error should be lower");
+    //         }
 
-            parent.is_monotonic(submeshes, mesh);
-        }
-    }
+    //         parent.is_monotonic(submeshes, mesh);
+    //     }
+    // }
 
     pub fn should_draw(
         &self,
-        submeshes: &Query<&SubMeshComponent>,
+        submeshes: &Query<(Entity, &SubMeshComponent)>,
         mesh: &MultiResMeshComponent,
     ) -> bool {
         //TODO: Give each partition a unique parent. This parent should be a
@@ -100,39 +133,50 @@ impl SubMeshComponent {
         // Each demeshed item can look at a unique bound to compare agaisnt, maybe this is what we want
 
         // With no parents, assume infinite error
-        let mut parent_error_too_large = self.parents.len() == 0;
+        let mut parent_error_too_large = self.parents.len() != 0;
 
+        // For each parent, if any are within bounds, they all will be
         for &dep in &self.parents {
-            if !submeshes.get(dep).unwrap().error_within_bounds(mesh) {
-                parent_error_too_large = true;
+            if submeshes.get(dep).unwrap().1.error_within_bounds(mesh) {
+                parent_error_too_large = false;
             }
         }
 
         //TODO: This is messy - we are drawing if *we* have too high an error, but our child does not - this should be flipped,
         // and we should draw the child
 
-        self.error_within_bounds(mesh) && parent_error_too_large
+        parent_error_too_large
+            && (self.error_within_bounds(mesh)
+                || match self.co_parent {
+                    Some(co_parent) => submeshes
+                        .get(co_parent)
+                        .unwrap()
+                        .1
+                        .error_within_bounds(mesh),
+                    None => true, // Leaf nodes have no co parent, as have no children
+                })
     }
 
     pub fn r_should_draw(
         &self,
-        submeshes: &Query<&SubMeshComponent>,
+        submeshes: &Query<(Entity, &SubMeshComponent)>,
         mesh: &MultiResMeshComponent,
     ) -> bool {
         let should_draw = self.should_draw(submeshes, mesh);
 
         for g in &self.group {
-            if should_draw != submeshes.get(*g).unwrap().should_draw(submeshes, mesh) {
+            if should_draw != submeshes.get(*g).unwrap().1.should_draw(submeshes, mesh) {
                 println!("WARNING: Not all members of a group are drawing")
             }
         }
 
-        self.is_monotonic(submeshes, mesh);
+        // FIXME: probably do this on the error graph
+        //self.is_monotonic(submeshes, mesh);
 
         should_draw
     }
 }
-#[derive(Debug, PartialEq)]
+#[derive(PartialEq, Clone)]
 pub enum ErrorMode {
     PointDistance {
         camera_point: Vec3,
@@ -146,6 +190,18 @@ pub enum ErrorMode {
         layer: usize,
     },
 }
+impl Debug for ErrorMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::PointDistance { .. } => f.debug_struct("PointDistance").finish(),
+            Self::MaxError { error } => f.debug_struct("MaxError").field("error", error).finish(),
+            Self::ExactLayer { layer } => {
+                f.debug_struct("ExactLayer").field("layer", layer).finish()
+            }
+        }
+    }
+}
+
 #[derive(Component)]
 pub struct MultiResMeshComponent {
     vertex_buffer: wgpu::Buffer,
@@ -156,12 +212,13 @@ pub struct MultiResMeshComponent {
     pub error_calc: ErrorMode,
     pub focus_part: usize,
     //puffin_ui : puffin_imgui::ProfilerUi,
+    pub freeze: bool,
 }
 impl MultiResMeshComponent {
     pub fn render_pass<'a>(
         &'a self,
         renderer: &'a Renderer,
-        submeshes: &'a Query<&SubMeshComponent>,
+        submeshes: &'a Query<(Entity, &SubMeshComponent)>,
         render_pass: &mut wgpu::RenderPass<'a>,
     ) {
         // 1.
@@ -171,7 +228,7 @@ impl MultiResMeshComponent {
 
         render_pass.set_bind_group(2, self.model.bind_group(), &[]);
 
-        for submesh in submeshes.iter() {
+        for (_, submesh) in submeshes.iter() {
             if submesh.r_should_draw(submeshes, self) {
                 //let submesh = submeshes.get(*s).unwrap();
 
@@ -200,7 +257,7 @@ impl MultiResMeshComponent {
 
         render_pass.set_pipeline(renderer.render_pipeline_wire());
 
-        for submesh in submeshes.iter() {
+        for (_, submesh) in submeshes.iter() {
             if submesh.part == self.focus_part {
                 if submesh.should_draw(submeshes, self) {
                     render_pass.set_index_buffer(
@@ -213,6 +270,34 @@ impl MultiResMeshComponent {
                 }
             }
         }
+    }
+
+    pub fn submesh_error_graph(
+        &self,
+        submeshes: &Query<(Entity, &SubMeshComponent)>,
+    ) -> petgraph::prelude::Graph<f32, ()> {
+        let mut graph = petgraph::Graph::new();
+
+        let mut nodes = HashMap::new();
+
+        for (e, s) in submeshes.iter() {
+            nodes.insert(e, graph.add_node(s.co_error(submeshes, &self)));
+        }
+
+        for (e, s) in submeshes.iter() {
+            let n = nodes[&e];
+
+            for p in &s.parents {
+                let p_n = nodes[p];
+
+                graph.add_edge(n, p_n, ());
+            }
+
+            // if let Some(co_parent) = &s.co_parent {
+            //     graph.add_edge(n, nodes[co_parent], ());
+            // }
+        }
+        graph
     }
 
     pub fn load_mesh(instance: Arc<Instance>, world: &mut World) {
@@ -251,8 +336,8 @@ impl MultiResMeshComponent {
                 );
 
                 let model = BufferGroup::create_single(
-                    &[Mat4::from_translation(submesh.tight_sphere.center())
-                        * Mat4::from_scale(Vec3::ONE * submesh.tight_sphere.radius())],
+                    &[Mat4::from_translation(submesh.saturated_sphere.center())
+                        * Mat4::from_scale(Vec3::ONE * submesh.saturated_sphere.radius())],
                     wgpu::BufferUsages::UNIFORM,
                     instance.device(),
                     instance.model_bind_group_layout(),
@@ -266,12 +351,13 @@ impl MultiResMeshComponent {
                     layer: level,
                     part,
                     center: submesh.saturated_sphere.center(),
-                    error: submesh.tight_sphere.radius(),
+                    error: submesh.error,
                     model,
                     radius: submesh.saturated_sphere.radius(),
                     //    children: vec![],
                     parents: vec![],
                     group: vec![],
+                    co_parent: None,
                 };
                 let e = world.spawn(sub).id();
                 if vis {
@@ -285,7 +371,7 @@ impl MultiResMeshComponent {
 
         // Search for [dependencies], group members, and dependants
         for (level, partition_entities) in partitions_per_lod.iter().enumerate() {
-            for (i_partition, partition) in partition_entities.iter().enumerate() {
+            for (i_partition, &partition) in partition_entities.iter().enumerate() {
                 let i_partition_group = asset.lods[level].partitions[i_partition].group_index;
 
                 assert!(asset.lods[level].groups[i_partition_group]
@@ -305,14 +391,14 @@ impl MultiResMeshComponent {
                     .map(|child_partition| partitions_per_lod[level - 1][*child_partition])
                     .collect();
 
-                for child in &child_partitions {
+                for &child in &child_partitions {
                     // only the partitions with a shared boundary should be listed as dependants
 
                     world
-                        .get_mut::<SubMeshComponent>(*child)
+                        .get_mut::<SubMeshComponent>(child)
                         .unwrap()
                         .parents
-                        .push(*partition);
+                        .push(partition);
                 }
 
                 //world.get_mut::<SubMeshComponent>(*ent).unwrap().dependences = dependences;
@@ -325,6 +411,26 @@ impl MultiResMeshComponent {
                 //}
             }
 
+            // Search for Co-parents
+            for (level, partition_entities) in partitions_per_lod.iter().enumerate() {
+                for (i_partition, &partition) in partition_entities.iter().enumerate() {
+                    let parents = world
+                        .get::<SubMeshComponent>(partition)
+                        .unwrap()
+                        .parents
+                        .clone();
+
+                    if parents.len() == 2 {
+                        let mut p1 = world.get_mut::<SubMeshComponent>(parents[1]).unwrap();
+                        p1.co_parent = Some(parents[0]);
+
+                        let mut p0 = world.get_mut::<SubMeshComponent>(parents[0]).unwrap();
+                        p0.co_parent = Some(parents[1]);
+                    } else if parents.len() != 0 {
+                        panic!("Non-binary parented DAG, not currently supported");
+                    }
+                }
+            }
             // Groups TODO:
             //for (group, info) in asset.lods[layer].groups.iter().enumerate() {
             //    for part0 in &info.partitions {
@@ -377,6 +483,7 @@ impl MultiResMeshComponent {
             submeshes,
             error_calc: ErrorMode::ExactLayer { layer: 0 },
             focus_part: 0,
+            freeze: false,
         });
     }
 

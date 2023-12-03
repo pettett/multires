@@ -13,6 +13,7 @@ bytemuck.workspace = true
 glam.workspace = true
 pollster.workspace = true
 bevy_ecs.workspace = true
+petgraph.workspace = true
 common = { path = "../common" }
 common_renderer = { path = "../common_renderer" }
 egui = "0.23.0"
