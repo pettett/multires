@@ -75,21 +75,20 @@ impl Gui {
                                 .show_ui(ui, |ui| {
                                     ui.selectable_value(
                                         &mut mesh.error_calc,
-                                        ErrorMode::MaxError { error: 0.1 },
+                                        ErrorMode::MaxError,
                                         "Max Error",
                                     );
                                     ui.selectable_value(
                                         &mut mesh.error_calc,
                                         ErrorMode::PointDistance {
                                             camera_point: Vec3::ZERO,
-                                            target_error: 2.0,
                                             cam: Camera::new(1.0),
                                         },
                                         "Point distance",
                                     );
                                     ui.selectable_value(
                                         &mut mesh.error_calc,
-                                        ErrorMode::ExactLayer { layer: 0 },
+                                        ErrorMode::ExactLayer,
                                         "Exact Layer",
                                     );
                                 });
@@ -97,63 +96,36 @@ impl Gui {
                             let freeze = mesh.freeze;
 
                             match &mut mesh.error_calc {
-                                ErrorMode::PointDistance {
-                                    camera_point,
-                                    target_error,
-                                    cam,
-                                } => {
+                                ErrorMode::PointDistance { camera_point, cam } => {
                                     if !freeze {
                                         *camera_point = (*transform.get_pos()).into();
                                         *cam = camera.clone();
                                     }
-                                    // ui.add(
-                                    //     egui::widgets::Slider::new(&mut camera_point.x, -2.5..=2.5)
-                                    //         .prefix("X: "),
-                                    // );
-                                    // ui.add(
-                                    //     egui::widgets::Slider::new(&mut camera_point.y, -2.5..=2.5)
-                                    //         .prefix("Y: "),
-                                    // );
-                                    // ui.add(
-                                    //     egui::widgets::Slider::new(&mut camera_point.z, -2.5..=2.5)
-                                    //         .prefix("Z: "),
-                                    // );
+
                                     ui.add_space(10.0);
-                                    ui.add(
-                                        egui::widgets::Slider::new(target_error, 0.1..=10.0)
-                                            .prefix("Target Error: "),
-                                    );
                                 }
-                                ErrorMode::MaxError { error } => {
-                                    ui.add(
-                                        egui::widgets::Slider::new(error, 0.0..=10.0)
-                                            .prefix("MAX: "),
-                                    );
-                                }
-                                ErrorMode::ExactLayer { layer } => {
-                                    ui.add(
-                                        egui::widgets::Slider::new(layer, 0..=10).prefix("Layer: "),
-                                    );
-                                }
+                                _ => (),
                             }
+
+                            ui.add(
+                                egui::widgets::Slider::new(&mut mesh.error_target, 0.1..=10.0)
+                                    .prefix("Target Error: "),
+                            );
 
                             if ui.button("Snapshot Error Graph").clicked() {
                                 let g = mesh.submesh_error_graph(submeshes);
-                                let e_calc = mesh.error_calc.clone();
+                                let error_target = mesh.error_target;
 
                                 thread::spawn(move || {
                                     petgraph_to_svg(
                                         &g,
                                         "svg/error.svg",
-                                        &|_, (_, &e)| match e_calc {
-                                            ErrorMode::PointDistance { target_error, .. } => {
-                                                if e < target_error {
-                                                    "color=green".to_owned()
-                                                } else {
-                                                    "color=red".to_owned()
-                                                }
+                                        &|_, (_, &e)| {
+                                            if e < error_target {
+                                                "color=green".to_owned()
+                                            } else {
+                                                "color=red".to_owned()
                                             }
-                                            _ => String::new(),
                                         },
                                         common::graph::GraphSVGRender::Directed {
                                             node_label: common::graph::Label::Weight,

@@ -54,8 +54,8 @@ impl SubMeshComponent {
 
                 self.error * self.radius / distance
             }
-            ErrorMode::MaxError { error } => self.error,
-            ErrorMode::ExactLayer { layer } => self.layer as _, //FIXME:
+            ErrorMode::MaxError => self.error,
+            ErrorMode::ExactLayer => self.layer as _, //FIXME:
         }
     }
 
@@ -66,23 +66,7 @@ impl SubMeshComponent {
     // (Group != siblings, but everything in a group and every sibling must *both* be in agreement on weather to draw)
 
     pub fn error_within_bounds(&self, mesh: &MultiResMeshComponent) -> bool {
-        match &mesh.error_calc {
-            ErrorMode::PointDistance {
-                camera_point,
-                target_error,
-                cam,
-            } => {
-                // Max error we can have before mesh is not suitable to draw
-
-                let distance = self.center.distance(*camera_point).max(cam.znear());
-
-                let error = self.error * self.radius / distance;
-
-                error < *target_error
-            }
-            ErrorMode::MaxError { error } => self.error < *error,
-            ErrorMode::ExactLayer { layer } => self.layer == *layer, //FIXME:
-        }
+        self.error(mesh) < mesh.error_target
     }
 
     //FIXME:
@@ -178,26 +162,16 @@ impl SubMeshComponent {
 }
 #[derive(PartialEq, Clone)]
 pub enum ErrorMode {
-    PointDistance {
-        camera_point: Vec3,
-        target_error: f32,
-        cam: Camera,
-    },
-    MaxError {
-        error: f32,
-    },
-    ExactLayer {
-        layer: usize,
-    },
+    PointDistance { camera_point: Vec3, cam: Camera },
+    MaxError,
+    ExactLayer,
 }
 impl Debug for ErrorMode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::PointDistance { .. } => f.debug_struct("PointDistance").finish(),
-            Self::MaxError { error } => f.debug_struct("MaxError").field("error", error).finish(),
-            Self::ExactLayer { layer } => {
-                f.debug_struct("ExactLayer").field("layer", layer).finish()
-            }
+            Self::MaxError => f.debug_struct("MaxError").finish(),
+            Self::ExactLayer => f.debug_struct("ExactLayer").finish(),
         }
     }
 }
@@ -210,6 +184,7 @@ pub struct MultiResMeshComponent {
     pub submeshes: HashSet<Entity>,
     asset: MultiResMesh,
     pub error_calc: ErrorMode,
+    pub error_target: f32,
     pub focus_part: usize,
     //puffin_ui : puffin_imgui::ProfilerUi,
     pub freeze: bool,
@@ -481,7 +456,8 @@ impl MultiResMeshComponent {
             model,
             asset,
             submeshes,
-            error_calc: ErrorMode::ExactLayer { layer: 0 },
+            error_calc: ErrorMode::ExactLayer,
+            error_target: 0.5,
             focus_part: 0,
             freeze: false,
         });

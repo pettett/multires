@@ -220,7 +220,7 @@ impl PartitioningConfig {
             options[moptions_et_METIS_OPTION_UFACTOR as usize] = x as _;
         }
 
-        options[moptions_et_METIS_OPTION_DBGLVL as usize] = mdbglvl_et_METIS_DBG_INFO;
+        //options[moptions_et_METIS_OPTION_DBGLVL as usize] = mdbglvl_et_METIS_DBG_INFO;
     }
 
     pub fn partition_from_graph<V, E>(
