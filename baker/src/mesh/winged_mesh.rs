@@ -4,10 +4,6 @@ use idmap::IntegerId;
 use rayon::prelude::*;
 use std::fs;
 
-use parking_lot::{
-    MappedRwLockReadGuard, MappedRwLockWriteGuard, RwLock, RwLockReadGuard, RwLockWriteGuard,
-};
-
 use super::{
     iter::EdgeIter,
     vertex::{VertID, Vertex},
@@ -119,9 +115,9 @@ pub struct Face {
 
 #[derive(Debug)]
 pub struct WingedMesh {
-    faces: Vec<RwLock<Option<Face>>>,
-    edges: Vec<RwLock<Option<HalfEdge>>>,
-    verts: Vec<RwLock<Option<Vertex>>>,
+    faces: Vec<Option<Face>>,
+    edges: Vec<Option<HalfEdge>>,
+    verts: Vec<Option<Vertex>>,
     pub partitions: Vec<PartitionInfo>,
     pub groups: Vec<GroupInfo>,
 }
@@ -140,99 +136,88 @@ impl WingedMesh {
             }],
         }
     }
-    pub fn get_face(&self, FaceID(face): FaceID) -> MappedRwLockReadGuard<Face> {
-        RwLockReadGuard::map(self.faces[face].read(), |x| x.as_ref().unwrap())
+    pub fn get_face(&self, FaceID(face): FaceID) -> &Face {
+        self.faces[face].as_ref().unwrap()
     }
-    pub fn try_get_face_mut(&mut self, FaceID(face): FaceID) -> RwLockWriteGuard<Option<Face>> {
-        self.faces[face].write()
+    pub fn try_get_face_mut(&mut self, FaceID(face): FaceID) -> &mut Option<Face> {
+        &mut self.faces[face]
     }
-    pub fn get_face_mut(&mut self, face: FaceID) -> MappedRwLockWriteGuard<Face> {
-        RwLockWriteGuard::map(self.try_get_face_mut(face), |x| x.as_mut().unwrap())
-    }
-
-    pub fn try_get_edge(&self, EdgeID(edge): EdgeID) -> RwLockReadGuard<Option<HalfEdge>> {
-        self.edges[edge].read()
+    pub fn get_face_mut(&mut self, face: FaceID) -> &mut Face {
+        self.try_get_face_mut(face).as_mut().unwrap()
     }
 
-    pub fn get_edge(&self, edge: EdgeID) -> MappedRwLockReadGuard<HalfEdge> {
-        RwLockReadGuard::map(self.try_get_edge(edge), |x| x.as_ref().unwrap())
-    }
-    pub fn try_get_edge_mut(&self, EdgeID(edge): EdgeID) -> RwLockWriteGuard<Option<HalfEdge>> {
-        self.edges[edge].write()
-    }
-    pub fn get_edge_mut(&self, edge: EdgeID) -> MappedRwLockWriteGuard<HalfEdge> {
-        RwLockWriteGuard::map(self.try_get_edge_mut(edge), |x| x.as_mut().unwrap())
+    pub fn try_get_edge(&self, EdgeID(edge): EdgeID) -> &Option<HalfEdge> {
+        &self.edges[edge]
     }
 
-    pub fn get_edge_or_insert_none(&mut self, edge: EdgeID) -> RwLockWriteGuard<Option<HalfEdge>> {
+    pub fn get_edge(&self, edge: EdgeID) -> &HalfEdge {
+        self.try_get_edge(edge).as_ref().unwrap()
+    }
+    pub fn try_get_edge_mut(&mut self, EdgeID(edge): EdgeID) -> &mut Option<HalfEdge> {
+        &mut self.edges[edge]
+    }
+    pub fn get_edge_mut(&mut self, edge: EdgeID) -> &mut HalfEdge {
+        self.try_get_edge_mut(edge).as_mut().unwrap()
+    }
+
+    pub fn get_edge_or_insert_none(&mut self, edge: EdgeID) -> &mut Option<HalfEdge> {
         while edge.0 >= self.edges.len() {
-            self.edges.push(RwLock::new(None));
+            self.edges.push(None);
         }
 
         self.try_get_edge_mut(edge)
     }
-    pub fn get_face_or_insert_none(&mut self, face: FaceID) -> RwLockWriteGuard<Option<Face>> {
+    pub fn get_face_or_insert_none(&mut self, face: FaceID) -> &mut Option<Face> {
         while face.0 >= self.faces.len() {
-            self.faces.push(RwLock::new(None));
+            self.faces.push(None);
         }
 
         self.try_get_face_mut(face)
     }
 
-    pub fn try_get_vert(&self, VertID(vert): VertID) -> Option<RwLockReadGuard<Option<Vertex>>> {
-        self.verts.get(vert).map(|v| v.read())
+    pub fn try_get_vert(&self, VertID(vert): VertID) -> Option<&Vertex> {
+        self.verts.get(vert).map(|v| v.as_ref()).flatten()
     }
 
-    pub fn get_vert(&self, vert: VertID) -> MappedRwLockReadGuard<Vertex> {
-        RwLockReadGuard::map(self.try_get_vert(vert).unwrap(), |x| x.as_ref().unwrap())
+    pub fn get_vert(&self, vert: VertID) -> &Vertex {
+        self.try_get_vert(vert).as_ref().unwrap()
     }
-    pub fn get_vert_mut(&self, VertID(vert): VertID) -> MappedRwLockWriteGuard<Vertex> {
-        RwLockWriteGuard::map(self.verts[vert].write(), |x| x.as_mut().unwrap())
+    pub fn get_vert_mut(&mut self, VertID(vert): VertID) -> &mut Vertex {
+        self.verts[vert].as_mut().unwrap()
     }
-    pub fn get_vert_or_default(&mut self, VertID(vert): VertID) -> MappedRwLockWriteGuard<Vertex> {
+    pub fn get_vert_or_default(&mut self, VertID(vert): VertID) -> &mut Vertex {
         while vert >= self.verts.len() {
-            self.verts.push(RwLock::new(None));
+            self.verts.push(None);
         }
 
-        let mut write = self.verts[vert].write();
-
-        if write.is_none() {
-            *write = Some(Vertex::default());
+        if self.verts[vert].is_none() {
+            self.verts[vert] = Some(Vertex::default());
         }
 
-        RwLockWriteGuard::map(write, |f| f.as_mut().unwrap())
+        self.verts[vert].as_mut().unwrap()
     }
 
-    pub fn wipe_face(&self, FaceID(face): FaceID) {
-        *self.faces[face].write() = None
+    pub fn wipe_face(&mut self, FaceID(face): FaceID) {
+        self.faces[face] = None
     }
-    pub fn wipe_edge(&self, EdgeID(edge): EdgeID) {
-        *self.edges[edge].write() = None
+    pub fn wipe_edge(&mut self, EdgeID(edge): EdgeID) {
+        self.edges[edge] = None
     }
 
-    pub fn wipe_vert(&self, VertID(vert): VertID) {
-        *self.verts[vert].write() = None
+    pub fn wipe_vert(&mut self, VertID(vert): VertID) {
+        self.verts[vert] = None
     }
 
     pub fn face_count(&self) -> usize {
-        self.faces
-            .iter()
-            .filter_map(|x| x.read().as_ref().map(|_| ()))
-            .count()
+        self.faces.iter().filter_map(|x| x.as_ref()).count()
     }
 
     pub fn edge_count(&self) -> usize {
-        self.edges
-            .iter()
-            .filter_map(|x| x.read().as_ref().map(|_| ()))
-            .count()
+        self.edges.iter().filter_map(|x| x.as_ref()).count()
     }
 
     pub fn vert_count(&self) -> usize {
-        self.verts
-            .iter()
-            .filter_map(|x| x.read().as_ref().map(|_| ()))
-            .count()
+        self.verts.iter().filter_map(|x| x.as_ref()).count()
     }
 
     // pub fn iter_faces(&self) -> impl Iterator<Item = (FaceID, &Face)> {
@@ -259,93 +244,58 @@ impl WingedMesh {
     //     })
     // }
 
-    pub fn iter_verts(&self) -> impl Iterator<Item = (VertID, MappedRwLockReadGuard<Vertex>)> {
+    pub fn iter_verts(&self) -> impl Iterator<Item = (VertID, &Vertex)> {
         self.verts.iter().enumerate().filter_map(|(i, x)| {
-            let read = x.read();
-
-            if read.is_some() {
-                Some((
-                    VertID(i),
-                    RwLockReadGuard::map(read, |x| x.as_ref().unwrap()),
-                ))
+            if x.is_some() {
+                Some((VertID(i), x.as_ref().unwrap()))
             } else {
                 None
             }
         })
     }
-    pub fn iter_edges(&self) -> impl Iterator<Item = (EdgeID, MappedRwLockReadGuard<HalfEdge>)> {
+    pub fn iter_edges(&self) -> impl Iterator<Item = (EdgeID, &HalfEdge)> {
         self.edges.iter().enumerate().filter_map(|(i, x)| {
-            let read = x.read();
-
-            if read.is_some() {
-                Some((
-                    EdgeID(i),
-                    RwLockReadGuard::map(read, |x| x.as_ref().unwrap()),
-                ))
+            if x.is_some() {
+                Some((EdgeID(i), x.as_ref().unwrap()))
             } else {
                 None
             }
         })
     }
 
-    pub fn iter_faces(&self) -> impl Iterator<Item = (FaceID, MappedRwLockReadGuard<Face>)> + '_ {
+    pub fn iter_faces(&self) -> impl Iterator<Item = (FaceID, &Face)> + '_ {
         self.faces.iter().enumerate().filter_map(|(i, x)| {
-            let read = x.read();
-            if read.is_some() {
-                Some((
-                    FaceID(i),
-                    RwLockReadGuard::map(read, |x| x.as_ref().unwrap()),
-                ))
+            if x.is_some() {
+                Some((FaceID(i), x.as_ref().unwrap()))
             } else {
                 None
             }
         })
     }
 
-    pub fn iter_faces_mut(
-        &mut self,
-    ) -> impl Iterator<Item = (FaceID, MappedRwLockWriteGuard<Face>)> {
+    pub fn iter_faces_mut(&mut self) -> impl Iterator<Item = (FaceID, &mut Face)> {
         self.faces.iter_mut().enumerate().filter_map(|(i, x)| {
-            let write = x.write();
-
-            if write.is_some() {
-                Some((
-                    FaceID(i),
-                    RwLockWriteGuard::map(write, |x| x.as_mut().unwrap()),
-                ))
+            if x.is_some() {
+                Some((FaceID(i), x.as_mut().unwrap()))
             } else {
                 None
             }
         })
     }
 
-    pub fn iter_edges_mut(
-        &mut self,
-    ) -> impl Iterator<Item = (EdgeID, MappedRwLockWriteGuard<HalfEdge>)> {
+    pub fn iter_edges_mut(&mut self) -> impl Iterator<Item = (EdgeID, &mut HalfEdge)> {
         self.edges.iter_mut().enumerate().filter_map(|(i, x)| {
-            let write = x.write();
-
-            if write.is_some() {
-                Some((
-                    EdgeID(i),
-                    RwLockWriteGuard::map(write, |x| x.as_mut().unwrap()),
-                ))
+            if x.is_some() {
+                Some((EdgeID(i), x.as_mut().unwrap()))
             } else {
                 None
             }
         })
     }
-    pub fn iter_verts_mut(
-        &mut self,
-    ) -> impl Iterator<Item = (VertID, MappedRwLockWriteGuard<Vertex>)> {
+    pub fn iter_verts_mut(&mut self) -> impl Iterator<Item = (VertID, &mut Vertex)> {
         self.verts.iter_mut().enumerate().filter_map(|(i, x)| {
-            let write = x.write();
-
-            if write.is_some() {
-                Some((
-                    VertID(i),
-                    RwLockWriteGuard::map(write, |x| x.as_mut().unwrap()),
-                ))
+            if x.is_some() {
+                Some((VertID(i), x.as_mut().unwrap()))
             } else {
                 None
             }
@@ -399,15 +349,12 @@ impl WingedMesh {
         self.try_get_vert(a)
             .as_ref()
             .map(|v| {
-                v.as_ref().map(|v| {
-                    v.outgoing_edges()
-                        .iter()
-                        .filter(|&&p| self.get_edge(self.get_edge(p).edge_left_cw).vert_origin == b)
-                        .next()
-                        .copied()
-                })
+                v.outgoing_edges()
+                    .iter()
+                    .filter(|&&p| self.get_edge(self.get_edge(p).edge_left_cw).vert_origin == b)
+                    .next()
+                    .copied()
             })
-            .flatten()
             .flatten()
     }
 
@@ -466,7 +413,7 @@ impl WingedMesh {
     /// - No edges have been moved
     ///
     /// This function should only be called as part of an edge collapse, as leaves mesh partially invalid.
-    fn collapse_tri(&self, eid: EdgeID) {
+    fn collapse_tri(&mut self, eid: EdgeID) {
         let Some(edge) = self.try_get_edge(eid).clone() else {
             panic!("Attempted to collapse triangle over edge that does not exist.");
         };
@@ -519,7 +466,7 @@ impl WingedMesh {
     ///   \	| /
     /// 	B
     ///
-    pub fn collapse_edge(&self, eid: EdgeID) {
+    pub fn collapse_edge(&mut self, eid: EdgeID) {
         //    println!("Collapsing edge {eid:?}");
 
         //self.assert_valid();
@@ -598,18 +545,14 @@ impl WingedMesh {
     pub fn get_partition(&self) -> Vec<usize> {
         self.faces
             .iter()
-            .filter_map(|f| f.read().as_ref().map(|f| f.part))
+            .filter_map(|f| f.as_ref().map(|f| f.part))
             .collect()
     }
 
     pub fn get_group(&self) -> Vec<usize> {
         self.faces
             .iter()
-            .filter_map(|f| {
-                f.read()
-                    .as_ref()
-                    .map(|f| self.partitions[f.part].group_index)
-            })
+            .filter_map(|f| f.as_ref().map(|f| self.partitions[f.part].group_index))
             .collect()
     }
 
@@ -623,7 +566,7 @@ impl WingedMesh {
     }
     pub fn age(&mut self) {
         self.edges.iter_mut().for_each(|e| {
-            if let Some(e) = e.write().as_mut() {
+            if let Some(e) = e.as_mut() {
                 e.age += 1;
             }
         });
@@ -632,7 +575,7 @@ impl WingedMesh {
         self.edges
             .iter()
             .filter_map(|e| {
-                if let Some(e) = e.read().as_ref() {
+                if let Some(e) = e.as_ref() {
                     Some(e.age)
                 } else {
                     None
@@ -645,7 +588,7 @@ impl WingedMesh {
         self.edges
             .iter()
             .filter_map(|e| {
-                if let Some(e) = e.read().as_ref() {
+                if let Some(e) = e.as_ref() {
                     Some(e.age)
                 } else {
                     None
@@ -763,7 +706,7 @@ pub mod test {
         }
         /// Find the inner boundary of a set of faces. Quite simple - record all edges we have seen, and any twins for those.
         /// Inner boundary as will not include edges from an edge of the mesh, as these have no twins.
-        pub fn face_boundary(&self, faces: &Vec<Face>) -> HashSet<EdgeID> {
+        pub fn face_boundary(&self, faces: &Vec<&Face>) -> HashSet<EdgeID> {
             let mut unseen_edges = HashSet::<EdgeID>::with_capacity(faces.len() * 3);
 
             for face in faces {
@@ -836,7 +779,7 @@ pub mod test {
             let faces = mesh
                 .faces
                 .iter()
-                .filter_map(|e| e.read().clone())
+                .filter_map(|e| e.as_ref())
                 .filter(|f| pi == f.part)
                 .collect();
 
@@ -968,7 +911,7 @@ pub mod test {
         let mut avg_outgoing = 0.0;
         let mut avg_incoming = 0.0;
 
-        for (outc, inc) in mesh.verts.iter().filter_map(|v| match v.read().as_ref() {
+        for (outc, inc) in mesh.verts.iter().filter_map(|v| match v.as_ref() {
             Some(v) => Some((v.outgoing_edges().len(), v.incoming_edges().len())),
             None => None,
         }) {

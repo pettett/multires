@@ -72,10 +72,7 @@ impl VertID {
     /// Does this vertex have a complete fan of triangles surrounding it?
     pub fn is_local_manifold(self, mesh: &WingedMesh) -> bool {
         let v = mesh.try_get_vert(self);
-        let Some(vert) = v.as_ref() else {
-            return false;
-        };
-        let Some(vert) = vert.as_ref() else {
+        let Some(vert) = v else {
             return false;
         };
 
@@ -115,11 +112,7 @@ impl VertID {
     }
 
     pub fn is_group_embedded(self, mesh: &WingedMesh) -> bool {
-        let Some(s) = mesh.try_get_vert(self) else {
-            return false;
-        };
-
-        let Some(vert) = s.as_ref() else {
+        let Some(vert) = mesh.try_get_vert(self) else {
             return false;
         };
 
