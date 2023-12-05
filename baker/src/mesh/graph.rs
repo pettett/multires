@@ -135,8 +135,15 @@ pub mod test {
     ) {
         let n0 = petgraph::graph::node_index(0);
         let mut dfs_space = petgraph::algo::DfsSpace::default();
+
+        let bar = indicatif::ProgressBar::new(graph.node_count() as _);
+
         for i in graph.node_indices() {
+            bar.inc(1);
+
             if !petgraph::algo::has_path_connecting(&graph, n0, i, Some(&mut dfs_space)) {
+                println!("Graph is not contiguous, outputting error...");
+
                 graph::petgraph_to_svg(
                     graph,
                     ERROR_SVG_OUT,
@@ -154,6 +161,8 @@ pub mod test {
                 );
             }
         }
+
+        bar.finish_and_clear();
     }
     #[test]
     pub fn generate_face_graph() -> Result<(), Box<dyn error::Error>> {

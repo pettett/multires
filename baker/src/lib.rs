@@ -97,7 +97,7 @@ pub fn group_and_partition_full_res(mut working_mesh: WingedMesh, verts: &[Vec4]
 pub fn group_and_partition_and_simplify(mut mesh: WingedMesh, verts: &[Vec4], name: String) {
     let config = &metis::PartitioningConfig {
         method: metis::PartitioningMethod::MultilevelKWay,
-        force_contiguous_partitions: true,
+        force_contiguous_partitions: false,
         minimize_subgraph_degree: Some(true),
         ..Default::default()
     };
@@ -105,7 +105,7 @@ pub fn group_and_partition_and_simplify(mut mesh: WingedMesh, verts: &[Vec4], na
     let mut quadrics = mesh.create_quadrics(verts);
 
     // Apply primary partition, that will define the lowest level clusterings
-    mesh.partition_full_mesh(config, mesh.faces.len().div_ceil(60) as u32)
+    mesh.partition_full_mesh(config, mesh.faces.len().div_ceil(60) as _)
         .unwrap();
 
     mesh.group(config, &verts).unwrap();
@@ -406,3 +406,21 @@ pub fn generate_submeshes(mesh: &WingedMesh, verts: &[Vec4]) -> Vec<SubMesh> {
 
 //     mesh
 // }
+
+#[cfg(test)]
+mod test {
+    use crate::mesh::graph::test::assert_contiguous_graph;
+
+    use super::*;
+
+    #[test]
+    fn test_contiguous_meshes() {
+        println!("Loading from gltf!");
+        let (mesh, verts) = WingedMesh::from_gltf("../../assets/dragon_1m.glb");
+
+        let mesh_dual = mesh.generate_face_graph();
+
+        println!("Testing Contiguous!");
+        assert_contiguous_graph(&mesh_dual);
+    }
+}

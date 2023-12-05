@@ -214,7 +214,9 @@ impl EdgeID {
             }
         }
 
-        Ok(Some(Error(cmp::Reverse( q.quadric_error(verts[orig.0].into())))))
+        Ok(Some(Error(cmp::Reverse(
+            q.quadric_error(verts[orig.0].into()),
+        ))))
     }
 }
 
@@ -248,19 +250,17 @@ impl WingedMesh {
             };
             queue_count
         ];
-		#[cfg(feature = "progress")]
+        #[cfg(feature = "progress")]
         let bar = indicatif::ProgressBar::new(self.edges.len() as _);
 
         for (&eid, edge) in self.edges.iter() {
-			#[cfg(feature = "progress")]
+            #[cfg(feature = "progress")]
             bar.inc(1);
             if let Some(error) = eid.edge_collapse_error(&self, verts, &quadrics).unwrap() {
-                pq[queue_lookup(edge.face, self)]
-                    .queue
-                    .push(eid, error);
+                pq[queue_lookup(edge.face, self)].queue.push(eid, error);
             }
         }
-		#[cfg(feature = "progress")]
+        #[cfg(feature = "progress")]
         bar.finish_and_clear();
 
         pq
@@ -274,10 +274,10 @@ impl WingedMesh {
         collapse_reqs: &[usize],
         queue_lookup: impl Fn(FaceID, &WingedMesh) -> usize,
     ) -> Result<f64> {
-        let mut collapse_queue =
+        let mut collapse_queues =
             self.initialise_collapse_queues(verts, quadrics, collapse_reqs.len(), &queue_lookup);
 
-        assert_eq!(collapse_queue.len(), collapse_reqs.len());
+        assert_eq!(collapse_queues.len(), collapse_reqs.len());
         assert_eq!(verts.len(), quadrics.len());
 
         // Priority queue with every vertex and their errors.
@@ -286,19 +286,16 @@ impl WingedMesh {
         // let tris = self.face_count();
         // // Need to remove half the triangles - each reduction removes 2
         // let required_reductions = (tris / 4);
-		#[cfg(feature = "progress")]
-        let bar = indicatif::ProgressBar::new(collapse_reqs.iter().sum::<usize>() as _);
         #[cfg(feature = "progress")]
-		bar.set_style(
-            ProgressStyle::with_template("(Error:{msg}) {wide_bar} {pos}/{len} ({per_sec})")
-                .unwrap(),
-        );
+        let bar = indicatif::ProgressBar::new(collapse_queues.len() as _);
+        #[cfg(feature = "progress")]
+        bar.set_style(ProgressStyle::with_template("{wide_bar} {pos}/{len} ({per_sec})").unwrap());
 
-        for qi in 0..collapse_queue.len() {
+        for qi in 0..collapse_queues.len() {
             #[cfg(test)]
             {
                 self.assert_valid();
-                for (&q, _e) in collapse_queue[qi].queue.iter() {
+                for (&q, _e) in collapse_queues[qi].queue.iter() {
                     assert!(
                         self.edges.contains_key(q),
                         "Invalid edge in collapse queue {}",
@@ -307,22 +304,21 @@ impl WingedMesh {
                     self.assert_edge_valid(q, "Invalid edge in collapse queue ");
                 }
             }
+            #[cfg(feature = "progress")]
+            bar.inc(1);
+            //#[cfg(feature = "progress")]
+            //bar.set_message(format!("{err:.3e}"));
 
             for _ in 0..collapse_reqs[qi] {
-                let (eid, Error(cmp::Reverse(err))) = match collapse_queue[qi].queue.pop() {
+                let (eid, Error(cmp::Reverse(err))) = match collapse_queues[qi].queue.pop() {
                     Some(err) => err,
                     None => {
                         // FIXME: how to handle early exits
-						#[cfg(feature = "progress")]
+                        #[cfg(feature = "progress")]
                         bar.println("Exiting early from demeshing");
                         break;
                     }
                 };
-
-				#[cfg(feature = "progress")]
-                bar.inc(1);
-				#[cfg(feature = "progress")]
-                bar.set_message(format!("{err:.3e}"));
 
                 new_error += err;
 
@@ -333,7 +329,7 @@ impl WingedMesh {
                 #[cfg(not(test))]
                 {
                     if !self.verts.contains_key(orig) || !self.verts.contains_key(dest) {
-						#[cfg(feature = "progress")]
+                        #[cfg(feature = "progress")]
                         bar.println("Warning - drawn 'valid' edge with no orig or dest");
                         continue;
                     }
@@ -360,16 +356,14 @@ impl WingedMesh {
                         let edge_queue = queue_lookup(self.edges[eid].face, &self);
 
                         if let Some(error) = eid.edge_collapse_error(&self, verts, &quadrics)? {
-                            collapse_queue[edge_queue]
-                                .queue
-                                .push(eid, error);
+                            collapse_queues[edge_queue].queue.push(eid, error);
                             continue;
                         }
                     }
 
                     // First check in our own queue, then check in all the others if we cannot find it
-                    if collapse_queue[qi].queue.remove(&eid).is_none() {
-                        for q in &mut collapse_queue {
+                    if collapse_queues[qi].queue.remove(&eid).is_none() {
+                        for q in &mut collapse_queues {
                             if q.queue.remove(&eid).is_some() {
                                 break;
                             }
@@ -378,7 +372,7 @@ impl WingedMesh {
                 }
             }
         }
-		#[cfg(feature = "progress")]
+        #[cfg(feature = "progress")]
         bar.finish();
         Ok(new_error)
     }

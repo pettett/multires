@@ -1,8 +1,9 @@
 use glam::Vec4Swizzles;
 
-use crate::mesh::winged_mesh;
+#[cfg(test)]
+use crate::mesh::graph::test::assert_contiguous_graph;
 
-use super::winged_mesh::{FaceID, WingedMesh};
+use super::winged_mesh::WingedMesh;
 
 impl WingedMesh {
     pub fn partition_full_mesh(
@@ -12,7 +13,16 @@ impl WingedMesh {
     ) -> Result<(), metis::PartitioningError> {
         println!("Partitioning into {partitions} partitions");
 
-        let part = config.partition_from_graph(partitions, &self.generate_face_graph())?;
+        let mesh_dual = self.generate_face_graph();
+
+        #[cfg(test)]
+        {
+            if config.force_contiguous_partitions {
+                assert_contiguous_graph(&mesh_dual);
+            }
+        }
+
+        let part = config.partition_from_graph(partitions, &mesh_dual)?;
 
         assert_eq!(part.len(), self.faces.len());
 
