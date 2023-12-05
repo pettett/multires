@@ -3,9 +3,8 @@ use std::cmp;
 use glam::{Vec4, Vec4Swizzles};
 #[cfg(feature = "progress")]
 use indicatif::{ParallelProgressIterator, ProgressStyle};
-use rayon::iter::{
-    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator,
-};
+use parking_lot::RwLock;
+use rayon::prelude::*;
 
 use super::{
     vertex::{VertID, Vertex},
@@ -158,7 +157,7 @@ impl EdgeID {
         self,
         mesh: &WingedMesh,
         verts: &[glam::Vec4],
-        quadric_errors: &[Quadric],
+        quadric_errors: &[RwLock<Quadric>],
     ) -> Result<Option<Error>> {
         let (orig, dest) = self.orig_dest(mesh)?;
 
@@ -173,7 +172,7 @@ impl EdgeID {
             return Ok(None);
         }
 
-        let q = Quadric(quadric_errors[orig.0].0 + quadric_errors[dest.0].0);
+        let q = Quadric(quadric_errors[orig.0].read().0 + quadric_errors[dest.0].read().0);
         // Collapsing this edge would move the origin to the destination, so we find the error of the origin at the merged point.
 
         // Test normals of triangles before and after the swap
@@ -220,7 +219,7 @@ impl EdgeID {
 }
 
 impl WingedMesh {
-    pub fn create_quadrics(&self, verts: &[glam::Vec4]) -> Vec<Quadric> {
+    pub fn create_quadrics(&self, verts: &[glam::Vec4]) -> Vec<RwLock<Quadric>> {
         let mut quadrics = Vec::with_capacity(verts.len());
         //The combination of this and the next step is completely safe, as we initialise everything.
         unsafe {
@@ -230,7 +229,7 @@ impl WingedMesh {
         quadrics
             .par_iter_mut()
             .enumerate()
-            .for_each(|(i, q)| *q = VertID(i).generate_error_matrix(&self, verts));
+            .for_each(|(i, q)| *q = RwLock::new(VertID(i).generate_error_matrix(&self, verts)));
 
         quadrics
     }
@@ -238,27 +237,33 @@ impl WingedMesh {
     pub fn initialise_collapse_queues(
         &self,
         verts: &[glam::Vec4],
-        quadrics: &[Quadric],
+        quadrics: &[RwLock<Quadric>],
         queue_count: usize,
         queue_lookup: impl Fn(FaceID, &WingedMesh) -> usize,
-    ) -> Vec<CollapseQueue> {
-        println!("Generating Collapse Queue...");
-        let mut pq = vec![
-            CollapseQueue {
+    ) -> Vec<RwLock<CollapseQueue>> {
+        println!("Generating Collapse Queues...");
+        let mut pq = Vec::with_capacity(queue_count);
+
+        for _ in 0..queue_count {
+            pq.push(RwLock::new(CollapseQueue {
                 queue: priority_queue::PriorityQueue::with_capacity(
-                    self.edge_count() / queue_count
+                    self.edge_count() / queue_count,
                 ),
-            };
-            queue_count
-        ];
+            }))
+        }
+
         #[cfg(feature = "progress")]
         let bar = indicatif::ProgressBar::new(self.edge_count() as _);
 
         for (eid, edge) in self.iter_edges() {
             #[cfg(feature = "progress")]
             bar.inc(1);
+
             if let Some(error) = eid.edge_collapse_error(&self, verts, &quadrics).unwrap() {
-                pq[queue_lookup(edge.face, self)].queue.push(eid, error);
+                pq[queue_lookup(edge.face, self)]
+                    .get_mut()
+                    .queue
+                    .push(eid, error);
             }
         }
         #[cfg(feature = "progress")]
@@ -271,11 +276,11 @@ impl WingedMesh {
     pub fn reduce(
         &mut self,
         verts: &[glam::Vec4],
-        quadrics: &mut [Quadric],
+        quadrics: &mut [RwLock<Quadric>],
         collapse_requirements: &[usize],
-        queue_lookup: impl Fn(FaceID, &WingedMesh) -> usize,
+        queue_lookup: impl Fn(FaceID, &WingedMesh) -> usize + std::marker::Sync,
     ) -> Result<f64> {
-        let mut collapse_queues = self.initialise_collapse_queues(
+        let collapse_queues = self.initialise_collapse_queues(
             verts,
             quadrics,
             collapse_requirements.len(),
@@ -287,7 +292,7 @@ impl WingedMesh {
 
         // Priority queue with every vertex and their errors.
 
-        let mut new_error = 0.0;
+        let mut new_error = RwLock::new(0.0);
         // let tris = self.face_count();
         // // Need to remove half the triangles - each reduction removes 2
         // let required_reductions = (tris / 4);
@@ -296,90 +301,98 @@ impl WingedMesh {
         #[cfg(feature = "progress")]
         bar.set_style(ProgressStyle::with_template("{wide_bar} {pos}/{len} ({per_sec})").unwrap());
 
-        for qi in 0..collapse_queues.len() {
-            #[cfg(test)]
-            {
-                self.assert_valid();
-                for (&q, _e) in collapse_queues[qi].queue.iter() {
-                    assert!(
-                        self.try_get_edge(q).is_some(),
-                        "Invalid edge in collapse queue {}",
-                        qi
-                    );
-                    self.assert_edge_valid(q, "Invalid edge in collapse queue ");
-                }
-            }
-            #[cfg(feature = "progress")]
-            bar.inc(1);
-            //#[cfg(feature = "progress")]
-            //bar.set_message(format!("{err:.3e}"));
-
-            for _ in 0..collapse_requirements[qi] {
-                let (eid, Error(cmp::Reverse(err))) = match collapse_queues[qi].queue.pop() {
-                    Some(err) => err,
-                    None => {
-                        // FIXME: how to handle early exits
-                        #[cfg(feature = "progress")]
-                        bar.println("Exiting early from demeshing");
-                        break;
-                    }
-                };
-
-                new_error += err;
-
-                // Collapse edge, and update quadrics (update before collapsing, as vertex becomes invalid)
-
-                let (orig, dest) = eid.orig_dest(&self)?;
-
-                #[cfg(not(test))]
-                {
-                    if self.try_get_vert(orig).is_none() || self.try_get_vert(dest).is_none() {
-                        #[cfg(feature = "progress")]
-                        bar.println("Warning - drawn 'valid' edge with no orig or dest");
-                        continue;
-                    }
-                }
-
+        collapse_requirements
+            .par_iter()
+            .enumerate()
+            .for_each(|(qi, &requirement)| {
                 #[cfg(test)]
                 {
-                    assert!(orig.is_group_embedded(&self));
+                    self.assert_valid();
+                    for (&q, _e) in collapse_queues[qi].read().queue.iter() {
+                        assert!(
+                            self.try_get_edge(q).is_some(),
+                            "Invalid edge in collapse queue {}",
+                            qi
+                        );
+                        self.assert_edge_valid(q, "Invalid edge in collapse queue ");
+                    }
                 }
+                #[cfg(feature = "progress")]
+                bar.inc(1);
+                //#[cfg(feature = "progress")]
+                //bar.set_message(format!("{err:.3e}"));
 
-                quadrics[dest.0].0 += quadrics[orig.0].0;
+                for _ in 0..requirement {
+                    let (eid, Error(cmp::Reverse(err))) =
+                        match collapse_queues[qi].write().queue.pop() {
+                            Some(err) => err,
+                            None => {
+                                // FIXME: how to handle early exits
+                                #[cfg(feature = "progress")]
+                                bar.println("Exiting early from demeshing");
+                                break;
+                            }
+                        };
 
-                //TODO: When we collapse an edge, recalculate any effected edges.
+                    *new_error.write() += err;
 
-                let mut effected_edges: Vec<_> = self.get_vert(orig).outgoing_edges().to_vec();
-                effected_edges.extend(self.get_vert(dest).outgoing_edges());
-                effected_edges.extend(self.get_vert(orig).incoming_edges());
-                effected_edges.extend(self.get_vert(dest).incoming_edges());
+                    // Collapse edge, and update quadrics (update before collapsing, as vertex becomes invalid)
 
-                self.collapse_edge(eid);
+                    let (orig, dest) = eid.orig_dest(&self).unwrap();
 
-                for eid in effected_edges {
-                    if let Some(edge) = self.try_get_edge(eid) {
-                        let edge_queue = queue_lookup(edge.face, &self);
-
-                        if let Some(error) = eid.edge_collapse_error(&self, verts, &quadrics)? {
-                            collapse_queues[edge_queue].queue.push(eid, error);
+                    #[cfg(not(test))]
+                    {
+                        if self.try_get_vert(orig).is_none() || self.try_get_vert(dest).is_none() {
+                            #[cfg(feature = "progress")]
+                            bar.println("Warning - drawn 'valid' edge with no orig or dest");
                             continue;
                         }
                     }
 
-                    // First check in our own queue, then check in all the others if we cannot find it
-                    if collapse_queues[qi].queue.remove(&eid).is_none() {
-                        for q in &mut collapse_queues {
-                            if q.queue.remove(&eid).is_some() {
-                                break;
+                    #[cfg(test)]
+                    {
+                        assert!(orig.is_group_embedded(&self));
+                    }
+
+                    quadrics[dest.0].write().0 += quadrics[orig.0].read().0;
+
+                    //TODO: When we collapse an edge, recalculate any effected edges.
+
+                    let mut effected_edges: Vec<_> = self.get_vert(orig).outgoing_edges().to_vec();
+                    effected_edges.extend(self.get_vert(dest).outgoing_edges());
+                    effected_edges.extend(self.get_vert(orig).incoming_edges());
+                    effected_edges.extend(self.get_vert(dest).incoming_edges());
+
+                    self.collapse_edge(eid);
+
+                    for eid in effected_edges {
+                        if let Some(edge) = self.try_get_edge(eid).as_ref() {
+                            let edge_queue = queue_lookup(edge.face, &self);
+
+                            if let Some(error) =
+                                eid.edge_collapse_error(&self, verts, &quadrics).unwrap()
+                            {
+                                collapse_queues[edge_queue].write().queue.push(eid, error);
+                                continue;
+                            }
+                        }
+
+                        // First check in our own queue, then check in all the others if we cannot find it
+                        if collapse_queues[qi].write().queue.remove(&eid).is_none() {
+                            for q in &collapse_queues {
+                                if q.write().queue.remove(&eid).is_some() {
+                                    break;
+                                }
                             }
                         }
                     }
                 }
-            }
-        }
+            });
+
         #[cfg(feature = "progress")]
         bar.finish();
-        Ok(new_error)
+        // Get mut to save a single lock
+        Ok(*new_error.get_mut())
     }
 }
 
@@ -413,7 +426,7 @@ mod tests {
                 "Plane {i} is not normalised"
             );
 
-            for v in mesh.triangle_from_face(f) {
+            for v in mesh.triangle_from_face(&f) {
                 let v_dist = plane_distance(&plane, verts[v].into()).abs();
                 assert!(
                     v_dist < e,
@@ -449,7 +462,7 @@ mod tests {
                 }
             }
 
-            for v in mesh.triangle_from_face(f) {
+            for v in mesh.triangle_from_face(&f) {
                 let v = verts[v];
                 // v^t * K_p * v
                 let q_error = mat.quadric_error(v.into());
@@ -481,8 +494,8 @@ mod tests {
 
         let e = 0.0000000001;
 
-        for (vid, v) in mesh.iter_verts() {
-            let q = vid.generate_error_matrix(&mesh, &verts);
+        for vid in mesh.iter_verts() {
+            let q = vid.0.generate_error_matrix(&mesh, &verts);
 
             let cols = q.0.to_cols_array_2d();
             // Assert symmetry
@@ -492,7 +505,7 @@ mod tests {
                 }
             }
 
-            let v = verts[vid.0];
+            let v = verts[vid.0 .0];
             // v^t * K_p * v
             let q_error = q.quadric_error(v.into());
             assert!(

@@ -71,9 +71,14 @@ impl Vertex {
 impl VertID {
     /// Does this vertex have a complete fan of triangles surrounding it?
     pub fn is_local_manifold(self, mesh: &WingedMesh) -> bool {
-        let Some(vert) = mesh.try_get_vert(self) else {
+        let v = mesh.try_get_vert(self);
+        let Some(vert) = v.as_ref() else {
             return false;
         };
+        let Some(vert) = vert.as_ref() else {
+            return false;
+        };
+
         let eid_first = vert.outgoing_edges()[0];
 
         let mut eid = eid_first;
@@ -110,7 +115,15 @@ impl VertID {
     }
 
     pub fn is_group_embedded(self, mesh: &WingedMesh) -> bool {
-        let outgoings = &mesh.get_vert(self).outgoing_edges;
+        let Some(s) = mesh.try_get_vert(self) else {
+            return false;
+        };
+
+        let Some(vert) = s.as_ref() else {
+            return false;
+        };
+
+        let outgoings = &vert.outgoing_edges;
         let part =
             mesh.partitions[mesh.get_face(mesh.get_edge(outgoings[0]).face).part].group_index;
 
@@ -121,7 +134,7 @@ impl VertID {
         }
 
         #[cfg(test)]
-        for &eid in &mesh.get_vert(self).incoming_edges {
+        for &eid in &vert.incoming_edges {
             if part != mesh.partitions[mesh.get_face(mesh.get_edge(eid).face).part].group_index {
                 unreachable!();
             }

@@ -27,10 +27,10 @@ impl WingedMesh {
         assert_eq!(part.len(), self.face_count());
 
         let mut max_part = 0;
-        for (fid, f) in self.iter_faces_mut() {
+        for (fid, mut face) in self.iter_faces_mut() {
             // Some faces will have already been removed
-            f.part = part[fid.0] as usize;
-            max_part = max_part.max(f.part)
+            face.part = part[fid.0] as usize;
+            max_part = max_part.max(face.part)
         }
 
         self.partitions = vec![
@@ -166,6 +166,11 @@ impl WingedMesh {
 
         for (i_group, graph) in graphs.iter().enumerate() {
             // TODO: fine tune so we get 64/126 meshlets
+
+            if graph.node_count() == 0 {
+                println!("WARNING: Group {i_group} face graph has no nodes!");
+                continue;
+            }
 
             let parts = if let Some(parts_per_group) = parts_per_group {
                 parts_per_group

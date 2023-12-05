@@ -259,7 +259,7 @@ pub fn grab_indicies(mesh: &WingedMesh) -> Vec<u32> {
     let mut indices = Vec::with_capacity(mesh.face_count() * 3);
 
     for (fid, f) in mesh.iter_faces() {
-        let [a, b, c] = mesh.triangle_from_face(f);
+        let [a, b, c] = mesh.triangle_from_face(&f);
         indices.push(a as _);
         indices.push(b as _);
         indices.push(c as _);
@@ -282,7 +282,7 @@ pub fn generate_meshlets(mesh: &WingedMesh) -> Vec<Meshlet> {
         .collect();
 
     for (fid, face) in mesh.iter_faces() {
-        let verts = mesh.triangle_from_face(face);
+        let verts = mesh.triangle_from_face(&face);
 
         let m = meshlets.get_mut(face.part as usize).unwrap();
 
@@ -341,7 +341,7 @@ pub fn generate_submeshes(mesh: &WingedMesh, verts: &[Vec4]) -> Vec<SubMesh> {
         .collect();
 
     for (fid, face) in mesh.iter_faces() {
-        let verts = mesh.triangle_from_face(face);
+        let verts = mesh.triangle_from_face(&face);
 
         let m = submeshes.get_mut(face.part as usize).unwrap();
 

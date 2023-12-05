@@ -324,7 +324,7 @@ impl PartitioningConfig {
         let o = options.clone();
         self.apply(&mut options);
 
-        println!("{:?} \n {:?}", o, options);
+        //println!("{:?} \n {:?}", o, options);
 
         let status = if self.method == PartitioningMethod::MultilevelKWay {
             unsafe {
