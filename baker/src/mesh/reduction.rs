@@ -1,4 +1,4 @@
-use std::cmp;
+use std::{cmp, collections::HashSet};
 
 use glam::{Vec4, Vec4Swizzles};
 #[cfg(feature = "progress")]
@@ -17,12 +17,24 @@ pub struct Plane(glam::Vec4);
 /// Quadric type. Internally a DMat4, kept private to ensure only valid reduction operations can effect it.
 pub struct Quadric(glam::DMat4);
 /// Similar to `Quadric`, this data is for internal use only. Reverses the ordering of a float value, such that we take min values from a priority queue.
-#[derive(PartialOrd, PartialEq, Clone, Copy)]
-pub struct Error(cmp::Reverse<f64>);
+#[derive(Clone, Copy)]
+pub struct Error(cmp::Reverse<f64>, EdgeID);
 /// Similar to `Quadric`, this data is for internal use only.
 #[derive(Clone)]
 pub struct CollapseQueue {
     queue: priority_queue::PriorityQueue<EdgeID, Error>,
+}
+
+impl PartialEq for Error {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
+    }
+}
+
+impl PartialOrd for Error {
+    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
+        self.0.partial_cmp(&other.0)
+    }
 }
 
 impl Eq for Error {}
@@ -132,15 +144,21 @@ impl VertID {
 
 impl EdgeID {
     pub fn orig_dest(self, mesh: &WingedMesh) -> Result<(VertID, VertID)> {
-        let e = mesh.get_edge(self);
+        let e = mesh.try_get_edge(self);
+
+        let Some(edge) = e.as_ref() else {
+            return Err(MeshError::InvalidEdge.into());
+        };
+
         //.get(self)
         //.ok_or(MeshError::InvalidEdge)
         //.context("Failed to lookup origin/destination")?;
-        let orig = e.vert_origin;
+        let orig = edge.vert_origin;
         let dest = mesh
-            .get_edge(e.edge_left_cw)
-            //.ok_or(MeshError::InvalidCwEdge)
-            //.context("Failed to lookup origin/destination")?
+            .try_get_edge(edge.edge_left_cw)
+            .as_ref()
+            .ok_or(MeshError::InvalidCwEdge)
+            .context("Failed to lookup origin/destination")?
             .vert_origin;
         Ok((orig, dest))
     }
@@ -212,9 +230,10 @@ impl EdgeID {
             }
         }
 
-        Ok(Some(Error(cmp::Reverse(
-            q.quadric_error(verts[orig.0].into()),
-        ))))
+        Ok(Some(Error(
+            cmp::Reverse(q.quadric_error(verts[orig.0].into())),
+            self,
+        )))
     }
 }
 
@@ -267,7 +286,7 @@ impl WingedMesh {
             }
         }
         #[cfg(feature = "progress")]
-        bar.finish_and_clear();
+        bar.finish();
 
         pq
     }
@@ -293,6 +312,7 @@ impl WingedMesh {
         // Priority queue with every vertex and their errors.
 
         let mut new_error = RwLock::new(0.0);
+        println!("Beginning Collapse...");
         // let tris = self.face_count();
         // // Need to remove half the triangles - each reduction removes 2
         // let required_reductions = (tris / 4);
@@ -301,8 +321,10 @@ impl WingedMesh {
         #[cfg(feature = "progress")]
         bar.set_style(ProgressStyle::with_template("{wide_bar} {pos}/{len} ({per_sec})").unwrap());
 
+        let mut invalid_edges = RwLock::new(HashSet::new());
+
         collapse_requirements
-            .par_iter()
+            .iter()
             .enumerate()
             .for_each(|(qi, &requirement)| {
                 #[cfg(test)]
@@ -317,28 +339,39 @@ impl WingedMesh {
                         self.assert_edge_valid(q, "Invalid edge in collapse queue ");
                     }
                 }
-                #[cfg(feature = "progress")]
-                bar.inc(1);
+
                 //#[cfg(feature = "progress")]
                 //bar.set_message(format!("{err:.3e}"));
 
-                for _ in 0..requirement {
-                    let (eid, Error(cmp::Reverse(err))) =
-                        match collapse_queues[qi].write().queue.pop() {
-                            Some(err) => err,
-                            None => {
-                                // FIXME: how to handle early exits
-                                #[cfg(feature = "progress")]
-                                bar.println("Exiting early from demeshing");
-                                break;
-                            }
+                'outer: for _ in 0..requirement {
+                    let (orig, dest, eid, err) = loop {
+                        let (_, Error(cmp::Reverse(err), eid)) =
+                            match collapse_queues[qi].write().queue.pop() {
+                                Some(err) => err,
+                                None => {
+                                    // FIXME: how to handle early exits
+                                    #[cfg(feature = "progress")]
+                                    bar.println("Exiting early from de-meshing");
+                                    break 'outer;
+                                }
+                            };
+
+                        if invalid_edges.read().contains(&eid) {
+                            continue;
+                        }
+
+                        let Ok((orig, dest)) = eid.orig_dest(&self) else {
+                            continue;
                         };
+
+                        assert_ne!(orig, dest);
+
+                        break (orig, dest, eid, err);
+                    };
 
                     *new_error.write() += err;
 
                     // Collapse edge, and update quadrics (update before collapsing, as vertex becomes invalid)
-
-                    let (orig, dest) = eid.orig_dest(&self).unwrap();
 
                     #[cfg(not(test))]
                     {
@@ -365,6 +398,8 @@ impl WingedMesh {
 
                     self.collapse_edge(eid);
 
+                    let mut invalid_edges_write = invalid_edges.write();
+
                     for eid in effected_edges {
                         if let Some(edge) = self.try_get_edge(eid).as_ref() {
                             let edge_queue = queue_lookup(edge.face, &self);
@@ -378,15 +413,20 @@ impl WingedMesh {
                         }
 
                         // First check in our own queue, then check in all the others if we cannot find it
-                        if collapse_queues[qi].write().queue.remove(&eid).is_none() {
-                            for q in &collapse_queues {
-                                if q.write().queue.remove(&eid).is_some() {
-                                    break;
-                                }
-                            }
-                        }
+                        invalid_edges_write.insert(eid);
+
+                        //if collapse_queues[qi].write().queue.remove(&eid).is_none() {
+                        //    for q in &collapse_queues {
+                        //        if q.write().queue.remove(&eid).is_some() {
+                        //            break;
+                        //        }
+                        //    }
+                        //}
                     }
                 }
+
+                #[cfg(feature = "progress")]
+                bar.inc(1);
             });
 
         #[cfg(feature = "progress")]

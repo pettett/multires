@@ -359,13 +359,11 @@ impl WingedMesh {
     }
 
     pub fn triangle_from_face(&self, face: &Face) -> [usize; 3] {
-        let verts: Vec<usize> = self
-            .iter_edge_loop(face.edge)
-            .map(|e| self.get_edge(e).vert_origin.into())
-            .collect();
+        let e1 = self.get_edge(face.edge);
+        let e0 = self.get_edge(e1.edge_left_ccw);
+        let e2 = self.get_edge(e1.edge_left_cw);
 
-        assert_eq!(verts.len(), 3);
-        [verts[0], verts[1], verts[2]]
+        [e0.vert_origin.0, e1.vert_origin.0, e2.vert_origin.0]
     }
 
     pub fn from_gltf(path: impl AsRef<std::path::Path>) -> (Self, Box<[Vec4]>) {
@@ -469,22 +467,24 @@ impl WingedMesh {
     ///
     /// This function should only be called as part of an edge collapse, as leaves mesh partially invalid.
     fn collapse_tri(&self, eid: EdgeID) {
-        assert!(self.try_get_edge(eid).is_some());
+        let Some(edge) = self.try_get_edge(eid).clone() else {
+            panic!("Attempted to collapse triangle over edge that does not exist.");
+        };
 
-        let fid = self.get_edge(eid).face;
+        let fid = edge.face;
 
         #[cfg(test)]
         {
             self.assert_face_valid(fid);
         }
 
-        let tri = self.iter_edge_loop(eid).collect::<Vec<_>>();
+        let tri = [eid, edge.edge_left_ccw, edge.edge_left_cw];
 
         self.wipe_face(fid);
 
         assert_eq!(tri[0], eid);
         // we are pinching edge to nothing, so make the other two edges twins
-        let t0 = self.get_edge(eid).twin;
+        let t0 = edge.twin;
         let t1 = self.get_edge(tri[1]).twin;
         let t2 = self.get_edge(tri[2]).twin;
 
