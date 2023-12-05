@@ -30,7 +30,7 @@ pub fn group_and_partition_full_res(mut working_mesh: WingedMesh, verts: &[Vec4]
 
     // Apply primary partition, that will define the lowest level clusterings
     working_mesh
-        .partition_full_mesh(&config, working_mesh.verts.len().div_ceil(60) as _)
+        .partition_full_mesh(&config, working_mesh.vert_count().div_ceil(60) as _)
         .unwrap();
 
     working_mesh.group(&config, &verts).unwrap();
@@ -105,7 +105,7 @@ pub fn group_and_partition_and_simplify(mut mesh: WingedMesh, verts: &[Vec4], na
     let mut quadrics = mesh.create_quadrics(verts);
 
     // Apply primary partition, that will define the lowest level clusterings
-    mesh.partition_full_mesh(config, mesh.faces.len().div_ceil(60) as _)
+    mesh.partition_full_mesh(config, mesh.face_count().div_ceil(60) as _)
         .unwrap();
 
     mesh.group(config, &verts).unwrap();
@@ -124,14 +124,14 @@ pub fn group_and_partition_and_simplify(mut mesh: WingedMesh, verts: &[Vec4], na
         // We must regenerate the queue each time, as boundaries change.
 
         // Each group requires half it's triangles removed
-        let collapse_reqs: Vec<usize> = mesh.groups.iter().map(|g| g.tris / 4).collect();
+        let collapse_requirements: Vec<usize> = mesh.groups.iter().map(|g| g.tris / 4).collect();
 
-        println!("Reducing within {} groups:", collapse_reqs.len());
+        println!("Reducing within {} groups:", collapse_requirements.len());
 
         mesh.age();
 
-        let e = match mesh.reduce(verts, &mut quadrics, &collapse_reqs, |f, m| {
-            m.partitions[m.faces[f].part].group_index
+        let e = match mesh.reduce(verts, &mut quadrics, &collapse_requirements, |f, m| {
+            m.partitions[m.get_face(f).part].group_index
         }) {
             Ok(e) => e,
             Err(e) => {
@@ -258,7 +258,7 @@ pub fn apply_simplification(mut mesh: WingedMesh, verts: &[Vec4], name: String) 
 pub fn grab_indicies(mesh: &WingedMesh) -> Vec<u32> {
     let mut indices = Vec::with_capacity(mesh.face_count() * 3);
 
-    for f in mesh.faces().values() {
+    for (fid, f) in mesh.iter_faces() {
         let [a, b, c] = mesh.triangle_from_face(f);
         indices.push(a as _);
         indices.push(b as _);
@@ -281,7 +281,7 @@ pub fn generate_meshlets(mesh: &WingedMesh) -> Vec<Meshlet> {
         .map(|_| (Meshlet::default()))
         .collect();
 
-    for face in mesh.faces().values() {
+    for (fid, face) in mesh.iter_faces() {
         let verts = mesh.triangle_from_face(face);
 
         let m = meshlets.get_mut(face.part as usize).unwrap();
@@ -340,7 +340,7 @@ pub fn generate_submeshes(mesh: &WingedMesh, verts: &[Vec4]) -> Vec<SubMesh> {
         })
         .collect();
 
-    for face in mesh.faces().values() {
+    for (fid, face) in mesh.iter_faces() {
         let verts = mesh.triangle_from_face(face);
 
         let m = submeshes.get_mut(face.part as usize).unwrap();

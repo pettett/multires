@@ -24,12 +24,12 @@ impl WingedMesh {
 
         let part = config.partition_from_graph(partitions, &mesh_dual)?;
 
-        assert_eq!(part.len(), self.faces.len());
+        assert_eq!(part.len(), self.face_count());
 
         let mut max_part = 0;
-        for (i, f) in self.faces.iter_mut() {
+        for (fid, f) in self.iter_faces_mut() {
             // Some faces will have already been removed
-            f.part = part[i.0] as usize;
+            f.part = part[fid.0] as usize;
             max_part = max_part.max(f.part)
         }
 
@@ -59,7 +59,7 @@ impl WingedMesh {
         let graph = self.generate_partition_graph();
 
         // create new array of groups, and remember the old groups
-        let mut old_groups = vec![
+        let mut new_groups = vec![
             common::GroupInfo {
                 tris: 0,
                 monotonic_bound: Default::default(),
@@ -68,7 +68,7 @@ impl WingedMesh {
             group_count
         ];
 
-        std::mem::swap(&mut self.groups, &mut old_groups);
+        //std::mem::swap(&mut self.groups, &mut new_groups);
 
         // Partition -> Group
         if group_count != 1 {
@@ -86,36 +86,36 @@ impl WingedMesh {
         };
 
         for (part, info) in self.partitions.iter().enumerate() {
-            self.groups[info.group_index].partitions.push(part);
+            new_groups[info.group_index].partitions.push(part);
         }
 
-        for f in self.faces.values_mut() {
-            let f_group_info = &mut self.groups[self.partitions[f.part].group_index];
+        for (_fid, f) in self.iter_faces() {
+            let f_group_info = &mut new_groups[self.partitions[f.part].group_index];
             f_group_info.tris += 1;
             f_group_info
                 .monotonic_bound
-                .translate(verts[self.edges[f.edge].vert_origin.0].xyz());
+                .translate(verts[self.get_edge(f.edge).vert_origin.0].xyz());
         }
 
         // Take averages
-        for g in &mut self.groups {
+        for g in &mut new_groups {
             g.monotonic_bound.normalise(g.tris);
         }
 
         // Find radii of groups
-        for f in self.faces.values_mut() {
-            let f_group_info = &mut self.groups[self.partitions[f.part].group_index];
+        for (_fid, f) in self.iter_faces() {
+            let f_group_info = &mut new_groups[self.partitions[f.part].group_index];
 
             f_group_info
                 .monotonic_bound
-                .include_point(verts[self.edges[f.edge].vert_origin.0].xyz());
+                .include_point(verts[self.get_edge(f.edge).vert_origin.0].xyz());
         }
         println!(
             "Including child bounds with {} old groups",
-            old_groups.len()
+            new_groups.len()
         );
 
-        for g in &mut self.groups {
+        for g in &mut new_groups {
             // SQRT each group
             //    g.monotonic_bound.radius = g.monotonic_bound.radius.sqrt();
 
@@ -124,13 +124,15 @@ impl WingedMesh {
 
             for p in &g.partitions {
                 if let Some(child_group_index) = self.partitions[*p].child_group_index {
-                    let child_group = &old_groups[child_group_index];
+                    let child_group = &self.groups[child_group_index];
                     // combine groups radius
                     g.monotonic_bound
                         .include_sphere(&child_group.monotonic_bound);
                 }
             }
         }
+
+        self.groups = new_groups;
 
         #[cfg(test)]
         {
@@ -179,14 +181,15 @@ impl WingedMesh {
             let part = config.partition_from_graph(parts, graph)?;
 
             // Each new part needs to register its dependence on the group we were a part of before
-            let child_group =
-                self.partitions[self.faces[graph[petgraph::graph::node_index(0)]].part].group_index;
+            let child_group = self.partitions
+                [self.get_face(graph[petgraph::graph::node_index(0)]).part]
+                .group_index;
 
             assert_eq!(i_group, child_group);
 
             // Update partitions of the actual triangles
             for x in graph.node_indices() {
-                self.faces[graph[x]].part = new_partitions.len() + part[x.index()] as usize;
+                self.get_face_mut(graph[x]).part = new_partitions.len() + part[x.index()] as usize;
             }
             // If we have not been grouped yet,
             let child_group_index = if self.groups.len() == 0 {

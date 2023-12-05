@@ -88,8 +88,8 @@ impl Quadric {
 }
 impl FaceID {
     /// Generate plane from the 3 points a,b,c on this face.
-    pub fn plane(&self, mesh: &WingedMesh, verts: &[glam::Vec4]) -> Plane {
-        let [a, b, c] = mesh.triangle_from_face(&mesh.faces[self]);
+    pub fn plane(self, mesh: &WingedMesh, verts: &[glam::Vec4]) -> Plane {
+        let [a, b, c] = mesh.triangle_from_face(&mesh.get_face(self));
 
         Plane::from_three_points(verts[a].into(), verts[b].into(), verts[c].into())
     }
@@ -99,11 +99,11 @@ impl VertID {
     /// Generate error matrix Q, the sum of Kp for all planes p around this vertex.
     /// TODO: Eventually we can also add a high penality plane if this is a vertex on a boundary, but manually checking may be easier
     #[allow(non_snake_case)]
-    pub fn generate_error_matrix(&self, mesh: &WingedMesh, verts: &[glam::Vec4]) -> Quadric {
+    pub fn generate_error_matrix(self, mesh: &WingedMesh, verts: &[glam::Vec4]) -> Quadric {
         let mut Q = Quadric(glam::DMat4::ZERO);
 
-        for &e in mesh.verts[self].outgoing_edges() {
-            let f = mesh.edges[e].face;
+        for &e in mesh.get_vert(self).outgoing_edges() {
+            let f = mesh.get_edge(e).face;
 
             let plane = f.plane(mesh, verts);
 
@@ -111,7 +111,7 @@ impl VertID {
 
             Q.0 += Kp.0;
 
-            if mesh.edges[e].twin.is_none() {
+            if mesh.get_edge(e).twin.is_none() {
                 // Boundary edge, add a plane that stops us moving away from the boundary
 
                 // Edge Plane should have normal of Edge X plane
@@ -121,7 +121,7 @@ impl VertID {
 
                 let boundary_plane = Plane::from_normal_and_point(
                     boundary_norm,
-                    verts[mesh.edges[e].vert_origin.0].into(),
+                    verts[mesh.get_edge(e).vert_origin.0].into(),
                 );
                 // Multiply squared error by large factor, as changing the boundary adds a lot of visible error
                 Q.0 += boundary_plane.fundamental_error_quadric().0 * 3000.0;
@@ -132,18 +132,16 @@ impl VertID {
 }
 
 impl EdgeID {
-    pub fn orig_dest(&self, mesh: &WingedMesh) -> Result<(VertID, VertID)> {
-        let e = mesh
-            .edges
-            .get(self)
-            .ok_or(MeshError::InvalidEdge)
-            .context("Failed to lookup origin/destination")?;
+    pub fn orig_dest(self, mesh: &WingedMesh) -> Result<(VertID, VertID)> {
+        let e = mesh.get_edge(self);
+        //.get(self)
+        //.ok_or(MeshError::InvalidEdge)
+        //.context("Failed to lookup origin/destination")?;
         let orig = e.vert_origin;
         let dest = mesh
-            .edges
-            .get(e.edge_left_cw)
-            .ok_or(MeshError::InvalidCwEdge)
-            .context("Failed to lookup origin/destination")?
+            .get_edge(e.edge_left_cw)
+            //.ok_or(MeshError::InvalidCwEdge)
+            //.context("Failed to lookup origin/destination")?
             .vert_origin;
         Ok((orig, dest))
     }
@@ -180,18 +178,19 @@ impl EdgeID {
 
         // Test normals of triangles before and after the swap
         for &e in mesh
-            .verts
-            .get(orig)
-            .ok_or(MeshError::InvalidVertex)
-            .context("Failed to lookup vertex for finding plane normals")?
+            .get_vert(orig)
+            //.verts
+            //.get(orig)
+            //.ok_or(MeshError::InvalidVertex)
+            //.context("Failed to lookup vertex for finding plane normals")?
             .outgoing_edges()
         {
             if e == self {
                 continue;
             }
 
-            let f = mesh.edges[e].face;
-            let [a, b, c] = mesh.triangle_from_face(&mesh.faces[f]);
+            let f = mesh.get_edge(e).face;
+            let [a, b, c] = mesh.triangle_from_face(&mesh.get_face(f));
 
             let (v_a, v_b, v_c, new_corner) = (
                 verts[a].into(),
@@ -246,14 +245,16 @@ impl WingedMesh {
         println!("Generating Collapse Queue...");
         let mut pq = vec![
             CollapseQueue {
-                queue: priority_queue::PriorityQueue::with_capacity(self.edges.len() / queue_count),
+                queue: priority_queue::PriorityQueue::with_capacity(
+                    self.edge_count() / queue_count
+                ),
             };
             queue_count
         ];
         #[cfg(feature = "progress")]
-        let bar = indicatif::ProgressBar::new(self.edges.len() as _);
+        let bar = indicatif::ProgressBar::new(self.edge_count() as _);
 
-        for (&eid, edge) in self.edges.iter() {
+        for (eid, edge) in self.iter_edges() {
             #[cfg(feature = "progress")]
             bar.inc(1);
             if let Some(error) = eid.edge_collapse_error(&self, verts, &quadrics).unwrap() {
@@ -271,13 +272,17 @@ impl WingedMesh {
         &mut self,
         verts: &[glam::Vec4],
         quadrics: &mut [Quadric],
-        collapse_reqs: &[usize],
+        collapse_requirements: &[usize],
         queue_lookup: impl Fn(FaceID, &WingedMesh) -> usize,
     ) -> Result<f64> {
-        let mut collapse_queues =
-            self.initialise_collapse_queues(verts, quadrics, collapse_reqs.len(), &queue_lookup);
+        let mut collapse_queues = self.initialise_collapse_queues(
+            verts,
+            quadrics,
+            collapse_requirements.len(),
+            &queue_lookup,
+        );
 
-        assert_eq!(collapse_queues.len(), collapse_reqs.len());
+        assert_eq!(collapse_queues.len(), collapse_requirements.len());
         assert_eq!(verts.len(), quadrics.len());
 
         // Priority queue with every vertex and their errors.
@@ -297,7 +302,7 @@ impl WingedMesh {
                 self.assert_valid();
                 for (&q, _e) in collapse_queues[qi].queue.iter() {
                     assert!(
-                        self.edges.contains_key(q),
+                        self.try_get_edge(q).is_some(),
                         "Invalid edge in collapse queue {}",
                         qi
                     );
@@ -309,7 +314,7 @@ impl WingedMesh {
             //#[cfg(feature = "progress")]
             //bar.set_message(format!("{err:.3e}"));
 
-            for _ in 0..collapse_reqs[qi] {
+            for _ in 0..collapse_requirements[qi] {
                 let (eid, Error(cmp::Reverse(err))) = match collapse_queues[qi].queue.pop() {
                     Some(err) => err,
                     None => {
@@ -328,7 +333,7 @@ impl WingedMesh {
 
                 #[cfg(not(test))]
                 {
-                    if !self.verts.contains_key(orig) || !self.verts.contains_key(dest) {
+                    if self.try_get_vert(orig).is_none() || self.try_get_vert(dest).is_none() {
                         #[cfg(feature = "progress")]
                         bar.println("Warning - drawn 'valid' edge with no orig or dest");
                         continue;
@@ -344,16 +349,16 @@ impl WingedMesh {
 
                 //TODO: When we collapse an edge, recalculate any effected edges.
 
-                let mut effected_edges: Vec<_> = self.verts[orig].outgoing_edges().to_vec();
-                effected_edges.extend(self.verts[dest].outgoing_edges());
-                effected_edges.extend(self.verts[orig].incoming_edges());
-                effected_edges.extend(self.verts[dest].incoming_edges());
+                let mut effected_edges: Vec<_> = self.get_vert(orig).outgoing_edges().to_vec();
+                effected_edges.extend(self.get_vert(dest).outgoing_edges());
+                effected_edges.extend(self.get_vert(orig).incoming_edges());
+                effected_edges.extend(self.get_vert(dest).incoming_edges());
 
                 self.collapse_edge(eid);
 
                 for eid in effected_edges {
-                    if self.edges.contains_key(eid) {
-                        let edge_queue = queue_lookup(self.edges[eid].face, &self);
+                    if let Some(edge) = self.try_get_edge(eid) {
+                        let edge_queue = queue_lookup(edge.face, &self);
 
                         if let Some(error) = eid.edge_collapse_error(&self, verts, &quadrics)? {
                             collapse_queues[edge_queue].queue.push(eid, error);
@@ -400,7 +405,7 @@ mod tests {
         // These operations are not especially accurate, large epsilon value
         let e = 0.000001;
 
-        for (i, (&fid, f)) in mesh.faces.iter().enumerate() {
+        for (i, (fid, f)) in mesh.iter_faces().enumerate() {
             let plane = fid.plane(&mesh, &verts);
             let n = plane.normal();
             assert!(
@@ -430,7 +435,7 @@ mod tests {
 
         let random_points = [glam::Vec3A::X, glam::Vec3A::Y * 50.0];
 
-        for (i, (&fid, f)) in mesh.faces.iter().enumerate() {
+        for (i, (fid, f)) in mesh.iter_faces().enumerate() {
             let plane = fid.plane(&mesh, &verts);
 
             let mat = plane.fundamental_error_quadric();
@@ -476,7 +481,7 @@ mod tests {
 
         let e = 0.0000000001;
 
-        for (vid, v) in mesh.verts.iter() {
+        for (vid, v) in mesh.iter_verts() {
             let q = vid.generate_error_matrix(&mesh, &verts);
 
             let cols = q.0.to_cols_array_2d();

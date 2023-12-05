@@ -9,6 +9,11 @@ impl Into<usize> for VertID {
         self.0
     }
 }
+impl From<usize> for VertID {
+    fn from(value: usize) -> Self {
+        VertID(value)
+    }
+}
 impl IntegerId for VertID {
     fn from_id(id: u64) -> Self {
         VertID(id as usize)
@@ -32,11 +37,19 @@ pub struct Vertex {
 
 impl Vertex {
     pub fn remove_outgoing(&mut self, e: EdgeID) {
-        let index = self.outgoing_edges.iter().position(|&x| x == e).unwrap();
+        let index = self
+            .outgoing_edges
+            .iter()
+            .position(|&x| x == e)
+            .expect("Outgoing edges should contain edge id we are removing");
         self.outgoing_edges.swap_remove(index);
     }
     pub fn remove_incoming(&mut self, e: EdgeID) {
-        let index = self.incoming_edges.iter().position(|&x| x == e).unwrap();
+        let index = self
+            .incoming_edges
+            .iter()
+            .position(|&x| x == e)
+            .expect("Incoming edges should contain edge id we are removing");
         self.incoming_edges.swap_remove(index);
     }
     pub fn add_outgoing(&mut self, e: EdgeID) {
@@ -57,8 +70,8 @@ impl Vertex {
 
 impl VertID {
     /// Does this vertex have a complete fan of triangles surrounding it?
-    pub fn is_local_manifold(&self, mesh: &WingedMesh) -> bool {
-        let Some(vert) = mesh.verts.get(self) else {
+    pub fn is_local_manifold(self, mesh: &WingedMesh) -> bool {
+        let Some(vert) = mesh.try_get_vert(self) else {
             return false;
         };
         let eid_first = vert.outgoing_edges()[0];
@@ -69,11 +82,11 @@ impl VertID {
 
         loop {
             // attempt to move around the fan, by moving to our twin edge and going clockwise
-            let Some(twin) = mesh.edges[eid].twin else {
+            let Some(twin) = mesh.get_edge(eid).twin else {
                 return false;
             };
 
-            let e = &mesh.edges[twin];
+            let e = &mesh.get_edge(twin);
 
             // Compare against last face's partition
             // if is_group_manifold {
@@ -96,19 +109,20 @@ impl VertID {
         }
     }
 
-    pub fn is_group_embedded(&self, mesh: &WingedMesh) -> bool {
-        let outgoings = &mesh.verts[self].outgoing_edges;
-        let part = mesh.partitions[mesh.faces[mesh.edges[outgoings[0]].face].part].group_index;
+    pub fn is_group_embedded(self, mesh: &WingedMesh) -> bool {
+        let outgoings = &mesh.get_vert(self).outgoing_edges;
+        let part =
+            mesh.partitions[mesh.get_face(mesh.get_edge(outgoings[0]).face).part].group_index;
 
-        for eid in &outgoings[1..] {
-            if part != mesh.partitions[mesh.faces[mesh.edges[eid].face].part].group_index {
+        for &eid in &outgoings[1..] {
+            if part != mesh.partitions[mesh.get_face(mesh.get_edge(eid).face).part].group_index {
                 return false;
             }
         }
 
         #[cfg(test)]
-        for eid in &mesh.verts[self].incoming_edges {
-            if part != mesh.partitions[mesh.faces[mesh.edges[eid].face].part].group_index {
+        for &eid in &mesh.get_vert(self).incoming_edges {
+            if part != mesh.partitions[mesh.get_face(mesh.get_edge(eid).face).part].group_index {
                 unreachable!();
             }
         }

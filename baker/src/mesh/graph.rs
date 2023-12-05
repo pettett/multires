@@ -12,18 +12,18 @@ impl WingedMesh {
             // Estimate each partition hits roughly 3 other partitions
             self.partition_count() * 3,
         );
-        let mut ids = HashMap::with_capacity(self.faces.len());
-        for &i in self.faces.keys() {
+        let mut ids = HashMap::with_capacity(self.face_count());
+        for (fid, f) in self.iter_faces() {
             // Each node should directly correspond to a partition
-            ids.insert(i, graph.add_node(i));
+            ids.insert(fid, graph.add_node(fid));
         }
 
-        for (i, face) in self.faces().iter() {
+        for (fid, face) in self.iter_faces() {
             for e in self.iter_edge_loop(face.edge) {
-                if let Some(twin) = self.edges[e].twin {
-                    let other_face = &self.edges[twin].face;
+                if let Some(twin) = self.get_edge(e).twin {
+                    let other_face = &self.get_edge(twin).face;
 
-                    graph.update_edge(ids[i], ids[other_face], ());
+                    graph.update_edge(ids[&fid], ids[other_face], ());
                 }
             }
         }
@@ -44,27 +44,27 @@ impl WingedMesh {
         let mut faces = HashMap::new();
 
         // Give every triangle a node
-        for (i, face) in self.faces().iter() {
+        for (fid, face) in self.iter_faces() {
             let g = self.partitions[face.part].group_index;
-            let n = graphs[g].add_node(*i);
+            let n = graphs[g].add_node(fid);
 
             // indexes should correspond
             assert_eq!(n.index(), ids[g].len());
-            ids[g].push(*i);
+            ids[g].push(fid);
 
-            faces.insert(*i, n);
+            faces.insert(fid, n);
         }
         // Apply links between nodes
-        for (i, face) in self.faces().iter() {
+        for (fid, face) in self.iter_faces() {
             let g = self.partitions[face.part].group_index;
 
             for e in self.iter_edge_loop(face.edge) {
-                if let Some(twin) = self.edges[e].twin {
-                    let other_face = self.edges[twin].face;
-                    let o_g = self.partitions[self.faces[other_face].part].group_index;
+                if let Some(twin) = self.get_edge(e).twin {
+                    let other_face = self.get_edge(twin).face;
+                    let o_g = self.partitions[self.get_face(other_face).part].group_index;
 
                     if g == o_g {
-                        graphs[g].update_edge(faces[i], faces[&other_face], ());
+                        graphs[g].update_edge(faces[&fid], faces[&other_face], ());
                     }
                 }
             }
@@ -87,10 +87,10 @@ impl WingedMesh {
             assert_eq!(p, graph.add_node(()).index());
         }
 
-        for (i, face) in self.faces().iter() {
+        for (_fid, face) in self.iter_faces() {
             for e in self.iter_edge_loop(face.edge) {
-                if let Some(twin) = self.edges[e].twin {
-                    let other_face = &self.faces[self.edges[twin].face];
+                if let Some(twin) = self.get_edge(e).twin {
+                    let other_face = &self.get_face(self.get_edge(twin).face);
 
                     if face.part != other_face.part {
                         graph.update_edge(
@@ -181,7 +181,7 @@ pub mod test {
         println!(
             "Faces: {}, Verts: {}, Partitions: {}",
             mesh.face_count(),
-            mesh.verts.len(),
+            mesh.vert_count(),
             mesh.partitions.len()
         );
 
@@ -192,7 +192,7 @@ pub mod test {
             FACE_SVG_OUT,
             &|_, (n, &fid)| {
                 let p = fid.center(&mesh, &verts);
-                let part = mesh.faces[fid].part;
+                let part = mesh.get_face(fid).part;
                 format!(
                     "shape=point, color={}, pos=\"{},{}\"",
                     COLS[part % COLS.len()],
@@ -217,7 +217,7 @@ pub mod test {
             FACE_SVG_OUT_2,
             &|_, (n, &fid)| {
                 let p = fid.center(&mesh, &verts);
-                let part = mesh.faces[fid].part;
+                let part = mesh.get_face(fid).part;
                 format!(
                     "shape=point, color={}, pos=\"{},{}\"",
                     COLS[part % COLS.len()],
@@ -242,7 +242,7 @@ pub mod test {
         let mesh = TEST_MESH_PLANE_LOW;
         let (mut mesh, verts) = WingedMesh::from_gltf(mesh);
 
-        println!("Faces: {}, Verts: {}", mesh.face_count(), mesh.verts.len());
+        println!("Faces: {}, Verts: {}", mesh.face_count(), mesh.vert_count());
 
         // Apply primary partition, that will define the lowest level clusterings
         mesh.partition_within_groups(test_config, None)?;
@@ -270,7 +270,7 @@ pub mod test {
         let mesh = TEST_MESH_LOW;
         let (mut mesh, verts) = WingedMesh::from_gltf(mesh);
 
-        println!("Faces: {}, Verts: {}", mesh.face_count(), mesh.verts.len());
+        println!("Faces: {}, Verts: {}", mesh.face_count(), mesh.vert_count());
 
         // Apply primary partition, that will define the lowest level clusterings
         mesh.partition_within_groups(test_config, None)?;
