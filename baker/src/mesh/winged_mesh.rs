@@ -1,3 +1,4 @@
+use anyhow::Context;
 use common::{tri_mesh::TriMesh, BoundingSphere, GroupInfo, PartitionInfo};
 use glam::{Vec3, Vec4};
 use idmap::IntegerId;
@@ -413,10 +414,12 @@ impl WingedMesh {
     /// - No edges have been moved
     ///
     /// This function should only be called as part of an edge collapse, as leaves mesh partially invalid.
-    fn collapse_tri(&mut self, eid: EdgeID) {
-        let Some(edge) = self.try_get_edge(eid).clone() else {
-            panic!("Attempted to collapse triangle over edge that does not exist.");
-        };
+    fn collapse_tri(&mut self, eid: EdgeID) -> anyhow::Result<()> {
+        let edge = self
+            .try_get_edge(eid)
+            .clone()
+            .ok_or(MeshError::InvalidEdge)
+            .context("Attempted to collapse triangle over edge that does not exist.")?;
 
         let fid = edge.face;
 
@@ -457,6 +460,7 @@ impl WingedMesh {
 
             self.wipe_edge(e);
         }
+        Ok(())
     }
 
     /// Collapse an edge so it no longer exists, the source vertex is no longer referenced,
@@ -466,7 +470,7 @@ impl WingedMesh {
     ///   \	| /
     /// 	B
     ///
-    pub fn collapse_edge(&mut self, eid: EdgeID) {
+    pub fn collapse_edge(&mut self, eid: EdgeID) -> anyhow::Result<()> {
         //    println!("Collapsing edge {eid:?}");
 
         //self.assert_valid();
@@ -483,7 +487,8 @@ impl WingedMesh {
         let vb = edge.vert_origin;
         let va = self.get_edge(edge.edge_left_cw).vert_origin;
 
-        self.collapse_tri(eid);
+        self.collapse_tri(eid)
+            .context("Failed to collapse main triangle")?;
 
         #[cfg(test)]
         {
@@ -492,7 +497,8 @@ impl WingedMesh {
         }
 
         if let Some(e0t) = edge.twin {
-            self.collapse_tri(e0t);
+            self.collapse_tri(e0t)
+                .context("Failed to collapse twin triangle")?;
         }
 
         // Remove `vert_origin`
@@ -540,6 +546,8 @@ impl WingedMesh {
             //self.assert_valid();
         }
         //self.assert_valid();
+
+        Ok(())
     }
 
     pub fn get_partition(&self) -> Vec<usize> {

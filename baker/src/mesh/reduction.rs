@@ -1,6 +1,6 @@
 use std::{cmp, collections::HashSet};
 
-use glam::{Vec4, Vec4Swizzles};
+use glam::{vec4, Vec4, Vec4Swizzles};
 #[cfg(feature = "progress")]
 use indicatif::{ParallelProgressIterator, ProgressStyle};
 use parking_lot::RwLock;
@@ -69,9 +69,7 @@ impl Plane {
     pub fn from_normal_and_point(norm: glam::Vec3A, p: glam::Vec3A) -> Self {
         let d = -p.dot(norm);
 
-        let plane: glam::Vec4 = (norm, d).into();
-
-        Plane(plane)
+        Plane(vec4(norm.x, norm.y, norm.z, d))
     }
 
     /// The fundamental error quadric `K_p`, such that `v^T K_p v` = `sqr distance v <-> p`
@@ -263,27 +261,33 @@ impl WingedMesh {
         println!("Generating Collapse Queues...");
         let mut pq = Vec::with_capacity(queue_count);
 
+        #[cfg(feature = "progress")]
+        let bar = indicatif::ProgressBar::new(self.edge_count() as _);
+
+        let queue_t = priority_queue::PriorityQueue::with_capacity(self.edge_count() / queue_count);
         for _ in 0..queue_count {
             pq.push(RwLock::new(CollapseQueue {
-                queue: priority_queue::PriorityQueue::with_capacity(
-                    self.edge_count() / queue_count,
-                ),
-            }))
-        }
+                queue: queue_t.clone(),
+            }));
 
+            #[cfg(feature = "progress")]
+            bar.inc(1);
+        }
+        #[cfg(feature = "progress")]
+        bar.finish();
         #[cfg(feature = "progress")]
         let bar = indicatif::ProgressBar::new(self.edge_count() as _);
 
         for (eid, edge) in self.iter_edges() {
-            #[cfg(feature = "progress")]
-            bar.inc(1);
-
             if let Some(error) = eid.edge_collapse_error(&self, verts, &quadrics).unwrap() {
                 pq[queue_lookup(edge.face, self)]
                     .get_mut()
                     .queue
                     .push(eid, error);
             }
+
+            #[cfg(feature = "progress")]
+            bar.inc(1);
         }
         #[cfg(feature = "progress")]
         bar.finish();
@@ -351,7 +355,9 @@ impl WingedMesh {
                                 None => {
                                     // FIXME: how to handle early exits
                                     #[cfg(feature = "progress")]
-                                    bar.println("Exiting early from de-meshing");
+                                    bar.println(
+                                        "Out of valid edges - Exiting early from de-meshing",
+                                    );
                                     break 'outer;
                                 }
                             };
@@ -396,7 +402,13 @@ impl WingedMesh {
                     effected_edges.extend(self.get_vert(orig).incoming_edges());
                     effected_edges.extend(self.get_vert(dest).incoming_edges());
 
-                    self.collapse_edge(eid);
+                    match self.collapse_edge(eid) {
+                        Ok(()) => (),
+                        Err(e) => {
+                            println!("{e} - Exiting early from de-meshing");
+                            break 'outer;
+                        }
+                    }
 
                     let mut invalid_edges_write = invalid_edges.write();
 

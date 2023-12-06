@@ -1,6 +1,6 @@
 use core::fmt;
 use petgraph::dot;
-use std::{error, fs, path, process};
+use std::{default, error, fs, path, process};
 const OUT: &str = "C:\\Users\\maxwe\\OneDriveC\\sync\\projects\\multires";
 
 /// Generate a graph corresponding to the dual mesh of a mesh generated from triangulating a grid
@@ -22,9 +22,8 @@ const OUT: &str = "C:\\Users\\maxwe\\OneDriveC\\sync\\projects\\multires";
 /// - if i even to (i+1,j+1).
 /// - else if i odd to (i-1, j-1).
 ///
-pub fn generate_triangle_plane<const N: usize, const M: usize, E>(
-    weight: impl Fn((usize, usize), (usize, usize)) -> E,
-) -> petgraph::Graph<(), E, petgraph::Undirected> {
+pub fn generate_triangle_plane<const N: usize, const M: usize>(
+) -> petgraph::Graph<(), (), petgraph::Undirected> {
     let mut graph = petgraph::Graph::with_capacity(N * M, N * M * 3);
     // Add nodes
     let mut nodes = [[petgraph::graph::node_index(0); N]; M];
@@ -40,18 +39,18 @@ pub fn generate_triangle_plane<const N: usize, const M: usize, E>(
             let a = nodes[m][n];
 
             if n < N - 1 {
-                graph.update_edge(a, nodes[m][n + 1], weight((n, m), (n + 1, m)));
+                graph.update_edge(a, nodes[m][n + 1], ());
 
                 if m < M - 1 && n % 2 == 0 {
-                    graph.update_edge(a, nodes[m + 1][n + 1], weight((n, m), (n + 1, m + 1)));
+                    graph.update_edge(a, nodes[m + 1][n + 1], ());
                 }
             }
 
             if n > 0 {
-                graph.update_edge(a, nodes[m][n - 1], weight((n, m), (n - 1, m)));
+                graph.update_edge(a, nodes[m][n - 1], ());
 
                 if m > 0 && n % 2 == 1 {
-                    graph.update_edge(a, nodes[m - 1][n - 1], weight((n, m), (n - 1, m - 1)));
+                    graph.update_edge(a, nodes[m - 1][n - 1], ());
                 }
             }
         }
@@ -59,15 +58,16 @@ pub fn generate_triangle_plane<const N: usize, const M: usize, E>(
 
     graph
 }
-
+#[derive(Default)]
 pub enum Label {
     Index,
+    #[default]
     Weight,
     None,
 }
 pub enum GraphSVGRender {
     Directed { node_label: Label },
-    Undirected { positions: bool },
+    Undirected { edge_label: Label, positions: bool },
 }
 pub const COLS: [&str; 10] = [
     "red",
@@ -116,13 +116,25 @@ where
                 )
             ),
         )?,
-        GraphSVGRender::Undirected { .. } => fs::write(
+        GraphSVGRender::Undirected { edge_label, .. } => fs::write(
             &dot_out_path,
             format!(
                 "graph {{ \n layout=\"neato\"\n  {:?} }}",
                 dot::Dot::with_attr_getters(
                     &graph,
-                    &[dot::Config::GraphContentOnly, dot::Config::NodeNoLabel,],
+                    match edge_label {
+                        Label::Index => &[
+                            dot::Config::GraphContentOnly,
+                            dot::Config::NodeNoLabel,
+                            dot::Config::EdgeIndexLabel
+                        ],
+                        Label::Weight => &[dot::Config::GraphContentOnly, dot::Config::NodeNoLabel],
+                        Label::None => &[
+                            dot::Config::GraphContentOnly,
+                            dot::Config::NodeNoLabel,
+                            dot::Config::EdgeNoLabel
+                        ],
+                    },
                     &|_, _| "arrowhead=none".to_owned(),
                     get_node_attrs
                 )
@@ -136,7 +148,7 @@ where
             c.arg(dot_out_path);
             c
         }
-        GraphSVGRender::Undirected { positions } => {
+        GraphSVGRender::Undirected { positions, .. } => {
             let mut c = process::Command::new("neato");
             if positions {
                 c.arg("-n");

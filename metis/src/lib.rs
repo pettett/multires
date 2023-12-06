@@ -15,28 +15,56 @@ pub mod test {
 
     #[test]
     fn test_triangle_plane() {
-        let graph = generate_triangle_plane::<12, 6, _>(|_, _| ());
+        let graph = generate_triangle_plane::<12, 6>();
 
         petgraph_to_svg(
             &graph,
             "svg\\triangle_plane.svg",
             &|_, _| String::new(),
-            GraphSVGRender::Undirected { positions: false },
+            GraphSVGRender::Undirected {
+                positions: false,
+                edge_label: Default::default(),
+            },
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn test_unweighted_edges() {
+        let graph = generate_triangle_plane::<6, 4>();
+
+        let test_config = &PartitioningConfig {
+            method: PartitioningMethod::MultilevelKWay,
+            force_contiguous_partitions: true,
+            minimize_subgraph_degree: Some(true),
+            ..Default::default()
+        };
+
+        let p = test_config.partition_from_graph(3, &graph).unwrap();
+
+        petgraph_to_svg(
+            &graph,
+            "svg\\triangle_plane_row_divided.svg",
+            &|_, (i, _)| format!("color={}", COLS[p[i.index()] as usize % COLS.len()]),
+            GraphSVGRender::Undirected {
+                positions: false,
+                edge_label: common::graph::Label::None,
+            },
         )
         .unwrap();
     }
 
     #[test]
     fn test_weighted_edges() {
-        // We kinda assume each row will be grouped separately
-        let graph = generate_triangle_plane::<12, 6, _>(
-            |(x1, y1), (x2, y2)| {
-                if y1 == 4 && x1 == 4 {
-                    10
-                } else {
-                    0
-                }
-            },
+        let mut graph = generate_triangle_plane::<6, 4>();
+
+        // Demonstrates that we can use weighting (that works, weights array breaks the contiguous graphs) by adding extra edges connecting nodes
+        // We use this principle in generating the group graph
+
+        graph.add_edge(
+            petgraph::graph::node_index(0),
+            petgraph::graph::node_index(1),
+            (),
         );
 
         let test_config = &PartitioningConfig {
@@ -46,15 +74,16 @@ pub mod test {
             ..Default::default()
         };
 
-        let p = test_config
-            .partition_from_edge_weighted_graph(6, &graph)
-            .unwrap();
+        let p = test_config.partition_from_graph(3, &graph).unwrap();
 
         petgraph_to_svg(
             &graph,
             "svg\\triangle_plane_row_divided.svg",
             &|_, (i, _)| format!("color={}", COLS[p[i.index()] as usize % COLS.len()]),
-            GraphSVGRender::Undirected { positions: false },
+            GraphSVGRender::Undirected {
+                positions: false,
+                edge_label: common::graph::Label::None,
+            },
         )
         .unwrap();
     }

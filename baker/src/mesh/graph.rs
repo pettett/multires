@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use super::winged_mesh::{FaceID, WingedMesh};
 
 impl WingedMesh {
+    /// Generates a graph that is the dual of this mesh - connections from each face to their neighbours
     pub fn generate_face_graph(&self) -> petgraph::graph::UnGraph<FaceID, ()> {
         //TODO: Give lower weight to grouping partitions that have not been recently grouped, to ensure we are
         // constantly overwriting old borders with remeshes
@@ -72,6 +73,9 @@ impl WingedMesh {
         graphs
     }
 
+    /// Generates a graph of all partitions and their neighbours.
+    /// A partition neighbours another one iff there is some triangle in each that share an edge.
+    /// We add an edge for each linking triangle, to record 'weights' for partitioning.
     pub fn generate_partition_graph(&self) -> petgraph::graph::UnGraph<(), ()> {
         //TODO: Give lower weight to grouping partitions that have not been recently grouped, to ensure we are
         // constantly overwriting old borders with remeshes
@@ -93,7 +97,9 @@ impl WingedMesh {
                     let other_face = &self.get_face(self.get_edge(twin).face);
 
                     if face.part != other_face.part {
-                        graph.update_edge(
+                        // Add an edge for *each* shared edge, recording how
+                        // linked the two partitions are (how much 'cruft' is shared)
+                        graph.add_edge(
                             petgraph::graph::NodeIndex::new(face.part),
                             petgraph::graph::NodeIndex::new(other_face.part),
                             (),
@@ -200,7 +206,10 @@ pub mod test {
                     p.z * 200.0,
                 )
             },
-            graph::GraphSVGRender::Undirected { positions: true },
+            graph::GraphSVGRender::Undirected {
+                positions: true,
+                edge_label: Default::default(),
+            },
         )?;
 
         graph.retain_edges(|g, e| {
@@ -225,7 +234,10 @@ pub mod test {
                     p.z * 200.0,
                 )
             },
-            graph::GraphSVGRender::Undirected { positions: true },
+            graph::GraphSVGRender::Undirected {
+                positions: true,
+                edge_label: Default::default(),
+            },
         )?;
 
         Ok(())
