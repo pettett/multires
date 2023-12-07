@@ -4,7 +4,7 @@ use baker::{
 };
 
 fn main() {
-    let mesh_name = "../assets/cone.glb";
+    let mesh_name = "../assets/dragon_high.glb";
 
     println!("Loading from gltf!");
     let (working_mesh, verts) = WingedMesh::from_gltf(mesh_name);

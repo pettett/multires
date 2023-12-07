@@ -44,7 +44,7 @@ pub mod test {
 
         petgraph_to_svg(
             &graph,
-            "svg\\triangle_plane_row_divided.svg",
+            "svg\\triangle_plane_unweighted_group.svg",
             &|_, (i, _)| format!("color={}", COLS[p[i.index()] as usize % COLS.len()]),
             GraphSVGRender::Undirected {
                 positions: false,
@@ -78,7 +78,7 @@ pub mod test {
 
         petgraph_to_svg(
             &graph,
-            "svg\\triangle_plane_row_divided.svg",
+            "svg\\triangle_plane_weighted_group.svg",
             &|_, (i, _)| format!("color={}", COLS[p[i.index()] as usize % COLS.len()]),
             GraphSVGRender::Undirected {
                 positions: false,

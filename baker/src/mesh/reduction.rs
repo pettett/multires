@@ -1,5 +1,6 @@
 use std::{cmp, collections::HashSet};
 
+use common::graph::petgraph_to_svg;
 use glam::{vec4, Vec4, Vec4Swizzles};
 #[cfg(feature = "progress")]
 use indicatif::{ParallelProgressIterator, ProgressStyle};
@@ -141,12 +142,8 @@ impl VertID {
 }
 
 impl EdgeID {
-    pub fn orig_dest(self, mesh: &WingedMesh) -> Result<(VertID, VertID)> {
-        let e = mesh.try_get_edge(self);
-
-        let Some(edge) = e.as_ref() else {
-            return Err(MeshError::InvalidEdge.into());
-        };
+    pub fn src_dst(self, mesh: &WingedMesh) -> Result<(VertID, VertID)> {
+        let edge = mesh.try_get_edge(self)?;
 
         //.get(self)
         //.ok_or(MeshError::InvalidEdge)
@@ -154,15 +151,13 @@ impl EdgeID {
         let orig = edge.vert_origin;
         let dest = mesh
             .try_get_edge(edge.edge_left_cw)
-            .as_ref()
-            .ok_or(MeshError::InvalidCwEdge)
-            .context("Failed to lookup origin/destination")?
+            .context(MeshError::InvalidCwEdge(self))?
             .vert_origin;
         Ok((orig, dest))
     }
 
     pub fn edge_vec(&self, mesh: &WingedMesh, verts: &[glam::Vec4]) -> Result<glam::Vec3A> {
-        let (src, dst) = self.orig_dest(mesh)?;
+        let (src, dst) = self.src_dst(mesh)?;
         let vd: glam::Vec3A = verts[dst.0].into();
         let vs: glam::Vec3A = verts[src.0].into();
         Ok(vd - vs)
@@ -175,7 +170,8 @@ impl EdgeID {
         verts: &[glam::Vec4],
         quadric_errors: &[RwLock<Quadric>],
     ) -> Result<Option<Error>> {
-        let (orig, dest) = self.orig_dest(mesh)?;
+
+        let (orig, dest) = self.src_dst(mesh)?;
 
         if !orig.is_local_manifold(mesh) && !dest.is_group_embedded(mesh) {
             // If we change the boundary shape, we must move into an embedded position, or we risk separating the partition into two chunks
@@ -325,7 +321,9 @@ impl WingedMesh {
         #[cfg(feature = "progress")]
         bar.set_style(ProgressStyle::with_template("{wide_bar} {pos}/{len} ({per_sec})").unwrap());
 
-        let mut invalid_edges = RwLock::new(HashSet::new());
+        let mut invalid_edges = HashSet::new();
+
+        //    let pre_collapse_group_graphs = self.generate_group_graphs();
 
         collapse_requirements
             .iter()
@@ -333,21 +331,21 @@ impl WingedMesh {
             .for_each(|(qi, &requirement)| {
                 #[cfg(test)]
                 {
-                    self.assert_valid();
+                    //self.assert_valid();
                     for (&q, _e) in collapse_queues[qi].read().queue.iter() {
                         assert!(
-                            self.try_get_edge(q).is_some(),
+                            self.try_get_edge(q).is_ok(),
                             "Invalid edge in collapse queue {}",
                             qi
                         );
-                        self.assert_edge_valid(q, "Invalid edge in collapse queue ");
+                        self.assert_edge_valid(q).context("Invalid edge in collapse queue: ").unwrap();
                     }
                 }
 
                 //#[cfg(feature = "progress")]
                 //bar.set_message(format!("{err:.3e}"));
 
-                'outer: for _ in 0..requirement {
+                'outer: for i in 0..requirement {
                     let (orig, dest, eid, err) = loop {
                         let (_, Error(cmp::Reverse(err), eid)) =
                             match collapse_queues[qi].write().queue.pop() {
@@ -362,15 +360,31 @@ impl WingedMesh {
                                 }
                             };
 
-                        if invalid_edges.read().contains(&eid) {
+                        if invalid_edges.contains(&eid) {
                             continue;
                         }
 
-                        let Ok((orig, dest)) = eid.orig_dest(&self) else {
+                        let Ok((orig, dest)) = eid.src_dst(&self) else {
                             continue;
                         };
 
-                        assert_ne!(orig, dest);
+                        if orig == dest {
+                            let e = self.get_edge(eid);
+                            assert_ne!(
+                                orig,
+                                dest,
+                                "Failed at {i} within group {qi} on edge id {eid:?}:\n {e:?}\n with face:\n {:?}", 
+                                self.get_face(e.face)
+                            );
+                        }
+
+						// Cannot collapse edges that would result in combining triangles over each other
+						// TODO: We check this here, as many operations can influence if an edge can be collapsed due to this factor,
+						//		 but really an edge collapse should update errors of more edges in the region around it.
+						if !self.max_one_joint_neighbour_vertices_per_side(eid) {
+							continue;
+						}
+						
 
                         break (orig, dest, eid, err);
                     };
@@ -381,7 +395,7 @@ impl WingedMesh {
 
                     #[cfg(not(test))]
                     {
-                        if self.try_get_vert(orig).is_none() || self.try_get_vert(dest).is_none() {
+                        if self.try_get_vert(orig).is_err() || self.try_get_vert(dest).is_err() {
                             #[cfg(feature = "progress")]
                             bar.println("Warning - drawn 'valid' edge with no orig or dest");
                             continue;
@@ -402,18 +416,18 @@ impl WingedMesh {
                     effected_edges.extend(self.get_vert(orig).incoming_edges());
                     effected_edges.extend(self.get_vert(dest).incoming_edges());
 
+					#[allow(unreachable_patterns)]
                     match self.collapse_edge(eid) {
                         Ok(()) => (),
-                        Err(e) => {
+						#[cfg(test)] e => e.unwrap(),
+						Err(e) => { 
                             println!("{e} - Exiting early from de-meshing");
                             break 'outer;
                         }
                     }
 
-                    let mut invalid_edges_write = invalid_edges.write();
-
                     for eid in effected_edges {
-                        if let Some(edge) = self.try_get_edge(eid).as_ref() {
+                        if let Ok(edge) = self.try_get_edge(eid)  {
                             let edge_queue = queue_lookup(edge.face, &self);
 
                             if let Some(error) =
@@ -425,7 +439,7 @@ impl WingedMesh {
                         }
 
                         // First check in our own queue, then check in all the others if we cannot find it
-                        invalid_edges_write.insert(eid);
+                        invalid_edges.insert(eid);
 
                         //if collapse_queues[qi].write().queue.remove(&eid).is_none() {
                         //    for q in &collapse_queues {
@@ -575,12 +589,12 @@ mod tests {
         let mut quadrics = mesh.create_quadrics(&verts);
 
         for i in 0..4 {
-            mesh.assert_valid();
+            mesh.assert_valid().unwrap();
             mesh.reduce(&verts, &mut quadrics, &[mesh.face_count() / 4], |_, _| 0)
                 .unwrap();
         }
 
-        mesh.assert_valid();
+        mesh.assert_valid().unwrap();
 
         Ok(())
     }

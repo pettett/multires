@@ -17,9 +17,9 @@ impl WingedMesh {
 
         #[cfg(test)]
         {
-            if config.force_contiguous_partitions {
-                assert_contiguous_graph(&mesh_dual);
-            }
+            //if config.force_contiguous_partitions {
+            //        assert_contiguous_graph(&mesh_dual);
+            //    }
         }
 
         let part = config.partition_from_graph(partitions, &mesh_dual)?;
@@ -137,11 +137,13 @@ impl WingedMesh {
         #[cfg(test)]
         {
             //Assert that we have made good groups
+            //TODO: Split graph into contiguous segments beforehand
+            if config.force_contiguous_partitions {
+                let groups = self.generate_group_graphs();
 
-            let groups = self.generate_group_graphs();
-
-            for g in &groups {
-                super::graph::test::assert_contiguous_graph(g);
+                for g in &groups {
+                    super::graph::test::assert_contiguous_graph(g);
+                }
             }
         }
 

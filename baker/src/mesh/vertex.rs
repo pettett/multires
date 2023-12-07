@@ -37,25 +37,55 @@ pub struct Vertex {
 
 impl Vertex {
     pub fn remove_outgoing(&mut self, e: EdgeID) {
+        #[cfg(test)]
+        {
+            assert!(self.outgoing_edges.contains(&e));
+        }
+
         let index = self
             .outgoing_edges
             .iter()
             .position(|&x| x == e)
             .expect("Outgoing edges should contain edge id we are removing");
         self.outgoing_edges.swap_remove(index);
+
+        #[cfg(test)]
+        {
+            assert!(!self.outgoing_edges.contains(&e));
+        }
     }
     pub fn remove_incoming(&mut self, e: EdgeID) {
+        #[cfg(test)]
+        {
+            assert!(self.incoming_edges.contains(&e));
+        }
+
         let index = self
             .incoming_edges
             .iter()
             .position(|&x| x == e)
             .expect("Incoming edges should contain edge id we are removing");
         self.incoming_edges.swap_remove(index);
+
+        #[cfg(test)]
+        {
+            assert!(!self.incoming_edges.contains(&e));
+        }
     }
     pub fn add_outgoing(&mut self, e: EdgeID) {
+        #[cfg(test)]
+        {
+            assert!(!self.outgoing_edges.contains(&e));
+        }
+
         self.outgoing_edges.push(e);
     }
     pub fn add_incoming(&mut self, e: EdgeID) {
+        #[cfg(test)]
+        {
+            assert!(!self.incoming_edges.contains(&e));
+        }
+
         self.incoming_edges.push(e);
     }
 
@@ -72,7 +102,7 @@ impl VertID {
     /// Does this vertex have a complete fan of triangles surrounding it?
     pub fn is_local_manifold(self, mesh: &WingedMesh) -> bool {
         let v = mesh.try_get_vert(self);
-        let Some(vert) = v else {
+        let Ok(vert) = v else {
             return false;
         };
 
@@ -112,25 +142,28 @@ impl VertID {
     }
 
     pub fn is_group_embedded(self, mesh: &WingedMesh) -> bool {
-        let Some(vert) = mesh.try_get_vert(self) else {
+        let Ok(vert) = mesh.try_get_vert(self) else {
             return false;
         };
 
         let outgoings = &vert.outgoing_edges;
-        let part =
+        let group_index =
             mesh.partitions[mesh.get_face(mesh.get_edge(outgoings[0]).face).part].group_index;
 
         for &eid in &outgoings[1..] {
-            if part != mesh.partitions[mesh.get_face(mesh.get_edge(eid).face).part].group_index {
+            if group_index
+                != mesh.partitions[mesh.get_face(mesh.get_edge(eid).face).part].group_index
+            {
                 return false;
             }
         }
 
         #[cfg(test)]
         for &eid in &vert.incoming_edges {
-            if part != mesh.partitions[mesh.get_face(mesh.get_edge(eid).face).part].group_index {
-                unreachable!();
-            }
+            assert_eq!(
+                group_index,
+                mesh.partitions[mesh.get_face(mesh.get_edge(eid).face).part].group_index
+            );
         }
 
         return true;

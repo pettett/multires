@@ -97,7 +97,7 @@ pub fn group_and_partition_full_res(mut working_mesh: WingedMesh, verts: &[Vec4]
 pub fn group_and_partition_and_simplify(mut mesh: WingedMesh, verts: &[Vec4], name: String) {
     let config = &metis::PartitioningConfig {
         method: metis::PartitioningMethod::MultilevelKWay,
-        force_contiguous_partitions: true,
+        force_contiguous_partitions: false,
         minimize_subgraph_degree: Some(true),
         ..Default::default()
     };
@@ -115,7 +115,7 @@ pub fn group_and_partition_and_simplify(mut mesh: WingedMesh, verts: &[Vec4], na
     layers.push(to_mesh_layer(&mesh, &verts));
 
     // Generate 2 more meshes
-    for i in 0..7 {
+    for i in 0..10 {
         // i = index of previous mesh layer
         //working_mesh = reduce_mesh(working_mesh);
 
@@ -126,9 +126,19 @@ pub fn group_and_partition_and_simplify(mut mesh: WingedMesh, verts: &[Vec4], na
         // Each group requires half it's triangles removed
         let collapse_requirements: Vec<usize> = mesh.groups.iter().map(|g| g.tris / 4).collect();
 
-        println!("Reducing within {} groups:", collapse_requirements.len());
-
         mesh.age();
+
+        // Make sure groups are contiguous before reduction
+        #[cfg(test)]
+        {
+            println!("Ensuring groups are contiguous... ");
+            let graphs = mesh.generate_group_graphs();
+            for graph in graphs {
+                mesh::graph::test::assert_contiguous_graph(&graph);
+            }
+        }
+
+        println!("Reducing within {} groups:", collapse_requirements.len());
 
         let e = match mesh.reduce(verts, &mut quadrics, &collapse_requirements, |f, m| {
             m.partitions[m.get_face(f).part].group_index
@@ -143,7 +153,7 @@ pub fn group_and_partition_and_simplify(mut mesh: WingedMesh, verts: &[Vec4], na
             }
         };
         println!(
-            "Introduced error of {e}. Average edge age: {}, Mean: {}",
+            "Introduced error of {e}. Max edge age: {}, Mean: {}",
             mesh.max_edge_age(),
             mesh.avg_edge_age(),
         );

@@ -5,7 +5,7 @@ members = [
 	"baker",
 	"common_renderer",
 	"renderer",
-	"vk_renderer",
+	# "vk_renderer",
 	"ash_renderer",
 ]
 resolver = "2"
@@ -14,6 +14,7 @@ resolver = "2"
 authors = ["mp2015@cam.ac.uk"]
 version = "0.1.0"
 edition = "2021"
+
 
 [workspace.dependencies]
 glam = { version = "0.24.1", features = ["bytemuck", "serde"] }
@@ -28,3 +29,7 @@ pollster = "0.3"
 
 [profile.release]
 debug = true
+
+[profile.dev.package."*"]
+debug = false
+# opt-level = 1
