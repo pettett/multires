@@ -4,12 +4,18 @@ use baker::{
 };
 
 fn main() {
-    let mesh_name = "../assets/dragon_high.glb";
+    // let mesh_name = "../assets/rock.glb";
+    let mesh_name = "../assets/torus.glb";
 
     println!("Loading from gltf!");
-    let (working_mesh, verts) = WingedMesh::from_gltf(mesh_name);
+    let (mut mesh, verts) = WingedMesh::from_gltf(mesh_name);
 
+    let num_contiguous = mesh.partition_contiguous();
+
+    println!("We have {} Contiguous segments", num_contiguous);
+
+    assert_eq!(num_contiguous, 1);
     //group_and_partition_full_res(working_mesh, &verts, mesh_name.to_owned());
     //apply_simplification(working_mesh, &verts, mesh_name.to_owned());
-    group_and_partition_and_simplify(working_mesh, &verts, mesh_name.to_owned());
+    group_and_partition_and_simplify(mesh, &verts, mesh_name.to_owned());
 }

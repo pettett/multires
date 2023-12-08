@@ -1,11 +1,68 @@
+use super::winged_mesh::WingedMesh;
+use common::graph::petgraph_to_svg;
 use glam::Vec4Swizzles;
 
-#[cfg(test)]
-use crate::mesh::graph::test::assert_contiguous_graph;
-
-use super::winged_mesh::WingedMesh;
-
 impl WingedMesh {
+    pub fn partition_contiguous(&mut self) -> usize {
+        println!("Wiping partitions");
+        // Wipe partitions
+        for (_, f) in self.iter_faces_mut() {
+            f.part = 0;
+        }
+
+        let mut p = 1;
+        let mut search = Vec::new();
+
+        #[cfg(feature = "progress")]
+        let bar = indicatif::ProgressBar::new(self.face_count() as _);
+
+        loop {
+            assert_eq!(search.len(), 0);
+            // select a random face to start the search
+
+            for (fid, f) in self.iter_faces() {
+                if f.part == 0 {
+                    search.push(fid);
+                    break;
+                }
+            }
+
+            if search.len() == 0 {
+                #[cfg(feature = "progress")]
+                bar.finish();
+
+                // end this with p-1 partitions
+                break p - 1;
+            }
+
+            while let Some(fid) = search.pop() {
+                // Mark
+                #[cfg(feature = "progress")]
+                bar.inc(1);
+                self.get_face_mut(fid).part = p;
+
+                // Search for unmarked
+                let e0 = self.get_face(fid).edge;
+                let e1 = self.get_edge(e0).edge_left_cw;
+                let e2 = self.get_edge(e0).edge_left_ccw;
+
+                for e in [e0, e1, e2] {
+                    if let Some(t) = self.get_edge(e).twin {
+                        let f = self.get_edge(t).face;
+                        if self.get_face(f).part == 0 {
+                            // splitting by contiguous, we should not be able to access others
+
+                            search.push(f);
+                        } else {
+                            assert_eq!(self.get_face(f).part, p);
+                        }
+                    }
+                }
+            }
+            p += 1;
+        }
+    }
+
     pub fn partition_full_mesh(
         &mut self,
         config: &metis::PartitioningConfig,
@@ -27,7 +84,7 @@ impl WingedMesh {
         assert_eq!(part.len(), self.face_count());
 
         let mut max_part = 0;
-        for (fid, mut face) in self.iter_faces_mut() {
+        for (fid, face) in self.iter_faces_mut() {
             // Some faces will have already been removed
             face.part = part[fid.0] as usize;
             max_part = max_part.max(face.part)
@@ -185,7 +242,22 @@ impl WingedMesh {
                 super::graph::test::assert_contiguous_graph(graph);
             }
 
-            let part = config.partition_from_graph(parts, graph)?;
+            let part = match config.partition_from_graph(parts, graph) {
+                Ok(part) => part,
+                e => {
+                    petgraph_to_svg(
+                        graph,
+                        "svg/error_partition_within_group.svg",
+                        &|_, _| String::new(),
+                        common::graph::GraphSVGRender::Undirected {
+                            edge_label: common::graph::Label::None,
+                            positions: false,
+                        },
+                    )
+                    .unwrap();
+                    e?
+                }
+            };
 
             // Each new part needs to register its dependence on the group we were a part of before
             let child_group = self.partitions

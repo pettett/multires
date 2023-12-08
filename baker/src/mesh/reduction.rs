@@ -163,29 +163,52 @@ impl EdgeID {
         Ok(vd - vs)
     }
 
-    /// Estimate the error introduced by collapsing this edge. Does not take into account penalties from flipping triangles
-    pub fn edge_collapse_error(
+	/// Evaluate if any restrictions on edge collapse apply to this edge
+	/// Current restrictions:
+	/// - Cannot change group boundaries
+	/// - Cannot split group into non-contiguous segments
+	/// - Cannot split with connected triangles which would cause an overlap
+	/// - Cannot flip normals of any triangles when collapsing
+    pub fn can_collapse_edge(
         self,
         mesh: &WingedMesh,
-        verts: &[glam::Vec4],
-        quadric_errors: &[RwLock<Quadric>],
-    ) -> Result<Option<Error>> {
+        verts: &[glam::Vec4], 
+    ) -> Result<bool> {
 
         let (orig, dest) = self.src_dst(mesh)?;
 
-        if !orig.is_local_manifold(mesh) && !dest.is_group_embedded(mesh) {
-            // If we change the boundary shape, we must move into an embedded position, or we risk separating the partition into two chunks
-            // which will break partitioning
-            return Ok(None);
-        }
-
         if !orig.is_group_embedded(mesh) {
             // Cannot move a vertex unless it is in the center of a partition
-            return Ok(None);
+            return Ok(false);
         }
+ 
+		if !orig.is_group_embedded(mesh) {
+			// Cannot change group boundary
+			// Cannot move a vertex unless it is in the center of a partition
+			return Ok(false);
+		}
 
-        let q = Quadric(quadric_errors[orig.0].read().0 + quadric_errors[dest.0].read().0);
-        // Collapsing this edge would move the origin to the destination, so we find the error of the origin at the merged point.
+		if mesh.get_edge(self).twin.is_some() {
+			// This edge has a twin, so a bad collapse risks splitting the group into 2 pieces.
+
+			// If we change the boundary shape, we must move into a manifold embedded position, 
+			// or we risk separating the partition into two chunks, which will break partitioning
+	
+			if !orig.is_local_manifold(mesh) {
+				// We can split the group into two chunks by collapsing onto another edge (non manifold dest),
+				//  or collapsing onto another group
+				if !dest.is_group_embedded(mesh) || !dest.is_local_manifold(mesh) {
+	
+					return Ok(false);
+				}
+			}	
+		}
+
+		// Cannot collapse edges that would result in combining triangles over each other
+		if !mesh.max_one_joint_neighbour_vertices_per_side(self) {
+			return Ok(false);
+		}
+		
 
         // Test normals of triangles before and after the swap
         for &e in mesh
@@ -220,14 +243,30 @@ impl EdgeID {
 
             if starting_plane.normal().dot(end_plane.normal()) < 0.0 {
                 // Flipped triangle, give this an invalid weight - discard
-                return Ok(None);
+                return Ok(false);
             }
         }
 
-        Ok(Some(Error(
+        Ok(true)
+    }
+
+    /// Estimate the error introduced by collapsing this edge. Does not take into account penalties from flipping triangles
+    pub fn edge_collapse_error(
+        self,
+        mesh: &WingedMesh,
+        verts: &[glam::Vec4],
+        quadric_errors: &[RwLock<Quadric>],
+    ) -> Result<Error> {
+
+        let (orig, dest) = self.src_dst(mesh)?;
+
+        // Collapsing this edge would move the origin to the destination, so we find the error of the origin at the merged point.
+        let q = Quadric(quadric_errors[orig.0].read().0 + quadric_errors[dest.0].read().0);
+
+        Ok(Error(
             cmp::Reverse(q.quadric_error(verts[orig.0].into())),
             self,
-        )))
+        ))
     }
 }
 
@@ -275,12 +314,13 @@ impl WingedMesh {
         let bar = indicatif::ProgressBar::new(self.edge_count() as _);
 
         for (eid, edge) in self.iter_edges() {
-            if let Some(error) = eid.edge_collapse_error(&self, verts, &quadrics).unwrap() {
-                pq[queue_lookup(edge.face, self)]
-                    .get_mut()
-                    .queue
-                    .push(eid, error);
-            }
+            let error = eid.edge_collapse_error(&self, verts, &quadrics).unwrap() ;
+
+			pq[queue_lookup(edge.face, self)]
+				.get_mut()
+				.queue
+				.push(eid, error);
+            
 
             #[cfg(feature = "progress")]
             bar.inc(1);
@@ -321,10 +361,7 @@ impl WingedMesh {
         #[cfg(feature = "progress")]
         bar.set_style(ProgressStyle::with_template("{wide_bar} {pos}/{len} ({per_sec})").unwrap());
 
-        let mut invalid_edges = HashSet::new();
-
-        //    let pre_collapse_group_graphs = self.generate_group_graphs();
-
+ 
         collapse_requirements
             .iter()
             .enumerate()
@@ -360,9 +397,6 @@ impl WingedMesh {
                                 }
                             };
 
-                        if invalid_edges.contains(&eid) {
-                            continue;
-                        }
 
                         let Ok((orig, dest)) = eid.src_dst(&self) else {
                             continue;
@@ -378,13 +412,15 @@ impl WingedMesh {
                             );
                         }
 
-						// Cannot collapse edges that would result in combining triangles over each other
-						// TODO: We check this here, as many operations can influence if an edge can be collapsed due to this factor,
+						// TODO: We check these here, as many operations can influence if an edge can be collapsed due to these factors,
 						//		 but really an edge collapse should update errors of more edges in the region around it.
-						if !self.max_one_joint_neighbour_vertices_per_side(eid) {
+						// 		 - However is is slightly faster to manage this here
+
+						
+						if !eid.can_collapse_edge(self, verts).unwrap() {
 							continue;
 						}
-						
+
 
                         break (orig, dest, eid, err);
                     };
@@ -430,24 +466,10 @@ impl WingedMesh {
                         if let Ok(edge) = self.try_get_edge(eid)  {
                             let edge_queue = queue_lookup(edge.face, &self);
 
-                            if let Some(error) =
-                                eid.edge_collapse_error(&self, verts, &quadrics).unwrap()
-                            {
-                                collapse_queues[edge_queue].write().queue.push(eid, error);
-                                continue;
-                            }
+                            let error = eid.edge_collapse_error(&self, verts, &quadrics).unwrap();
+                            
+                            collapse_queues[edge_queue].write().queue.push(eid, error);
                         }
-
-                        // First check in our own queue, then check in all the others if we cannot find it
-                        invalid_edges.insert(eid);
-
-                        //if collapse_queues[qi].write().queue.remove(&eid).is_none() {
-                        //    for q in &collapse_queues {
-                        //        if q.write().queue.remove(&eid).is_some() {
-                        //            break;
-                        //        }
-                        //    }
-                        //}
                     }
                 }
 

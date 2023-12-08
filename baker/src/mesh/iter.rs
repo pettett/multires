@@ -1,6 +1,4 @@
-use std::marker::PhantomData;
-
-use super::winged_mesh::{EdgeID, HalfEdge, WingedMesh};
+use super::winged_mesh::{EdgeID, WingedMesh};
 
 pub struct EdgeIter<'a> {
     mesh: &'a WingedMesh,

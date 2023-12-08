@@ -154,7 +154,7 @@ impl Default for PartitioningConfig {
             rng_seed: None,
             minimize_subgraph_degree: None,
             two_hop_matching: None,
-            force_contiguous_partitions: false,
+            force_contiguous_partitions: true,
             compress_graph: Some(false),
             order_contiguous_components: None,
             p_factor: None,
@@ -444,12 +444,12 @@ impl PartitioningConfig {
 
 #[derive(Error, Debug)]
 pub enum PartitioningError {
-    #[error("number weights did not correspond to partition count")]
+    #[error("Number weights did not correspond to partition count")]
     WeightsMismatch,
-    #[error("erroneous inputs and/or options")]
+    #[error("Erroneous inputs and/or options")]
     Input,
-    #[error("insufficient memory")]
+    #[error("Insufficient memory")]
     Memory,
-    #[error("other error")]
+    #[error("Other error")]
     Other,
 }

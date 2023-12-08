@@ -97,7 +97,7 @@ pub fn group_and_partition_full_res(mut working_mesh: WingedMesh, verts: &[Vec4]
 pub fn group_and_partition_and_simplify(mut mesh: WingedMesh, verts: &[Vec4], name: String) {
     let config = &metis::PartitioningConfig {
         method: metis::PartitioningMethod::MultilevelKWay,
-        force_contiguous_partitions: false,
+        force_contiguous_partitions: true,
         minimize_subgraph_degree: Some(true),
         ..Default::default()
     };
@@ -105,7 +105,7 @@ pub fn group_and_partition_and_simplify(mut mesh: WingedMesh, verts: &[Vec4], na
     let mut quadrics = mesh.create_quadrics(verts);
 
     // Apply primary partition, that will define the lowest level clusterings
-    mesh.partition_full_mesh(config, mesh.face_count().div_ceil(60) as _)
+    mesh.partition_full_mesh(config, mesh.face_count().div_ceil(200) as _)
         .unwrap();
 
     mesh.group(config, &verts).unwrap();

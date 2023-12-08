@@ -141,4 +141,8 @@ impl CameraController {
             mouse_delta: Default::default(),
         }
     }
+
+    pub fn speed_mut(&mut self) -> &mut f32 {
+        &mut self.speed
+    }
 }

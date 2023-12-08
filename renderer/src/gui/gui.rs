@@ -11,7 +11,9 @@ use bevy_ecs::{
     world::World,
 };
 use common::graph::petgraph_to_svg;
-use common_renderer::components::{camera::Camera, transform::Transform};
+use common_renderer::components::{
+    camera::Camera, camera_controller::CameraController, transform::Transform,
+};
 use egui::{Pos2, Vec2};
 use egui_wgpu::renderer::ScreenDescriptor;
 use glam::Vec3;
@@ -33,7 +35,7 @@ impl Gui {
         view: &wgpu::TextureView,
         mut meshes: Query<&mut MultiResMeshComponent>,
         submeshes: &Query<(Entity, &SubMeshComponent)>,
-        mut camera: Query<(&mut Camera, &Transform)>,
+        mut camera: Query<(&mut Camera, &mut CameraController, &Transform)>,
         commands: &mut Commands,
     ) {
         let _delta_s = self.last_frame.elapsed();
@@ -56,10 +58,16 @@ impl Gui {
                 .min_height(100.0)
                 .min_width(100.0)
                 .show(&ctx, |ui| {
-                    for (mut camera, transform) in camera.iter_mut() {
+                    for (mut camera, mut camera_controller, transform) in camera.iter_mut() {
                         ui.add(
                             egui::widgets::DragValue::new(&mut camera.part_highlight)
                                 .prefix("highlight partition: "),
+                        );
+
+                        ui.add(
+                            egui::widgets::Slider::new(camera_controller.speed_mut(), 0.03..=3.0)
+                                .logarithmic(true)
+                                .prefix("Camera Speed: "),
                         );
 
                         for mut mesh in meshes.iter_mut() {
