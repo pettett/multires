@@ -33,7 +33,7 @@ impl Gui {
         ctx: &egui::Context,
         encoder: &mut wgpu::CommandEncoder,
         view: &wgpu::TextureView,
-        mut meshes: Query<&mut MultiResMeshComponent>,
+        meshes: &mut Query<&mut MultiResMeshComponent>,
         submeshes: &Query<(Entity, &ClusterComponent)>,
         mut camera: Query<(&mut Camera, &mut CameraController, &Transform)>,
         commands: &mut Commands,

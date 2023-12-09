@@ -49,6 +49,16 @@ impl BufferGroup<1> {
         Self::create_plural(&[data], &[usage], device, layout, label)
     }
 
+    pub fn init_single<T: bytemuck::Pod>(
+        size: usize,
+        usage: wgpu::BufferUsages,
+        device: &wgpu::Device,
+        layout: &BindGroupLayout<1>,
+        label: Option<&str>,
+    ) -> Self {
+        Self::init_plural::<T>(&[size], &[usage], device, layout, label)
+    }
+
     pub fn buffer(&self) -> &wgpu::Buffer {
         &self.buffers[0]
     }
@@ -85,6 +95,51 @@ impl<const N: usize> BufferGroup<N> {
                     label,
                     contents: bytemuck::cast_slice(datum),
                     usage: usages[i],
+                })
+            })
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap();
+
+        let entries: [_; N] = buffers
+            .iter()
+            .enumerate()
+            .map(|(i, buffer)| wgpu::BindGroupEntry {
+                binding: i as u32,
+                resource: buffer.as_entire_binding(),
+            })
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap();
+
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label,
+            layout: layout.into(),
+            entries: &entries[..],
+        });
+
+        Self {
+            buffers,
+            bind_group,
+        }
+    }
+
+    pub fn init_plural<T: bytemuck::Pod>(
+        data: &[usize; N],
+        usages: &[wgpu::BufferUsages; N],
+        device: &wgpu::Device,
+        layout: &BindGroupLayout<N>,
+        label: Option<&str>,
+    ) -> Self {
+        let buffers: [_; N] = data
+            .iter()
+            .enumerate()
+            .map(|(i, &size)| {
+                device.create_buffer(&wgpu::BufferDescriptor {
+                    label,
+                    size: size as _,
+                    usage: usages[i],
+                    mapped_at_creation: true,
                 })
             })
             .collect::<Vec<_>>()

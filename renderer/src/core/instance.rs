@@ -6,6 +6,8 @@ pub struct Instance {
     camera_bind_group_layout: super::buffer::BindGroupLayout<1>,
     model_bind_group_layout: super::buffer::BindGroupLayout<1>,
     partition_bind_group_layout: super::buffer::BindGroupLayout<2>,
+    write_compute_bind_group_layout: super::buffer::BindGroupLayout<1>,
+    read_compute_bind_group_layout: super::buffer::BindGroupLayout<1>,
 }
 
 impl Instance {
@@ -16,6 +18,8 @@ impl Instance {
         camera_bind_group_layout: super::buffer::BindGroupLayout<1>,
         model_bind_group_layout: super::buffer::BindGroupLayout<1>,
         partition_bind_group_layout: super::buffer::BindGroupLayout<2>,
+        write_compute_bind_group_layout: super::buffer::BindGroupLayout<1>,
+        read_compute_bind_group_layout: super::buffer::BindGroupLayout<1>,
     ) -> Self {
         Self {
             surface,
@@ -24,6 +28,8 @@ impl Instance {
             camera_bind_group_layout,
             model_bind_group_layout,
             partition_bind_group_layout,
+            write_compute_bind_group_layout,
+            read_compute_bind_group_layout,
         }
     }
 
@@ -36,7 +42,6 @@ impl Instance {
     pub fn queue(&self) -> &wgpu::Queue {
         &self.queue
     }
-
     pub fn camera_bind_group_layout(&self) -> &super::buffer::BindGroupLayout<1> {
         &self.camera_bind_group_layout
     }
@@ -45,5 +50,11 @@ impl Instance {
     }
     pub fn partition_bind_group_layout(&self) -> &super::buffer::BindGroupLayout<2> {
         &self.partition_bind_group_layout
+    }
+    pub fn write_compute_bind_group_layout(&self) -> &super::buffer::BindGroupLayout<1> {
+        &self.write_compute_bind_group_layout
+    }
+    pub fn read_compute_bind_group_layout(&self) -> &super::buffer::BindGroupLayout<1> {
+        &self.read_compute_bind_group_layout
     }
 }

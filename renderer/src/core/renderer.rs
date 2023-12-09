@@ -28,6 +28,7 @@ pub struct Renderer {
     camera_buffer: BufferGroup<1>,
     render_pipeline: wgpu::RenderPipeline,
     render_pipeline_wire: wgpu::RenderPipeline,
+    pub compute_pipeline: wgpu::ComputePipeline,
     depth_texture: Texture,
     surface_format: wgpu::TextureFormat,
     pub sphere_gizmo: DebugMesh,
@@ -98,6 +99,8 @@ impl Renderer {
         surface.configure(&device, &config);
 
         let shader = device.create_shader_module(wgpu::include_wgsl!("../shaders/shader.wgsl"));
+        let shader_compute =
+            device.create_shader_module(wgpu::include_wgsl!("../shaders/should_draw.wgsl"));
         let shader_wire =
             device.create_shader_module(wgpu::include_wgsl!("../shaders/shader_wire.wgsl"));
 
@@ -139,6 +142,35 @@ impl Renderer {
             Some("model_bind_group_layout"),
         );
 
+        let write_compute_bind_group_layout: BindGroupLayout<1> = BindGroupLayout::create(
+            &device,
+            &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: false },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+            Some("writeable_compute_buffer_bind_group"),
+        );
+        let read_compute_buffer_bind_group: BindGroupLayout<1> = BindGroupLayout::create(
+            &device,
+            &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+            Some("readable_compute_buffer_bind_group"),
+        );
+
         let partition_bind_group_layout = BindGroupLayout::create(
             &device,
             &[
@@ -177,6 +209,16 @@ impl Renderer {
                 push_constant_ranges: &[],
             });
 
+        let compute_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Compute Pipeline Layout"),
+                bind_group_layouts: &[
+                    (&write_compute_bind_group_layout).into(),
+                    (&read_compute_buffer_bind_group).into(),
+                ],
+                push_constant_ranges: &[],
+            });
+
         let render_pipeline = make_render_pipeline(
             &device,
             &render_pipeline_layout,
@@ -192,6 +234,13 @@ impl Renderer {
             wgpu::PolygonMode::Line,
         );
 
+        let compute_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("Culling compute pipeline"),
+            layout: Some(&compute_pipeline_layout),
+            module: &shader_compute,
+            entry_point: "main",
+        });
+
         let depth_texture = Texture::create_depth_texture(&device, &config, "Depth Texture");
 
         let sphere_gizmo = TriMesh::from_gltf("../assets/sphere_low.glb").unwrap();
@@ -203,6 +252,8 @@ impl Renderer {
             camera_bind_group_layout,
             model_bind_group_layout,
             partition_bind_group_layout,
+            write_compute_bind_group_layout,
+            read_compute_buffer_bind_group,
         ));
 
         Self {
@@ -211,6 +262,7 @@ impl Renderer {
             instance,
             config,
             size,
+            compute_pipeline,
             surface_format,
             depth_texture,
             render_pipeline,
@@ -328,7 +380,7 @@ pub fn render(
     mut gui: ResMut<Gui>,
     ctx: NonSend<egui::Context>,
     mut state: NonSendMut<egui_winit::State>,
-    meshes: Query<&mut MultiResMeshComponent>,
+    mut meshes: Query<&mut MultiResMeshComponent>,
     submeshes: Query<(Entity, &ClusterComponent)>,
     camera: Query<&CameraUniform>,
     cameras: Query<(&mut Camera, &mut CameraController, &Transform)>,
@@ -344,7 +396,7 @@ pub fn render(
             .instance
             .device()
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("Render Encoder"),
+                label: Some("Compute Encoder"),
             });
 
     for camera in camera.iter() {
@@ -354,6 +406,58 @@ pub fn render(
             bytemuck::cast_slice(&[*camera]),
         );
     }
+
+    {
+        let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("Mesh Render Pass"),
+        });
+
+        for mesh in meshes.iter() {
+            mesh.compute_pass(&renderer, &submeshes, &mut compute_pass);
+        }
+    }
+
+    {
+        for mesh in meshes.iter() {
+            // Sets adds copy operation to command encoder.
+            // Will copy data from storage buffer on GPU to staging buffer on CPU.
+            encoder.copy_buffer_to_buffer(
+                &mesh.cluster_data_buffer.buffer(),
+                0,
+                &mesh.debug_staging_buffer,
+                0,
+                mesh.staging_buffer_size as _,
+            );
+        }
+    }
+
+    renderer
+        .instance
+        .queue()
+        .submit(std::iter::once(encoder.finish()));
+
+    {
+        for mesh in meshes.iter() {
+            // Note that we're not calling `.await` here.
+            let buffer_slice = mesh.debug_staging_buffer.slice(..);
+            // Gets the future representing when `staging_buffer` can be read from
+            buffer_slice.map_async(wgpu::MapMode::Read, |_| {});
+        }
+    }
+
+    // Poll the device in a blocking manner so that our future resolves.
+    // In an actual application, `device.poll(...)` should
+    // be called in an event loop or on another thread.
+    renderer.device().poll(wgpu::Maintain::Wait);
+
+    let mut encoder =
+        renderer
+            .instance
+            .device()
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Render Encoder"),
+            });
+
     {
         let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Mesh Render Pass"),
@@ -394,7 +498,7 @@ pub fn render(
         &ctx,
         &mut encoder,
         &view,
-        meshes,
+        &mut meshes,
         &submeshes,
         cameras,
         &mut commands,
@@ -406,6 +510,12 @@ pub fn render(
         .queue()
         .submit(std::iter::once(encoder.finish()));
     output.present();
+
+    {
+        for mesh in meshes.iter() {
+            mesh.debug_staging_buffer.unmap();
+        }
+    }
 }
 
 pub fn handle_screen_events(
