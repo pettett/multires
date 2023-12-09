@@ -35,9 +35,7 @@ fn group_and_partition_and_simplify(mesh: &mut WingedMesh, verts: &[glam::Vec4])
 
         println!("Reducing within {} groups:", collapse_requirements.len());
 
-        let e = match mesh.reduce(verts, &mut quadrics, &collapse_requirements, |f, m| {
-            m.partitions[m.get_face(f).part].group_index
-        }) {
+        let e = match mesh.reduce_within_groups(verts, &mut quadrics, &collapse_requirements) {
             Ok(e) => e,
             Err(e) => {
                 println!(

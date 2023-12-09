@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::components::camera_uniform::CameraUniform;
 use crate::components::debug_mesh::DebugMesh;
-use crate::components::multi_res_mesh::{MultiResMeshComponent, SubMeshComponent};
+use crate::components::gpu_multi_res_mesh::{ClusterComponent, MultiResMeshComponent};
 use crate::gui::gui::Gui;
 use crate::vertex::Vertex;
 use bevy_ecs::entity::Entity;
@@ -329,7 +329,7 @@ pub fn render(
     ctx: NonSend<egui::Context>,
     mut state: NonSendMut<egui_winit::State>,
     meshes: Query<&mut MultiResMeshComponent>,
-    submeshes: Query<(Entity, &SubMeshComponent)>,
+    submeshes: Query<(Entity, &ClusterComponent)>,
     camera: Query<&CameraUniform>,
     cameras: Query<(&mut Camera, &mut CameraController, &Transform)>,
     mut commands: Commands,

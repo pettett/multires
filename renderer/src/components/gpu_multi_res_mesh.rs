@@ -13,10 +13,11 @@ use wgpu::util::DeviceExt;
 use crate::core::{BufferGroup, Instance, Renderer};
 
 #[derive(Component)]
-pub struct SubMeshComponent {
-    indices: wgpu::Buffer,
-    partitions: BufferGroup<2>,
+pub struct ClusterComponent {
+    // Range into the index array that this submesh resides
+    index_offset: u32,
     index_count: u32,
+    partitions: BufferGroup<2>,
     pub layer: usize,
     pub part: usize,
     pub error: f32,
@@ -31,10 +32,40 @@ pub struct SubMeshComponent {
     pub model: BufferGroup<1>,
 }
 
-impl SubMeshComponent {
+#[derive(PartialEq, Clone)]
+pub enum ErrorMode {
+    PointDistance { camera_point: Vec3, cam: Camera },
+    MaxError,
+    ExactLayer,
+}
+impl Debug for ErrorMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::PointDistance { .. } => f.debug_struct("PointDistance").finish(),
+            Self::MaxError => f.debug_struct("MaxError").finish(),
+            Self::ExactLayer => f.debug_struct("ExactLayer").finish(),
+        }
+    }
+}
+
+#[derive(Component)]
+pub struct MultiResMeshComponent {
+    index_buffer: wgpu::Buffer,
+    vertex_buffer: wgpu::Buffer,
+    model: BufferGroup<1>,
+    index_format: wgpu::IndexFormat,
+    pub submeshes: HashSet<Entity>,
+    asset: MultiResMesh,
+    pub error_calc: ErrorMode,
+    pub error_target: f32,
+    pub focus_part: usize,
+    pub freeze: bool,
+}
+
+impl ClusterComponent {
     pub fn co_error(
         &self,
-        submeshes: &Query<(Entity, &SubMeshComponent)>,
+        submeshes: &Query<(Entity, &ClusterComponent)>,
         mesh: &MultiResMeshComponent,
     ) -> f32 {
         self.error(mesh).min(match self.co_parent {
@@ -102,7 +133,7 @@ impl SubMeshComponent {
 
     pub fn should_draw(
         &self,
-        submeshes: &Query<(Entity, &SubMeshComponent)>,
+        submeshes: &Query<(Entity, &ClusterComponent)>,
         mesh: &MultiResMeshComponent,
     ) -> bool {
         //TODO: Give each partition a unique parent. This parent should be a
@@ -114,7 +145,7 @@ impl SubMeshComponent {
         // so each partition has a parent group of partitions that form the same bound
         // this is computed as a group such that one of the original member was us,
 
-        // Each demeshed item can look at a unique bound to compare agaisnt, maybe this is what we want
+        // Each demeshed item can look at a unique bound to compare against, maybe this is what we want
 
         // With no parents, assume infinite error
         let mut parent_error_too_large = self.parents.len() != 0;
@@ -143,7 +174,7 @@ impl SubMeshComponent {
 
     pub fn r_should_draw(
         &self,
-        submeshes: &Query<(Entity, &SubMeshComponent)>,
+        submeshes: &Query<(Entity, &ClusterComponent)>,
         mesh: &MultiResMeshComponent,
     ) -> bool {
         let should_draw = self.should_draw(submeshes, mesh);
@@ -160,46 +191,19 @@ impl SubMeshComponent {
         should_draw
     }
 }
-#[derive(PartialEq, Clone)]
-pub enum ErrorMode {
-    PointDistance { camera_point: Vec3, cam: Camera },
-    MaxError,
-    ExactLayer,
-}
-impl Debug for ErrorMode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::PointDistance { .. } => f.debug_struct("PointDistance").finish(),
-            Self::MaxError => f.debug_struct("MaxError").finish(),
-            Self::ExactLayer => f.debug_struct("ExactLayer").finish(),
-        }
-    }
-}
 
-#[derive(Component)]
-pub struct MultiResMeshComponent {
-    vertex_buffer: wgpu::Buffer,
-    model: BufferGroup<1>,
-    index_format: wgpu::IndexFormat,
-    pub submeshes: HashSet<Entity>,
-    asset: MultiResMesh,
-    pub error_calc: ErrorMode,
-    pub error_target: f32,
-    pub focus_part: usize,
-    //puffin_ui : puffin_imgui::ProfilerUi,
-    pub freeze: bool,
-}
 impl MultiResMeshComponent {
     pub fn render_pass<'a>(
         &'a self,
         renderer: &'a Renderer,
-        submeshes: &'a Query<(Entity, &SubMeshComponent)>,
+        submeshes: &'a Query<(Entity, &ClusterComponent)>,
         render_pass: &mut wgpu::RenderPass<'a>,
     ) {
         // 1.
 
         render_pass.set_bind_group(0, renderer.camera_buffer().bind_group(), &[]);
         render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+        render_pass.set_index_buffer(self.index_buffer.slice(..), self.index_format);
 
         render_pass.set_bind_group(2, self.model.bind_group(), &[]);
 
@@ -216,9 +220,12 @@ impl MultiResMeshComponent {
                 //render_pass.draw_indexed(0..submesh.index_count, 0, 0..1);
 
                 render_pass.set_bind_group(1, submesh.partitions.bind_group(), &[]);
-                render_pass.set_index_buffer(submesh.indices.slice(..), self.index_format);
 
-                render_pass.draw_indexed(0..submesh.index_count, 0, 0..1);
+                render_pass.draw_indexed(
+                    submesh.index_offset..submesh.index_offset + submesh.index_count,
+                    0,
+                    0..1,
+                );
             }
             //render_pass.set_pipeline(state.render_pipeline_wire());
             //render_pass.draw_indexed(0..submesh.num_indices, 0, 0..1);
@@ -248,7 +255,7 @@ impl MultiResMeshComponent {
 
     pub fn submesh_error_graph(
         &self,
-        submeshes: &Query<(Entity, &SubMeshComponent)>,
+        submeshes: &Query<(Entity, &ClusterComponent)>,
     ) -> petgraph::prelude::Graph<f32, ()> {
         let mut graph = petgraph::Graph::new();
 
@@ -281,6 +288,8 @@ impl MultiResMeshComponent {
         let mut submeshes = HashSet::new();
         let mut partitions_per_lod: Vec<Vec<Entity>> = Vec::new();
 
+        let mut indices = Vec::new();
+
         for (level, r) in asset.lods.iter().enumerate() {
             println!("Loading layer {level}:");
             let mut partitions = Vec::new();
@@ -288,16 +297,7 @@ impl MultiResMeshComponent {
             for (part, submesh) in r.submeshes.iter().enumerate() {
                 // Map index buffer to global vertex range
 
-                let indices =
-                    instance
-                        .device()
-                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("U32 Index Buffer"),
-                            contents: bytemuck::cast_slice(&submesh.indices),
-                            usage: wgpu::BufferUsages::INDEX,
-                        });
-
-                let num_indices = submesh.indices.len() as u32;
+                let index_count = submesh.indices.len() as u32;
 
                 let info_buffer = BufferGroup::create_plural_storage(
                     &[
@@ -318,10 +318,10 @@ impl MultiResMeshComponent {
                     Some("Uniform Debug Model Buffer"),
                 );
 
-                let sub = SubMeshComponent {
-                    indices,
+                let cluster = ClusterComponent {
                     partitions: info_buffer,
-                    index_count: num_indices,
+                    index_offset: indices.len() as u32,
+                    index_count,
                     layer: level,
                     part,
                     center: submesh.saturated_sphere.center(),
@@ -333,7 +333,11 @@ impl MultiResMeshComponent {
                     group: vec![],
                     co_parent: None,
                 };
-                let e = world.spawn(sub).id();
+
+                // Push to indices *after* recording the offset above
+                indices.extend_from_slice(&submesh.indices);
+
+                let e = world.spawn(cluster).id();
                 if vis {
                     submeshes.insert(e);
                 }
@@ -369,7 +373,7 @@ impl MultiResMeshComponent {
                     // only the partitions with a shared boundary should be listed as dependants
 
                     world
-                        .get_mut::<SubMeshComponent>(child)
+                        .get_mut::<ClusterComponent>(child)
                         .unwrap()
                         .parents
                         .push(partition);
@@ -380,16 +384,16 @@ impl MultiResMeshComponent {
             for (level, partition_entities) in partitions_per_lod.iter().enumerate() {
                 for (i_partition, &partition) in partition_entities.iter().enumerate() {
                     let parents = world
-                        .get::<SubMeshComponent>(partition)
+                        .get::<ClusterComponent>(partition)
                         .unwrap()
                         .parents
                         .clone();
 
                     if parents.len() == 2 {
-                        let mut p1 = world.get_mut::<SubMeshComponent>(parents[1]).unwrap();
+                        let mut p1 = world.get_mut::<ClusterComponent>(parents[1]).unwrap();
                         p1.co_parent = Some(parents[0]);
 
-                        let mut p0 = world.get_mut::<SubMeshComponent>(parents[0]).unwrap();
+                        let mut p0 = world.get_mut::<ClusterComponent>(parents[0]).unwrap();
                         p0.co_parent = Some(parents[1]);
                     } else if parents.len() != 0 {
                         panic!("Non-binary parented DAG, not currently supported");
@@ -397,6 +401,15 @@ impl MultiResMeshComponent {
                 }
             }
         }
+
+        let index_buffer =
+            instance
+                .device()
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("U32 Index Buffer"),
+                    contents: bytemuck::cast_slice(&indices),
+                    usage: wgpu::BufferUsages::INDEX,
+                });
 
         let vertex_buffer =
             instance
@@ -420,6 +433,7 @@ impl MultiResMeshComponent {
         // Update the value stored in this mesh
         world.spawn(MultiResMeshComponent {
             vertex_buffer,
+            index_buffer,
             index_format,
             model,
             asset,

@@ -294,7 +294,6 @@ impl WingedMesh {
         verts: &[glam::Vec4],
         quadrics: &[Quadric],
         queue_count: usize,
-        queue_lookup: impl Fn(FaceID, &WingedMesh) -> usize,
     ) -> Vec<CollapseQueue> {
         println!("Generating Collapse Queues...");
         let mut pq = Vec::with_capacity(queue_count);
@@ -319,7 +318,9 @@ impl WingedMesh {
         for (eid, edge) in self.iter_edges() {
             let error = eid.edge_collapse_error(&self, verts, &quadrics).unwrap();
 
-            pq[queue_lookup(edge.face, self)].queue.push(eid, error);
+            pq[self.partitions[self.get_face(edge.face).part].group_index]
+                .queue
+                .push(eid, error);
 
             #[cfg(feature = "progress")]
             bar.inc(1);
@@ -331,19 +332,14 @@ impl WingedMesh {
     }
 
     /// Returns estimate of error introduced by halving the number of triangles
-    pub fn reduce(
+    pub fn reduce_within_groups(
         &mut self,
         verts: &[glam::Vec4],
         quadrics: &mut [Quadric],
         collapse_requirements: &[usize],
-        queue_lookup: impl Fn(FaceID, &WingedMesh) -> usize + std::marker::Sync,
     ) -> Result<f64> {
-        let mut collapse_queues = self.initialise_collapse_queues(
-            verts,
-            quadrics,
-            collapse_requirements.len(),
-            &queue_lookup,
-        );
+        let mut collapse_queues =
+            self.initialise_collapse_queues(verts, quadrics, collapse_requirements.len());
 
         assert_eq!(collapse_queues.len(), collapse_requirements.len());
         assert_eq!(verts.len(), quadrics.len());
@@ -437,7 +433,7 @@ impl WingedMesh {
 
                 for eid in effected_edges {
                     if let Ok(edge) = self.try_get_edge(eid) {
-                        let edge_queue = queue_lookup(edge.face, &self);
+                        let edge_queue = self.partitions[self.get_face(edge.face).part].group_index;
 
                         let error = eid.edge_collapse_error(&self, verts, &quadrics).unwrap();
 
@@ -585,7 +581,7 @@ mod tests {
 
         for i in 0..4 {
             mesh.assert_valid().unwrap();
-            mesh.reduce(&verts, &mut quadrics, &[mesh.face_count() / 4], |_, _| 0)
+            mesh.reduce_within_groups(&verts, &mut quadrics, &[mesh.face_count() / 4])
                 .unwrap();
         }
 

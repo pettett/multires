@@ -1163,7 +1163,7 @@ pub mod test {
 
         let mut quadrics = mesh.create_quadrics(&verts);
 
-        let e = match mesh.reduce(&verts, &mut quadrics, &[mesh.face_count() / 4], |_, _| 0) {
+        let e = match mesh.reduce_within_groups(&verts, &mut quadrics, &[mesh.face_count() / 4]) {
             Ok(e) => e,
             Err(e) => {
                 panic!(

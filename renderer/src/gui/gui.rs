@@ -1,7 +1,7 @@
 use std::{collections::HashMap, thread, time::Instant};
 
 use crate::{
-    components::multi_res_mesh::{ErrorMode, MultiResMeshComponent, SubMeshComponent},
+    components::gpu_multi_res_mesh::{ClusterComponent, ErrorMode, MultiResMeshComponent},
     core::Renderer,
 };
 use bevy_ecs::{
@@ -34,7 +34,7 @@ impl Gui {
         encoder: &mut wgpu::CommandEncoder,
         view: &wgpu::TextureView,
         mut meshes: Query<&mut MultiResMeshComponent>,
-        submeshes: &Query<(Entity, &SubMeshComponent)>,
+        submeshes: &Query<(Entity, &ClusterComponent)>,
         mut camera: Query<(&mut Camera, &mut CameraController, &Transform)>,
         commands: &mut Commands,
     ) {
@@ -217,7 +217,7 @@ impl Gui {
     pub fn init(
         renderer: &Renderer,
         mut mesh: QueryState<(&MultiResMeshComponent)>,
-        mut submeshes: QueryState<(Entity, &SubMeshComponent)>,
+        mut submeshes: QueryState<(Entity, &ClusterComponent)>,
         world: &World,
     ) -> Self {
         let renderer =

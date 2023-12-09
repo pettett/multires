@@ -142,9 +142,7 @@ pub fn group_and_partition_and_simplify(mut mesh: WingedMesh, verts: &[Vec4], na
 
         println!("Reducing within {} groups:", collapse_requirements.len());
 
-        let e = match mesh.reduce(verts, &mut quadrics, &collapse_requirements, |f, m| {
-            m.partitions[m.get_face(f).part].group_index
-        }) {
+        let e = match mesh.reduce_within_groups(verts, &mut quadrics, &collapse_requirements) {
             Ok(e) => e,
             Err(e) => {
                 println!(
@@ -231,7 +229,7 @@ pub fn apply_simplification(mut mesh: WingedMesh, verts: &[Vec4], name: String) 
             i + 1
         );
 
-        let e = match mesh.reduce(verts, &mut quadrics, &[mesh.face_count() / 4], |_, _| 0) {
+        let e = match mesh.reduce_within_groups(verts, &mut quadrics, &[mesh.face_count() / 4]) {
             Ok(e) => e,
             Err(e) => {
                 println!(

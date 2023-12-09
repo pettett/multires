@@ -1,7 +1,7 @@
 use crate::{
     components::{
         camera_uniform::{update_view_proj, CameraUniform},
-        multi_res_mesh::MultiResMeshComponent,
+        gpu_multi_res_mesh::MultiResMeshComponent,
     },
     gui::gui::Gui,
 };
