@@ -1,6 +1,6 @@
 pub mod mesh;
 
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, sync::Arc};
 
 use common::{asset::Asset, MeshLevel, Meshlet, MultiResMesh, SubMesh};
 

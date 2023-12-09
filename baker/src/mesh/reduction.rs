@@ -1,14 +1,19 @@
-use std::{cmp, sync::mpsc};
- 
-use glam::{vec4};
-#[cfg(feature = "progress")]
-use indicatif::{ ProgressStyle};
+use std::{
+    cmp,
+    sync::{mpsc, Arc},
+    thread,
+};
 
+use glam::vec4;
+#[cfg(feature = "progress")]
+use indicatif::ProgressStyle;
+
+use parking_lot::RwLock;
 use rayon::prelude::*;
 
 use super::{
-    vertex::{VertID},
-    winged_mesh::{EdgeID,  FaceID, MeshError, WingedMesh},
+    vertex::VertID,
+    winged_mesh::{EdgeID, FaceID, MeshError, WingedMesh},
 };
 use anyhow::{Context, Result};
 
@@ -141,9 +146,8 @@ impl VertID {
 }
 
 impl EdgeID {
-
-	/// Grab the source and destination vertex IDs from this edge.
-	/// Source vertex is just `HalfEdge.vert_origin`, destination vertex is `HalfEdge.edge_left_cw`'s vert_origin
+    /// Grab the source and destination vertex IDs from this edge.
+    /// Source vertex is just `HalfEdge.vert_origin`, destination vertex is `HalfEdge.edge_left_cw`'s vert_origin
     pub fn src_dst(self, mesh: &WingedMesh) -> Result<(VertID, VertID)> {
         let edge = mesh.try_get_edge(self)?;
 
@@ -158,7 +162,7 @@ impl EdgeID {
         Ok((orig, dest))
     }
 
-	/// Get a vector A-B for the source and destinations from [`EdgeID::src_dst`]
+    /// Get a vector A-B for the source and destinations from [`EdgeID::src_dst`]
     pub fn edge_vec(&self, mesh: &WingedMesh, verts: &[glam::Vec4]) -> Result<glam::Vec3A> {
         let (src, dst) = self.src_dst(mesh)?;
         let vd: glam::Vec3A = verts[dst.0].into();
@@ -166,53 +170,46 @@ impl EdgeID {
         Ok(vd - vs)
     }
 
-	/// Evaluate if any restrictions on edge collapse apply to this edge.
-	/// 
-	/// Current restrictions:
-	/// - Cannot change group boundaries.
-	/// - Cannot split group into non-contiguous segments.
-	/// - Cannot split with connected triangles which would cause an overlap.
-	/// - Cannot flip normals of any triangles when collapsing.
-    pub fn can_collapse_edge(
-        self,
-        mesh: &WingedMesh,
-        verts: &[glam::Vec4], 
-    ) -> Result<bool> {
-
+    /// Evaluate if any restrictions on edge collapse apply to this edge.
+    ///
+    /// Current restrictions:
+    /// - Cannot change group boundaries.
+    /// - Cannot split group into non-contiguous segments.
+    /// - Cannot split with connected triangles which would cause an overlap.
+    /// - Cannot flip normals of any triangles when collapsing.
+    pub fn can_collapse_edge(self, mesh: &WingedMesh, verts: &[glam::Vec4]) -> Result<bool> {
         let (orig, dest) = self.src_dst(mesh)?;
 
         if !orig.is_group_embedded(mesh) {
             // Cannot move a vertex unless it is in the center of a partition
             return Ok(false);
         }
- 
-		if !orig.is_group_embedded(mesh) {
-			// Cannot change group boundary
-			// Cannot move a vertex unless it is in the center of a partition
-			return Ok(false);
-		}
 
-		if mesh.get_edge(self).twin.is_some() {
-			// This edge has a twin, so a bad collapse risks splitting the group into 2 pieces.
+        if !orig.is_group_embedded(mesh) {
+            // Cannot change group boundary
+            // Cannot move a vertex unless it is in the center of a partition
+            return Ok(false);
+        }
 
-			// If we change the boundary shape, we must move into a manifold embedded position, 
-			// or we risk separating the partition into two chunks, which will break partitioning
-	
-			if !orig.is_local_manifold(mesh) {
-				// We can split the group into two chunks by collapsing onto another edge (non manifold dest),
-				//  or collapsing onto another group
-				if !dest.is_group_embedded(mesh) || !dest.is_local_manifold(mesh) {
-	
-					return Ok(false);
-				}
-			}	
-		}
+        if mesh.get_edge(self).twin.is_some() {
+            // This edge has a twin, so a bad collapse risks splitting the group into 2 pieces.
 
-		// Cannot collapse edges that would result in combining triangles over each other
-		if !mesh.max_one_joint_neighbour_vertices_per_side(self) {
-			return Ok(false);
-		}
-		
+            // If we change the boundary shape, we must move into a manifold embedded position,
+            // or we risk separating the partition into two chunks, which will break partitioning
+
+            if !orig.is_local_manifold(mesh) {
+                // We can split the group into two chunks by collapsing onto another edge (non manifold dest),
+                //  or collapsing onto another group
+                if !dest.is_group_embedded(mesh) || !dest.is_local_manifold(mesh) {
+                    return Ok(false);
+                }
+            }
+        }
+
+        // Cannot collapse edges that would result in combining triangles over each other
+        if !mesh.max_one_joint_neighbour_vertices_per_side(self) {
+            return Ok(false);
+        }
 
         // Test normals of triangles before and after the swap
         for &e in mesh
@@ -261,7 +258,6 @@ impl EdgeID {
         verts: &[glam::Vec4],
         quadric_errors: &[Quadric],
     ) -> Result<Error> {
-
         let (orig, dest) = self.src_dst(mesh)?;
 
         // Collapsing this edge would move the origin to the destination, so we find the error of the origin at the merged point.
@@ -290,9 +286,9 @@ impl WingedMesh {
         quadrics
     }
 
-	/// Generate a vector of priority queues for the mesh, based on errors calculated in `edge_collapse_error`.
-	/// 
-	/// `queue_lookup` -  Function to index a face into the queue it should have its error placed into. Must output `0..=queue_count`.
+    /// Generate a vector of priority queues for the mesh, based on errors calculated in `edge_collapse_error`.
+    ///
+    /// `queue_lookup` -  Function to index a face into the queue it should have its error placed into. Must output `0..=queue_count`.
     pub fn initialise_collapse_queues(
         &self,
         verts: &[glam::Vec4],
@@ -321,12 +317,9 @@ impl WingedMesh {
         let bar = indicatif::ProgressBar::new(self.edge_count() as _);
 
         for (eid, edge) in self.iter_edges() {
-            let error = eid.edge_collapse_error(&self, verts, &quadrics).unwrap() ;
+            let error = eid.edge_collapse_error(&self, verts, &quadrics).unwrap();
 
-			pq[queue_lookup(edge.face, self)] 
-				.queue
-				.push(eid, error);
-            
+            pq[queue_lookup(edge.face, self)].queue.push(eid, error);
 
             #[cfg(feature = "progress")]
             bar.inc(1);
@@ -357,7 +350,7 @@ impl WingedMesh {
 
         // Priority queue with every vertex and their errors.
 
-        let mut new_error =  0.0;
+        let mut new_error = 0.0;
         println!("Beginning Collapse...");
         // let tris = self.face_count();
         // // Need to remove half the triangles - each reduction removes 2
@@ -367,122 +360,95 @@ impl WingedMesh {
         #[cfg(feature = "progress")]
         bar.set_style(ProgressStyle::with_template("{wide_bar} {pos}/{len} ({per_sec})").unwrap());
 
-	
-        collapse_requirements
-            .iter()
-            .enumerate()
-            .for_each(|(qi, &requirement)| {
-                #[cfg(test)]
-                {
-                    //self.assert_valid();
-                    for (&q, _e) in collapse_queues[qi].queue.iter() {
-                        assert!(
-                            self.try_get_edge(q).is_ok(),
-                            "Invalid edge in collapse queue {}",
-                            qi
-                        );
-                        self.assert_edge_valid(q).context("Invalid edge in collapse queue: ").unwrap();
-                    }
+        for (qi, &requirement) in collapse_requirements.iter().enumerate() {
+            #[cfg(test)]
+            {
+                //self.assert_valid();
+                for (&q, _e) in collapse_queues[qi].queue.iter() {
+                    assert!(
+                        self.try_get_edge(q).is_ok(),
+                        "Invalid edge in collapse queue {}",
+                        qi
+                    );
+                    self.assert_edge_valid(q)
+                        .context("Invalid edge in collapse queue: ")
+                        .unwrap();
                 }
+            }
 
-                //#[cfg(feature = "progress")]
-                //bar.set_message(format!("{err:.3e}"));
+            //#[cfg(feature = "progress")]
+            //bar.set_message(format!("{err:.3e}"));
 
-                'outer: for i in 0..requirement {
-                    let (orig, dest, eid, err) = loop {
-                        let (_, Error(cmp::Reverse(err), eid)) =
-                            match collapse_queues[qi].queue.pop() {
-                                Some(err) => err,
-                                None => {
-                                    // FIXME: how to handle early exits
-                                    #[cfg(feature = "progress")]
-                                    bar.println(
-                                        "Out of valid edges - Exiting early from de-meshing",
-                                    );
-                                    break 'outer;
-                                }
-                            };
-
-
-                        let Ok((orig, dest)) = eid.src_dst(&self) else {
-							// Invalid edges are allowed to show up in the search
-                            continue;
-                        };
-
-                        if orig == dest {
-                            let e = self.get_edge(eid);
-                            assert_ne!(
-                                orig,
-                                dest,
-                                "Failed at {i} within group {qi} on edge id {eid:?}:\n {e:?}\n with face:\n {:?}", 
-                                self.get_face(e.face)
-                            );
-                        }
-
-						// TODO: We check these here, as many operations can influence if an edge can be collapsed due to these factors,
-						//		 but really an edge collapse should update errors of more edges in the region around it.
-						// 		 - However is is slightly faster to manage this here
-
-						
-						if !eid.can_collapse_edge(self, verts).unwrap() {
-							continue;
-						}
-
-
-                        break (orig, dest, eid, err);
-                    };
-
-                    new_error += err;
-
-                    // Collapse edge, and update quadrics (update before collapsing, as vertex becomes invalid)
-
-                    #[cfg(not(test))]
-                    {
-                        if self.try_get_vert(orig).is_err() || self.try_get_vert(dest).is_err() {
+            'outer: for i in 0..requirement {
+                let (orig, dest, eid, err) = loop {
+                    let (_, Error(cmp::Reverse(err), eid)) = match collapse_queues[qi].queue.pop() {
+                        Some(err) => err,
+                        None => {
+                            // FIXME: how to handle early exits
                             #[cfg(feature = "progress")]
-                            bar.println("Warning - drawn 'valid' edge with no orig or dest");
-                            continue;
-                        }
-                    }
-
-                    #[cfg(test)]
-                    {
-                        assert!(orig.is_group_embedded(&self));
-                    }
-
-                    quadrics[dest.0].0 += quadrics[orig.0].0;
-
-                    //TODO: When we collapse an edge, recalculate any effected edges.
-
-                    let mut effected_edges: Vec<_> = self.get_vert(orig).outgoing_edges().to_vec();
-                    effected_edges.extend(self.get_vert(dest).outgoing_edges());
-                    effected_edges.extend(self.get_vert(orig).incoming_edges());
-                    effected_edges.extend(self.get_vert(dest).incoming_edges());
-
-					#[allow(unreachable_patterns)]
-                    match self.collapse_edge(eid) {
-                        Ok(()) => (),
-						#[cfg(test)] e => e.unwrap(),
-						Err(e) => { 
-                            println!("{e} - Exiting early from de-meshing");
+                            bar.println("Out of valid edges - Exiting early from de-meshing");
                             break 'outer;
                         }
+                    };
+
+                    let Ok((orig, dest)) = eid.src_dst(&self) else {
+                        // Invalid edges are allowed to show up in the search
+                        continue;
+                    };
+
+                    // TODO: We check these here, as many operations can influence if an edge can be collapsed due to these factors,
+                    //		 but really an edge collapse should update errors of more edges in the region around it.
+                    // 		 - However is is slightly faster to manage this here
+
+                    if !eid.can_collapse_edge(self, verts).unwrap() {
+                        continue;
                     }
 
-                    for eid in effected_edges {
-                        if let Ok(edge) = self.try_get_edge(eid)  {
-                            let edge_queue = queue_lookup(edge.face, &self);
+                    break (orig, dest, eid, err);
+                };
 
-                            let error = eid.edge_collapse_error(&self, verts, &quadrics).unwrap();
-                            
-                            collapse_queues[edge_queue].queue.push(eid, error);
-                        }
+                new_error += err;
+
+                // Collapse edge, and update quadrics (update before collapsing, as vertex becomes invalid)
+
+                #[cfg(test)]
+                {
+                    assert!(orig.is_group_embedded(&self));
+                }
+
+                //TODO: When we collapse an edge, recalculate any effected edges.
+
+                let mut effected_edges: Vec<_> = self.get_vert(orig).outgoing_edges().to_vec();
+                effected_edges.extend(self.get_vert(dest).outgoing_edges());
+                effected_edges.extend(self.get_vert(orig).incoming_edges());
+                effected_edges.extend(self.get_vert(dest).incoming_edges());
+
+                quadrics[dest.0].0 += quadrics[orig.0].0;
+                #[allow(unreachable_patterns)]
+                match self.collapse_edge(eid) {
+                    Ok(()) => (),
+                    #[cfg(test)]
+                    e => e.unwrap(),
+                    Err(e) => {
+                        println!("{e} - Exiting early from de-meshing");
+                        break 'outer;
                     }
                 }
 
-                #[cfg(feature = "progress")]
-                bar.inc(1);
-            });
+                for eid in effected_edges {
+                    if let Ok(edge) = self.try_get_edge(eid) {
+                        let edge_queue = queue_lookup(edge.face, &self);
+
+                        let error = eid.edge_collapse_error(&self, verts, &quadrics).unwrap();
+
+                        collapse_queues[edge_queue].queue.push(eid, error);
+                    }
+                }
+            }
+
+            #[cfg(feature = "progress")]
+            bar.inc(1);
+        }
 
         #[cfg(feature = "progress")]
         bar.finish();
