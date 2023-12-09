@@ -1,11 +1,11 @@
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use bincode::{config, Decode, Encode};
 use glam::Vec3;
 
 use crate::asset;
 
-#[derive(Debug, Default, Clone, Decode, Encode)]
+#[derive(Debug, Default, Clone, Decode, Encode, PartialEq)]
 pub struct BoundingSphere {
     center: [f32; 3],
     radius: f32,
@@ -102,12 +102,15 @@ pub struct MultiResMesh {
 }
 
 /// Information for a group on layer n
-#[derive(Debug, Clone, Default, Decode, Encode)]
+#[derive(Debug, Clone, Default, Decode, Encode, PartialEq)]
 pub struct GroupInfo {
     /// Partitions in LOD`n-1` that we were created from. Will be empty in LOD0
     //pub child_partitions: Vec<usize>,
     // Partitions that we created by subdividing ourselves
     pub partitions: Vec<usize>,
+
+    /// Indexes of all groups that touch this one and could be effected by an edge collapse in this group
+    pub group_neighbours: BTreeSet<usize>,
 
     pub tris: usize,
     /// Monotonic bounds for error function of partitions. Includes bounds of all other partitions in the group,
@@ -116,7 +119,7 @@ pub struct GroupInfo {
 }
 
 /// Information for a partition on layer n
-#[derive(Debug, Clone, Decode, Encode)]
+#[derive(Debug, Clone, Decode, Encode, PartialEq)]
 pub struct PartitionInfo {
     /// Group in the previous LOD layer (LOD`n-1`) we have been attached to. LOD0 will have none
     pub child_group_index: Option<usize>,

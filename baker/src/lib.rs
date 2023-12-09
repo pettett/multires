@@ -1,5 +1,7 @@
 pub mod mesh;
 
+use std::collections::BTreeSet;
+
 use common::{asset::Asset, MeshLevel, Meshlet, MultiResMesh, SubMesh};
 
 use glam::Vec4;
@@ -208,7 +210,8 @@ pub fn apply_simplification(mut mesh: WingedMesh, verts: &[Vec4], name: String) 
         common::GroupInfo {
             tris: 0,
             monotonic_bound: Default::default(),
-            partitions: vec![0]
+            partitions: vec![0],
+            group_neighbours: BTreeSet::new()
         };
         1
     ];

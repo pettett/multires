@@ -1,15 +1,14 @@
-use std::{cmp, collections::HashSet};
-
-use common::graph::petgraph_to_svg;
-use glam::{vec4, Vec4, Vec4Swizzles};
+use std::{cmp, sync::mpsc};
+ 
+use glam::{vec4};
 #[cfg(feature = "progress")]
-use indicatif::{ParallelProgressIterator, ProgressStyle};
-use parking_lot::RwLock;
+use indicatif::{ ProgressStyle};
+
 use rayon::prelude::*;
 
 use super::{
-    vertex::{VertID, Vertex},
-    winged_mesh::{EdgeID, Face, FaceID, MeshError, WingedMesh},
+    vertex::{VertID},
+    winged_mesh::{EdgeID,  FaceID, MeshError, WingedMesh},
 };
 use anyhow::{Context, Result};
 
@@ -142,6 +141,9 @@ impl VertID {
 }
 
 impl EdgeID {
+
+	/// Grab the source and destination vertex IDs from this edge.
+	/// Source vertex is just `HalfEdge.vert_origin`, destination vertex is `HalfEdge.edge_left_cw`'s vert_origin
     pub fn src_dst(self, mesh: &WingedMesh) -> Result<(VertID, VertID)> {
         let edge = mesh.try_get_edge(self)?;
 
@@ -156,6 +158,7 @@ impl EdgeID {
         Ok((orig, dest))
     }
 
+	/// Get a vector A-B for the source and destinations from [`EdgeID::src_dst`]
     pub fn edge_vec(&self, mesh: &WingedMesh, verts: &[glam::Vec4]) -> Result<glam::Vec3A> {
         let (src, dst) = self.src_dst(mesh)?;
         let vd: glam::Vec3A = verts[dst.0].into();
@@ -163,12 +166,13 @@ impl EdgeID {
         Ok(vd - vs)
     }
 
-	/// Evaluate if any restrictions on edge collapse apply to this edge
+	/// Evaluate if any restrictions on edge collapse apply to this edge.
+	/// 
 	/// Current restrictions:
-	/// - Cannot change group boundaries
-	/// - Cannot split group into non-contiguous segments
-	/// - Cannot split with connected triangles which would cause an overlap
-	/// - Cannot flip normals of any triangles when collapsing
+	/// - Cannot change group boundaries.
+	/// - Cannot split group into non-contiguous segments.
+	/// - Cannot split with connected triangles which would cause an overlap.
+	/// - Cannot flip normals of any triangles when collapsing.
     pub fn can_collapse_edge(
         self,
         mesh: &WingedMesh,
@@ -255,13 +259,13 @@ impl EdgeID {
         self,
         mesh: &WingedMesh,
         verts: &[glam::Vec4],
-        quadric_errors: &[RwLock<Quadric>],
+        quadric_errors: &[Quadric],
     ) -> Result<Error> {
 
         let (orig, dest) = self.src_dst(mesh)?;
 
         // Collapsing this edge would move the origin to the destination, so we find the error of the origin at the merged point.
-        let q = Quadric(quadric_errors[orig.0].read().0 + quadric_errors[dest.0].read().0);
+        let q = Quadric(quadric_errors[orig.0].0 + quadric_errors[dest.0].0);
 
         Ok(Error(
             cmp::Reverse(q.quadric_error(verts[orig.0].into())),
@@ -271,7 +275,7 @@ impl EdgeID {
 }
 
 impl WingedMesh {
-    pub fn create_quadrics(&self, verts: &[glam::Vec4]) -> Vec<RwLock<Quadric>> {
+    pub fn create_quadrics(&self, verts: &[glam::Vec4]) -> Vec<Quadric> {
         let mut quadrics = Vec::with_capacity(verts.len());
         //The combination of this and the next step is completely safe, as we initialise everything.
         unsafe {
@@ -281,18 +285,21 @@ impl WingedMesh {
         quadrics
             .par_iter_mut()
             .enumerate()
-            .for_each(|(i, q)| *q = RwLock::new(VertID(i).generate_error_matrix(&self, verts)));
+            .for_each(|(i, q)| *q = VertID(i).generate_error_matrix(&self, verts));
 
         quadrics
     }
 
+	/// Generate a vector of priority queues for the mesh, based on errors calculated in `edge_collapse_error`.
+	/// 
+	/// `queue_lookup` -  Function to index a face into the queue it should have its error placed into. Must output `0..=queue_count`.
     pub fn initialise_collapse_queues(
         &self,
         verts: &[glam::Vec4],
-        quadrics: &[RwLock<Quadric>],
+        quadrics: &[Quadric],
         queue_count: usize,
         queue_lookup: impl Fn(FaceID, &WingedMesh) -> usize,
-    ) -> Vec<RwLock<CollapseQueue>> {
+    ) -> Vec<CollapseQueue> {
         println!("Generating Collapse Queues...");
         let mut pq = Vec::with_capacity(queue_count);
 
@@ -301,9 +308,9 @@ impl WingedMesh {
 
         let queue_t = priority_queue::PriorityQueue::with_capacity(self.edge_count() / queue_count);
         for _ in 0..queue_count {
-            pq.push(RwLock::new(CollapseQueue {
+            pq.push(CollapseQueue {
                 queue: queue_t.clone(),
-            }));
+            });
 
             #[cfg(feature = "progress")]
             bar.inc(1);
@@ -316,8 +323,7 @@ impl WingedMesh {
         for (eid, edge) in self.iter_edges() {
             let error = eid.edge_collapse_error(&self, verts, &quadrics).unwrap() ;
 
-			pq[queue_lookup(edge.face, self)]
-				.get_mut()
+			pq[queue_lookup(edge.face, self)] 
 				.queue
 				.push(eid, error);
             
@@ -335,11 +341,11 @@ impl WingedMesh {
     pub fn reduce(
         &mut self,
         verts: &[glam::Vec4],
-        quadrics: &mut [RwLock<Quadric>],
+        quadrics: &mut [Quadric],
         collapse_requirements: &[usize],
         queue_lookup: impl Fn(FaceID, &WingedMesh) -> usize + std::marker::Sync,
     ) -> Result<f64> {
-        let collapse_queues = self.initialise_collapse_queues(
+        let mut collapse_queues = self.initialise_collapse_queues(
             verts,
             quadrics,
             collapse_requirements.len(),
@@ -351,7 +357,7 @@ impl WingedMesh {
 
         // Priority queue with every vertex and their errors.
 
-        let mut new_error = RwLock::new(0.0);
+        let mut new_error =  0.0;
         println!("Beginning Collapse...");
         // let tris = self.face_count();
         // // Need to remove half the triangles - each reduction removes 2
@@ -361,7 +367,7 @@ impl WingedMesh {
         #[cfg(feature = "progress")]
         bar.set_style(ProgressStyle::with_template("{wide_bar} {pos}/{len} ({per_sec})").unwrap());
 
- 
+	
         collapse_requirements
             .iter()
             .enumerate()
@@ -369,7 +375,7 @@ impl WingedMesh {
                 #[cfg(test)]
                 {
                     //self.assert_valid();
-                    for (&q, _e) in collapse_queues[qi].read().queue.iter() {
+                    for (&q, _e) in collapse_queues[qi].queue.iter() {
                         assert!(
                             self.try_get_edge(q).is_ok(),
                             "Invalid edge in collapse queue {}",
@@ -385,7 +391,7 @@ impl WingedMesh {
                 'outer: for i in 0..requirement {
                     let (orig, dest, eid, err) = loop {
                         let (_, Error(cmp::Reverse(err), eid)) =
-                            match collapse_queues[qi].write().queue.pop() {
+                            match collapse_queues[qi].queue.pop() {
                                 Some(err) => err,
                                 None => {
                                     // FIXME: how to handle early exits
@@ -399,6 +405,7 @@ impl WingedMesh {
 
 
                         let Ok((orig, dest)) = eid.src_dst(&self) else {
+							// Invalid edges are allowed to show up in the search
                             continue;
                         };
 
@@ -425,7 +432,7 @@ impl WingedMesh {
                         break (orig, dest, eid, err);
                     };
 
-                    *new_error.write() += err;
+                    new_error += err;
 
                     // Collapse edge, and update quadrics (update before collapsing, as vertex becomes invalid)
 
@@ -443,7 +450,7 @@ impl WingedMesh {
                         assert!(orig.is_group_embedded(&self));
                     }
 
-                    quadrics[dest.0].write().0 += quadrics[orig.0].read().0;
+                    quadrics[dest.0].0 += quadrics[orig.0].0;
 
                     //TODO: When we collapse an edge, recalculate any effected edges.
 
@@ -468,7 +475,7 @@ impl WingedMesh {
 
                             let error = eid.edge_collapse_error(&self, verts, &quadrics).unwrap();
                             
-                            collapse_queues[edge_queue].write().queue.push(eid, error);
+                            collapse_queues[edge_queue].queue.push(eid, error);
                         }
                     }
                 }
@@ -480,7 +487,7 @@ impl WingedMesh {
         #[cfg(feature = "progress")]
         bar.finish();
         // Get mut to save a single lock
-        Ok(*new_error.get_mut())
+        Ok(new_error)
     }
 }
 

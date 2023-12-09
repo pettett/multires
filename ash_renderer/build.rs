@@ -3,8 +3,8 @@
 use std::fs;
 
 #[cfg(not(feature = "shaderc"))]
-fn main(){
-	//TODO: better way to skip build script
+fn main() {
+    //TODO: better way to skip build script
 }
 
 #[cfg(feature = "shaderc")]
@@ -16,7 +16,7 @@ fn main() {
 
     // Compile all shaders to spirv::1.6
 
-    let mut compiler = shaderc::Compiler::new().unwrap();
+    let compiler = shaderc::Compiler::new().unwrap();
     let mut options = shaderc::CompileOptions::new().unwrap();
     options.set_target_spirv(shaderc::SpirvVersion::V1_6);
     options.add_macro_definition("EP", Some("main"));

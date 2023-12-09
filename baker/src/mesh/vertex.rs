@@ -28,7 +28,7 @@ impl IntegerId for VertID {
     }
 }
 
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct Vertex {
     // Edge with vert_source = this id
     outgoing_edges: Vec<EdgeID>,

@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use super::winged_mesh::WingedMesh;
 use common::graph::petgraph_to_svg;
 use glam::Vec4Swizzles;
@@ -102,6 +104,7 @@ impl WingedMesh {
         Ok(())
     }
 
+    /// Group clusters, recording the bounding boxes for all groups.
     pub fn group(
         &mut self,
         config: &metis::PartitioningConfig,
@@ -120,14 +123,15 @@ impl WingedMesh {
             common::GroupInfo {
                 tris: 0,
                 monotonic_bound: Default::default(),
-                partitions: Vec::new()
+                partitions: Vec::new(),
+                group_neighbours: BTreeSet::new(),
             };
             group_count
         ];
 
         //std::mem::swap(&mut self.groups, &mut new_groups);
 
-        // Partition -> Group
+        // Tell each partition what group they now belong to.
         if group_count != 1 {
             for (part, &group) in config
                 .partition_from_graph(group_count as u32, &graph)?
@@ -142,10 +146,18 @@ impl WingedMesh {
             }
         };
 
+        // Record the partitions that each of these groups come from
         for (part, info) in self.partitions.iter().enumerate() {
             new_groups[info.group_index].partitions.push(part);
+
+            for n in graph.neighbors(petgraph::graph::node_index(part)) {
+                new_groups[info.group_index]
+                    .group_neighbours
+                    .insert(self.partitions[n.index()].group_index);
+            }
         }
 
+        // MONOTONIC BOUND ------ get sums of positions
         for (_fid, f) in self.iter_faces() {
             let f_group_info = &mut new_groups[self.partitions[f.part].group_index];
             f_group_info.tris += 1;
@@ -159,7 +171,7 @@ impl WingedMesh {
             g.monotonic_bound.normalise(g.tris);
         }
 
-        // Find radii of groups
+        // Find radii of groups, now that they have accurate positions
         for (_fid, f) in self.iter_faces() {
             let f_group_info = &mut new_groups[self.partitions[f.part].group_index];
 
@@ -291,5 +303,72 @@ impl WingedMesh {
 
         Ok(self.partitions.len())
         //Ok(groups)
+    }
+}
+
+#[cfg(test)]
+pub mod tests {
+    use std::collections::HashSet;
+
+    use anyhow::Context;
+
+    use crate::mesh::winged_mesh::{test::TEST_MESH_LOW, MeshError};
+
+    use super::*;
+
+    #[test]
+    pub fn test_group_neighbours() -> anyhow::Result<()> {
+        let test_config = &metis::PartitioningConfig {
+            method: metis::PartitioningMethod::MultilevelKWay,
+            force_contiguous_partitions: true,
+            minimize_subgraph_degree: Some(true),
+            ..Default::default()
+        };
+        let (mut mesh, verts) = WingedMesh::from_gltf(TEST_MESH_LOW);
+
+        mesh.partition_full_mesh(test_config, 200)?;
+        mesh.group(test_config, &verts)?;
+
+        // What does it mean for two groups to be neighbours?
+
+        // - An edge collapse in a group can only effect edges in a group and its neighbours.
+
+        // Define effect as changing the estimated error.
+
+        // - An edge collapse will effect any edges where the quartics change, i.e. surrounding the output vertex.
+
+        // This must be correct for the purposes of parallelisation, as we don't want to parallel collapse edges in neighbouring groups.
+
+        for (_, vert) in mesh.iter_verts() {
+            let mut groups = HashSet::new();
+
+            for &out in vert.outgoing_edges() {
+                groups.insert(
+                    mesh.partitions[mesh.get_face(mesh.get_edge(out).face).part].group_index,
+                );
+            }
+            for &out in vert.incoming_edges() {
+                groups.insert(
+                    mesh.partitions[mesh.get_face(mesh.get_edge(out).face).part].group_index,
+                );
+            }
+
+            for &g in &groups {
+                for &g2 in &groups {
+                    if g != g2 {
+                        if !mesh.groups[g].group_neighbours.contains(&g2) {
+                            println!("{:?}", mesh.groups[g].group_neighbours);
+                            println!("{:?}", mesh.groups[g2].group_neighbours);
+                            println!("{:?}", groups);
+
+                            Err(MeshError::InvalidNeighbours(g, g2))
+                                .context(MeshError::InvalidGroup(g))?;
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(())
     }
 }

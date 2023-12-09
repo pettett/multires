@@ -30,6 +30,10 @@ pub enum MeshError {
     SingletonEdge(EdgeID, VertID),
     #[error("Failed edge collapse on {0:?}, {1:?} -> {2:?}")]
     EdgeCollapse(EdgeID, VertID, VertID),
+    #[error("Group {0:?} is invalid")]
+    InvalidGroup(usize),
+    #[error("{0:?} and {1:?} should be neighbours but are not")]
+    InvalidNeighbours(usize, usize),
     #[error("Ran out of valid edges while reducing")]
     OutOfEdges,
 }
@@ -102,7 +106,7 @@ impl FaceID {
     }
 }
 
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct HalfEdge {
     pub vert_origin: VertID,
     // This is not actually needed, as the destination is the origin of the cw edge
@@ -124,11 +128,14 @@ pub struct Face {
     pub part: usize,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct WingedMesh {
     faces: Vec<Option<Face>>,
+    face_count: usize,
     edges: Vec<Option<HalfEdge>>,
+    edge_count: usize,
     verts: Vec<Option<Vertex>>,
+    vert_count: usize,
     pub partitions: Vec<PartitionInfo>,
     pub groups: Vec<GroupInfo>,
 }
@@ -139,6 +146,9 @@ impl WingedMesh {
             faces: Vec::with_capacity(faces),
             edges: Vec::with_capacity(faces * 3),
             verts: Vec::with_capacity(verts),
+            face_count: faces,
+            edge_count: faces * 3,
+            vert_count: verts,
             groups: vec![],
             partitions: vec![PartitionInfo {
                 child_group_index: None,
@@ -220,26 +230,29 @@ impl WingedMesh {
             self.assert_face_valid(FaceID(face)).unwrap();
         }
 
-        self.faces[face] = None
+        self.faces[face] = None;
+        self.face_count -= 1;
     }
     pub fn wipe_edge(&mut self, EdgeID(edge): EdgeID) {
-        self.edges[edge] = None
+        self.edges[edge] = None;
+        self.edge_count -= 1;
     }
 
     pub fn wipe_vert(&mut self, VertID(vert): VertID) {
-        self.verts[vert] = None
+        self.verts[vert] = None;
+        self.vert_count -= 1;
     }
 
     pub fn face_count(&self) -> usize {
-        self.faces.iter().filter_map(|x| x.as_ref()).count()
+        self.face_count
     }
 
     pub fn edge_count(&self) -> usize {
-        self.edges.iter().filter_map(|x| x.as_ref()).count()
+        self.edge_count
     }
 
     pub fn vert_count(&self) -> usize {
-        self.verts.iter().filter_map(|x| x.as_ref()).count()
+        self.vert_count
     }
 
     // pub fn iter_faces(&self) -> impl Iterator<Item = (FaceID, &Face)> {
