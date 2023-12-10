@@ -63,13 +63,21 @@ impl Debug for ErrorMode {
     }
 }
 
+#[repr(C)]
+#[derive(bytemuck::Zeroable, bytemuck::Pod, Clone, Copy)]
+struct DrawData {
+    error: f32,
+}
+
 #[derive(Component)]
 pub struct MultiResMeshComponent {
-    index_buffer: wgpu::Buffer,
+    index_buffer: BufferGroup<1>,
     vertex_buffer: wgpu::Buffer,
     cluster_count: u32,
     pub can_draw_buffer: BufferGroup<1>,
-    pub cluster_data_buffer: BufferGroup<1>,
+    pub cluster_data_real_error_buffer: BufferGroup<1>,
+    pub cluster_data_layer_error_buffer: BufferGroup<1>,
+    pub draw_data_buffer: BufferGroup<1>,
     pub debug_staging_buffer: wgpu::Buffer,
     pub staging_buffer_size: usize,
     model: BufferGroup<1>,
@@ -109,7 +117,7 @@ impl ClusterComponent {
         }
     }
 
-    // Issue - parents of a group may dissagree on if to draw, if they have differing errors due to being in different groups.
+    // Issue - parents of a group may disagree on if to draw, if they have differing errors due to being in different groups.
 
     // Solution Idea - merge the parents into a single node after calculating view dependant error,
     // taking the smaller of the two's errors to ensure other things in the group can still be drawn at the exact same time.
@@ -187,9 +195,29 @@ impl MultiResMeshComponent {
         submeshes: &'a Query<(Entity, &ClusterComponent)>,
         render_pass: &mut wgpu::ComputePass<'a>,
     ) {
+        {
+            renderer.queue().write_buffer(
+                self.draw_data_buffer.buffer(),
+                0,
+                &bytemuck::cast_slice(&[DrawData {
+                    error: self.error_target,
+                }]),
+            );
+        }
+
         render_pass.set_pipeline(&renderer.compute_pipeline);
         render_pass.set_bind_group(0, self.can_draw_buffer.bind_group(), &[]);
-        render_pass.set_bind_group(1, self.cluster_data_buffer.bind_group(), &[]);
+
+        let bind_1 = if self.error_calc == ErrorMode::ExactLayer {
+            self.cluster_data_layer_error_buffer.bind_group()
+        } else {
+            self.cluster_data_real_error_buffer.bind_group()
+        };
+
+        render_pass.set_bind_group(1, bind_1, &[]);
+
+        render_pass.set_bind_group(2, self.index_buffer.bind_group(), &[]);
+        render_pass.set_bind_group(3, self.draw_data_buffer.bind_group(), &[]);
         render_pass.dispatch_workgroups(self.cluster_count, 1, 1);
     }
 
@@ -199,47 +227,50 @@ impl MultiResMeshComponent {
         submeshes: &'a Query<(Entity, &ClusterComponent)>,
         render_pass: &mut wgpu::RenderPass<'a>,
     ) {
-        // 1.
-        {
-            for i in 0..self.cluster_count {
-                let r = self.debug_staging_buffer.slice(..).get_mapped_range();
-                print!(
-                    "{}|",
-                    000 + ((r[(i as usize) * 4 + 0] as u32) << 0)
-                        + ((r[(i as usize) * 4 + 1] as u32) << 8)
-                        + ((r[(i as usize) * 4 + 2] as u32) << 16)
-                        + ((r[(i as usize) * 4 + 3] as u32) << 26)
-                );
-            }
-            println!("");
-        }
+        //{
+        //    for i in 0..self.staging_buffer_size {
+        //        let r = self.debug_staging_buffer.slice(..).get_mapped_range();
+        //        print!("{}|", r[i]);
+        //    }
+        //    println!("");
+        //}
 
         render_pass.set_bind_group(0, renderer.camera_buffer().bind_group(), &[]);
         render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-        render_pass.set_index_buffer(self.index_buffer.slice(..), self.index_format);
+        render_pass.set_index_buffer(self.can_draw_buffer.buffer().slice(..), self.index_format);
 
         render_pass.set_bind_group(2, self.model.bind_group(), &[]);
 
         render_pass.set_pipeline(renderer.render_pipeline());
         for (_, submesh) in submeshes.iter() {
-            if submesh.r_should_draw(submeshes, self) {
-                //let submesh = submeshes.get(*s).unwrap();
+            render_pass.set_bind_group(1, submesh.partitions.bind_group(), &[]);
 
-                //render_pass.set_pipeline(renderer.render_pipeline_wire());
-                //
-                //render_pass.set_bind_group(1, submesh.partitions.bind_group(), &[]);
-                //render_pass.set_index_buffer(submesh.indices.slice(..), self.index_format);
-                //
-                //render_pass.draw_indexed(0..submesh.index_count, 0, 0..1);
+            render_pass.draw_indexed(0..(self.index_buffer.buffer().size() as u32 / 4), 0, 0..1);
 
-                render_pass.set_bind_group(1, submesh.partitions.bind_group(), &[]);
+            render_pass.set_pipeline(renderer.render_pipeline_wire());
 
-                render_pass.draw_indexed(
-                    submesh.index_offset..submesh.index_offset + submesh.index_count,
-                    0,
-                    0..1,
-                );
-            }
+            render_pass.draw_indexed(0..(self.index_buffer.buffer().size() as u32 / 4), 0, 0..1);
+
+            break;
+
+            // if submesh.r_should_draw(submeshes, self) {
+            //     //let submesh = submeshes.get(*s).unwrap();
+
+            //     //render_pass.set_pipeline(renderer.render_pipeline_wire());
+            //     //
+            //     //render_pass.set_bind_group(1, submesh.partitions.bind_group(), &[]);
+            //     //render_pass.set_index_buffer(submesh.indices.slice(..), self.index_format);
+            //     //
+            //     //render_pass.draw_indexed(0..submesh.index_count, 0, 0..1);
+
+            //     // render_pass.set_bind_group(1, submesh.partitions.bind_group(), &[]);
+
+            //     // render_pass.draw_indexed(
+            //     //     submesh.index_offset..submesh.index_offset + submesh.index_count,
+            //     //     0,
+            //     //     0..1,
+            //     // );
+            // }
             //render_pass.set_pipeline(state.render_pipeline_wire());
             //render_pass.draw_indexed(0..submesh.num_indices, 0, 0..1);
         }
@@ -300,7 +331,8 @@ impl MultiResMeshComponent {
         let mut clusters_per_lod: Vec<Vec<Entity>> = Vec::new();
 
         let mut all_clusters = Vec::new();
-        let mut all_clusters_data = Vec::new();
+        let mut all_clusters_data_real_error = Vec::new();
+        let mut all_clusters_data_layer_error = Vec::new();
         let mut indices = Vec::new();
 
         for (level, r) in asset.lods.iter().enumerate() {
@@ -332,7 +364,7 @@ impl MultiResMeshComponent {
                 );
 
                 let cluster = ClusterComponent {
-                    id: all_clusters_data.len(),
+                    id: all_clusters_data_real_error.len(),
                     partitions: info_buffer,
                     index_offset: indices.len() as u32,
                     index_count,
@@ -348,8 +380,8 @@ impl MultiResMeshComponent {
                     co_parent: None,
                 };
 
-                all_clusters_data.push(ClusterData {
-                    index_offset: cluster.index_count,
+                all_clusters_data_real_error.push(ClusterData {
+                    index_offset: cluster.index_offset,
                     index_count: cluster.index_count,
                     error: cluster.error,
                     parent0: -1,
@@ -416,31 +448,48 @@ impl MultiResMeshComponent {
 
                     let mut p1 = world.get_mut::<ClusterComponent>(parents[1]).unwrap();
                     p1.co_parent = Some(parents[0]);
-                    all_clusters_data[p1.id].co_parent = id0;
+                    all_clusters_data_real_error[p1.id].co_parent = id0;
 
                     let mut p0 = world.get_mut::<ClusterComponent>(parents[0]).unwrap();
                     p0.co_parent = Some(parents[1]);
-                    all_clusters_data[p0.id].co_parent = id1;
+                    all_clusters_data_real_error[p0.id].co_parent = id1;
 
                     // Set parent pointers for ourself
 
                     let this = world.get::<ClusterComponent>(cluster).unwrap();
-                    all_clusters_data[this.id].parent0 = id0;
-                    all_clusters_data[this.id].parent1 = id1;
+                    all_clusters_data_real_error[this.id].parent0 = id0;
+                    all_clusters_data_real_error[this.id].parent1 = id1;
                 } else if parents.len() != 0 {
                     panic!("Non-binary parented DAG, not currently (or ever) supported");
                 }
             }
         }
 
-        let index_buffer =
-            instance
-                .device()
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("U32 Index Buffer"),
-                    contents: bytemuck::cast_slice(&indices),
-                    usage: wgpu::BufferUsages::INDEX,
-                });
+        for i in 0..all_clusters.len() {
+            all_clusters_data_layer_error.push(ClusterData {
+                error: world
+                    .get::<ClusterComponent>(all_clusters[i])
+                    .unwrap()
+                    .layer as _,
+                ..all_clusters_data_real_error[i].clone()
+            });
+        }
+
+        let index_buffer = BufferGroup::create_single(
+            &indices,
+            wgpu::BufferUsages::INDEX | wgpu::BufferUsages::STORAGE,
+            instance.device(),
+            instance.read_compute_bind_group_layout(),
+            Some("U32 Index Buffer"),
+        );
+
+        let draw_data_buffer = BufferGroup::create_single(
+            &[DrawData { error: 1.5 }],
+            wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            instance.device(),
+            instance.read_compute_bind_group_layout(),
+            Some("Draw Data Buffer"),
+        );
 
         let vertex_buffer =
             instance
@@ -468,32 +517,39 @@ impl MultiResMeshComponent {
 
         //let mut cluster_buffer_data = vec![0; sizer.len()];
 
-        let cluster_data_buffer_size = std::mem::size_of_val(&all_clusters_data[..]);
+        //let cluster_data_buffer_size = std::mem::size_of_val(&all_clusters_data[..]);
 
         //let mut writer = crevice::std430::Writer::new(&mut cluster_buffer_data);
         //for data in &all_clusters_data {
         //    writer.write(data).unwrap();
         //}
 
-        let cluster_can_draw = vec![1i32; all_clusters_data.len()];
+        let cluster_can_draw = vec![1i32; indices.len()];
 
-        let cluster_data_buffer = BufferGroup::create_single(
-            &all_clusters_data,
+        let cluster_data_real_error_buffer = BufferGroup::create_single(
+            &all_clusters_data_real_error,
             wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
             instance.device(),
             instance.read_compute_bind_group_layout(),
-            Some("cluster_buffer_data"),
+            Some("all_clusters_data_real_error"),
+        );
+        let cluster_data_layer_error_buffer = BufferGroup::create_single(
+            &all_clusters_data_layer_error,
+            wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            instance.device(),
+            instance.read_compute_bind_group_layout(),
+            Some("all_clusters_data_layer_error"),
         );
 
         let compute_can_draw_buffer = BufferGroup::create_single(
             &cluster_can_draw,
-            wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::INDEX,
             instance.device(),
             instance.write_compute_bind_group_layout(),
             Some("cluster_can_draw"),
         );
 
-        let staging_buffer_size = std::mem::size_of_val(&cluster_can_draw[..]);
+        let staging_buffer_size = 100; // std::mem::size_of_val(&cluster_can_draw[..]);
         let debug_staging_buffer = instance.device().create_buffer(&wgpu::BufferDescriptor {
             label: Some("Compute Buffer"),
             size: staging_buffer_size as u64,
@@ -506,11 +562,13 @@ impl MultiResMeshComponent {
             vertex_buffer,
             index_buffer,
             index_format,
-            cluster_data_buffer,
+            cluster_data_real_error_buffer,
+            cluster_data_layer_error_buffer,
+            draw_data_buffer,
             can_draw_buffer: compute_can_draw_buffer,
             debug_staging_buffer,
             staging_buffer_size,
-            cluster_count: all_clusters_data.len() as _,
+            cluster_count: all_clusters_data_real_error.len() as _,
             model,
             asset,
             error_calc: ErrorMode::ExactLayer,

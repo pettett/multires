@@ -215,6 +215,8 @@ impl Renderer {
                 bind_group_layouts: &[
                     (&write_compute_bind_group_layout).into(),
                     (&read_compute_buffer_bind_group).into(),
+                    (&read_compute_buffer_bind_group).into(),
+                    (&read_compute_buffer_bind_group).into(),
                 ],
                 push_constant_ranges: &[],
             });
@@ -225,6 +227,7 @@ impl Renderer {
             &shader,
             config.format,
             wgpu::PolygonMode::Fill,
+            Some(wgpu::Face::Back),
         );
         let render_pipeline_wire = make_render_pipeline(
             &device,
@@ -232,6 +235,7 @@ impl Renderer {
             &shader_wire,
             config.format,
             wgpu::PolygonMode::Line,
+            None,
         );
 
         let compute_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
@@ -328,6 +332,7 @@ fn make_render_pipeline(
     format: wgpu::TextureFormat,
     // Setting this to anything other than Fill requires Features::NON_FILL_POLYGON_MODE
     polygon_mode: wgpu::PolygonMode,
+    cull_mode: Option<wgpu::Face>,
 ) -> wgpu::RenderPipeline {
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("Render Pipeline"),
@@ -352,7 +357,7 @@ fn make_render_pipeline(
             topology: wgpu::PrimitiveTopology::TriangleList,
             strip_index_format: None,
             front_face: wgpu::FrontFace::Ccw,
-            cull_mode: Some(wgpu::Face::Back),
+            cull_mode,
             polygon_mode,
             // Requires Features::DEPTH_CLIP_CONTROL
             unclipped_depth: false,
@@ -409,7 +414,7 @@ pub fn render(
 
     {
         let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some("Mesh Render Pass"),
+            label: Some("Compute Pass"),
         });
 
         for mesh in meshes.iter() {
@@ -422,7 +427,7 @@ pub fn render(
             // Sets adds copy operation to command encoder.
             // Will copy data from storage buffer on GPU to staging buffer on CPU.
             encoder.copy_buffer_to_buffer(
-                &mesh.cluster_data_buffer.buffer(),
+                &mesh.cluster_data_real_error_buffer.buffer(),
                 0,
                 &mesh.debug_staging_buffer,
                 0,

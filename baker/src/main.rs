@@ -4,8 +4,8 @@ use baker::{
 };
 
 fn main() {
-    // let mesh_name = "../assets/rock.glb";
-    let mesh_name = "../assets/sphere.glb";
+    let mesh_name = "../assets/rock.glb";
+    // let mesh_name = "../assets/sphere.glb";
 
     println!("Loading from gltf!");
     let (mut mesh, verts) = WingedMesh::from_gltf(mesh_name);
