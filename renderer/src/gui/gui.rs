@@ -54,11 +54,11 @@ impl Gui {
             //     });
             // });
 
-            egui::Window::new("Mesh View")
-                .min_height(100.0)
-                .min_width(100.0)
-                .show(&ctx, |ui| {
-                    for (mut camera, mut camera_controller, transform) in camera.iter_mut() {
+            for (mut camera, mut camera_controller, transform) in camera.iter_mut() {
+                egui::Window::new("Camera Settings")
+                    .min_height(100.0)
+                    .min_width(100.0)
+                    .show(&ctx, |ui| {
                         ui.add(
                             egui::widgets::DragValue::new(&mut camera.part_highlight)
                                 .prefix("highlight partition: "),
@@ -69,83 +69,100 @@ impl Gui {
                                 .logarithmic(true)
                                 .prefix("Camera Speed: "),
                         );
+                    });
 
-                        for mut mesh in meshes.iter_mut() {
-                            ui.add(
-                                egui::widgets::DragValue::new(&mut mesh.focus_part)
-                                    .prefix("focus partition: "),
-                            );
+                //FIXME: This is really nothing to do with gui.
+                for mut mesh in meshes.iter_mut() {
+                    let freeze = mesh.freeze;
 
-                            ui.add(egui::widgets::Checkbox::new(&mut mesh.freeze, "Freeze"));
-
-                            egui::ComboBox::from_label("Mode ")
-                                .selected_text(format!("{:?}", &mut mesh.error_calc))
-                                .show_ui(ui, |ui| {
-                                    ui.selectable_value(
-                                        &mut mesh.error_calc,
-                                        ErrorMode::MaxError,
-                                        "Max Error",
-                                    );
-                                    ui.selectable_value(
-                                        &mut mesh.error_calc,
-                                        ErrorMode::PointDistance {
-                                            camera_point: Vec3::ZERO,
-                                            cam: Camera::new(1.0),
-                                        },
-                                        "Point distance",
-                                    );
-                                    ui.selectable_value(
-                                        &mut mesh.error_calc,
-                                        ErrorMode::ExactLayer,
-                                        "Exact Layer",
-                                    );
-                                });
-
-                            let freeze = mesh.freeze;
-
-                            match &mut mesh.error_calc {
-                                ErrorMode::PointDistance { camera_point, cam } => {
-                                    if !freeze {
-                                        *camera_point = (*transform.get_pos()).into();
-                                        *cam = camera.clone();
-                                    }
-
-                                    ui.add_space(10.0);
-                                }
-                                _ => (),
-                            }
-
-                            ui.add(
-                                egui::widgets::Slider::new(&mut mesh.error_target, 0.1..=10.0)
-                                    .prefix("Target Error: "),
-                            );
-
-                            if ui.button("Snapshot Error Graph").clicked() {
-                                let g = mesh.submesh_error_graph(submeshes);
-                                let error_target = mesh.error_target;
-
-                                thread::spawn(move || {
-                                    petgraph_to_svg(
-                                        &g,
-                                        "svg/error.svg",
-                                        &|_, (_, &e)| {
-                                            if e < error_target {
-                                                "color=green".to_owned()
-                                            } else {
-                                                "color=red".to_owned()
-                                            }
-                                        },
-                                        common::graph::GraphSVGRender::Directed {
-                                            node_label: common::graph::Label::Weight,
-                                        },
-                                    )
-                                    .unwrap();
-                                });
+                    match &mut mesh.error_calc {
+                        ErrorMode::PointDistance { camera_point, cam } => {
+                            if !freeze {
+                                *camera_point = (*transform.get_pos()).into();
+                                *cam = camera.clone();
                             }
                         }
+                        _ => (),
                     }
-                });
+                }
+            }
 
+            for mut mesh in meshes.iter_mut() {
+                egui::Window::new("Mesh View")
+                    .min_height(100.0)
+                    .min_width(100.0)
+                    .show(&ctx, |ui| {
+                        ui.add(
+                            egui::widgets::DragValue::new(&mut mesh.focus_part)
+                                .prefix("focus partition: "),
+                        );
+
+                        ui.add(egui::widgets::Checkbox::new(&mut mesh.freeze, "Freeze"));
+                        ui.add(egui::widgets::Checkbox::new(
+                            &mut mesh.show_solid,
+                            "Show Solid",
+                        ));
+                        ui.add(egui::widgets::Checkbox::new(
+                            &mut mesh.show_wire,
+                            "Show Wire",
+                        ));
+                        ui.add(egui::widgets::Checkbox::new(
+                            &mut mesh.show_bounds,
+                            "Show Bounds",
+                        ));
+
+                        egui::ComboBox::from_label("Mode ")
+                            .selected_text(format!("{:?}", &mut mesh.error_calc))
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(
+                                    &mut mesh.error_calc,
+                                    ErrorMode::MaxError,
+                                    "Max Error",
+                                );
+                                ui.selectable_value(
+                                    &mut mesh.error_calc,
+                                    ErrorMode::PointDistance {
+                                        camera_point: Vec3::ZERO,
+                                        cam: Camera::new(1.0),
+                                    },
+                                    "Point distance",
+                                );
+                                ui.selectable_value(
+                                    &mut mesh.error_calc,
+                                    ErrorMode::ExactLayer,
+                                    "Exact Layer",
+                                );
+                            });
+
+                        ui.add(
+                            egui::widgets::Slider::new(&mut mesh.error_target, 0.1..=10.0)
+                                .prefix("Target Error: "),
+                        );
+
+                        if ui.button("Snapshot Error Graph").clicked() {
+                            let g = mesh.submesh_error_graph(submeshes);
+                            let error_target = mesh.error_target;
+
+                            thread::spawn(move || {
+                                petgraph_to_svg(
+                                    &g,
+                                    "svg/error.svg",
+                                    &|_, (_, &e)| {
+                                        if e < error_target {
+                                            "color=green".to_owned()
+                                        } else {
+                                            "color=red".to_owned()
+                                        }
+                                    },
+                                    common::graph::GraphSVGRender::Directed {
+                                        node_label: common::graph::Label::Weight,
+                                    },
+                                )
+                                .unwrap();
+                            });
+                        }
+                    });
+            }
             // for mut window in windows.iter_mut() {
             //     window.draw_window(ctx, renderer, &mut self.renderer, commands);
             // }

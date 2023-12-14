@@ -18,9 +18,8 @@ pub struct ClusterComponent {
     id: usize,
     index_offset: u32,
     index_count: u32,
-    partitions: BufferGroup<2>,
     pub layer: usize,
-    pub part: usize,
+    pub cluster_layer_idx: usize,
     pub error: f32,
     pub center: Vec3,
     pub radius: f32,
@@ -72,6 +71,7 @@ struct DrawData {
 #[derive(Component)]
 pub struct MultiResMeshComponent {
     index_buffer: BufferGroup<1>,
+    partition_buffer: BufferGroup<2>,
     vertex_buffer: wgpu::Buffer,
     cluster_count: u32,
     pub can_draw_buffer: BufferGroup<1>,
@@ -87,6 +87,9 @@ pub struct MultiResMeshComponent {
     pub error_target: f32,
     pub focus_part: usize,
     pub freeze: bool,
+    pub show_wire: bool,
+    pub show_solid: bool,
+    pub show_bounds: bool,
 }
 
 impl ClusterComponent {
@@ -235,63 +238,41 @@ impl MultiResMeshComponent {
         //    println!("");
         //}
 
-        render_pass.set_bind_group(0, renderer.camera_buffer().bind_group(), &[]);
         render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
         render_pass.set_index_buffer(self.can_draw_buffer.buffer().slice(..), self.index_format);
 
+        render_pass.set_bind_group(0, renderer.camera_buffer().bind_group(), &[]);
+        render_pass.set_bind_group(1, self.partition_buffer.bind_group(), &[]);
         render_pass.set_bind_group(2, self.model.bind_group(), &[]);
 
-        render_pass.set_pipeline(renderer.render_pipeline());
-        for (_, submesh) in submeshes.iter() {
-            render_pass.set_bind_group(1, submesh.partitions.bind_group(), &[]);
+        if self.show_solid {
+            render_pass.set_pipeline(renderer.render_pipeline());
 
             render_pass.draw_indexed(0..(self.index_buffer.buffer().size() as u32 / 4), 0, 0..1);
-
+        }
+        if self.show_wire {
             render_pass.set_pipeline(renderer.render_pipeline_wire());
 
             render_pass.draw_indexed(0..(self.index_buffer.buffer().size() as u32 / 4), 0, 0..1);
-
-            break;
-
-            // if submesh.r_should_draw(submeshes, self) {
-            //     //let submesh = submeshes.get(*s).unwrap();
-
-            //     //render_pass.set_pipeline(renderer.render_pipeline_wire());
-            //     //
-            //     //render_pass.set_bind_group(1, submesh.partitions.bind_group(), &[]);
-            //     //render_pass.set_index_buffer(submesh.indices.slice(..), self.index_format);
-            //     //
-            //     //render_pass.draw_indexed(0..submesh.index_count, 0, 0..1);
-
-            //     // render_pass.set_bind_group(1, submesh.partitions.bind_group(), &[]);
-
-            //     // render_pass.draw_indexed(
-            //     //     submesh.index_offset..submesh.index_offset + submesh.index_count,
-            //     //     0,
-            //     //     0..1,
-            //     // );
-            // }
-            //render_pass.set_pipeline(state.render_pipeline_wire());
-            //render_pass.draw_indexed(0..submesh.num_indices, 0, 0..1);
         }
 
         // Draw bounds gizmos
-        return;
+        if self.show_bounds {
+            render_pass.set_vertex_buffer(0, renderer.sphere_gizmo.verts.slice(..));
 
-        render_pass.set_vertex_buffer(0, renderer.sphere_gizmo.verts.slice(..));
+            render_pass.set_pipeline(renderer.render_pipeline_wire());
 
-        render_pass.set_pipeline(renderer.render_pipeline_wire());
+            for (_, submesh) in submeshes.iter() {
+                if submesh.cluster_layer_idx == self.focus_part {
+                    if submesh.should_draw(submeshes, self) {
+                        render_pass.set_index_buffer(
+                            renderer.sphere_gizmo.indices.slice(..),
+                            wgpu::IndexFormat::Uint32,
+                        );
 
-        for (_, submesh) in submeshes.iter() {
-            if submesh.part == self.focus_part {
-                if submesh.should_draw(submeshes, self) {
-                    render_pass.set_index_buffer(
-                        renderer.sphere_gizmo.indices.slice(..),
-                        wgpu::IndexFormat::Uint32,
-                    );
-
-                    render_pass.set_bind_group(2, submesh.model.bind_group(), &[]);
-                    render_pass.draw_indexed(0..renderer.sphere_gizmo.index_count, 0, 0..1);
+                        render_pass.set_bind_group(2, submesh.model.bind_group(), &[]);
+                        render_pass.draw_indexed(0..renderer.sphere_gizmo.index_count, 0, 0..1);
+                    }
                 }
             }
         }
@@ -334,25 +315,28 @@ impl MultiResMeshComponent {
         let mut all_clusters_data_real_error = Vec::new();
         let mut all_clusters_data_layer_error = Vec::new();
         let mut indices = Vec::new();
+        // Face indexed array
+        let mut partitions = Vec::new();
+        // Partition indexed array
+        let mut groups = Vec::new();
+
+        let mut cluster_idx = 0;
 
         for (level, r) in asset.lods.iter().enumerate() {
             println!("Loading layer {level}:");
             let mut clusters = Vec::new();
 
-            for (part, submesh) in r.submeshes.iter().enumerate() {
+            for (cluster_layer_idx, submesh) in r.submeshes.iter().enumerate() {
                 // Map index buffer to global vertex range
 
                 let index_count = submesh.indices.len() as u32;
 
-                let info_buffer = BufferGroup::create_plural_storage(
-                    &[
-                        &[part as i32, level as i32, submesh.debug_group as i32],
-                        &[0],
-                    ],
-                    instance.device(),
-                    &instance.partition_bind_group_layout(),
-                    Some("Partition Buffer"),
-                );
+                for _ in 0..(index_count / 3) {
+                    partitions.push(cluster_idx as i32);
+                }
+                groups.push(submesh.debug_group as i32);
+
+                cluster_idx += 1;
 
                 let model = BufferGroup::create_single(
                     &[Mat4::from_translation(submesh.saturated_sphere.center())
@@ -365,11 +349,11 @@ impl MultiResMeshComponent {
 
                 let cluster = ClusterComponent {
                     id: all_clusters_data_real_error.len(),
-                    partitions: info_buffer,
+                    //partitions: info_buffer,
                     index_offset: indices.len() as u32,
                     index_count,
                     layer: level,
-                    part,
+                    cluster_layer_idx,
                     center: submesh.saturated_sphere.center(),
                     error: submesh.error,
                     model,
@@ -399,6 +383,10 @@ impl MultiResMeshComponent {
             }
             clusters_per_lod.push(clusters);
         }
+
+        assert_eq!(partitions.len(), indices.len() / 3);
+        // The last partition should be the largest
+        assert_eq!(groups.len(), *partitions.last().unwrap() as usize + 1);
 
         // Search for [dependencies], group members, and dependants
         for (level, partition_entities) in clusters_per_lod.iter().enumerate() {
@@ -557,10 +545,18 @@ impl MultiResMeshComponent {
             mapped_at_creation: false,
         });
 
+        let partition_buffer = BufferGroup::create_plural_storage(
+            &[&partitions, &groups],
+            instance.device(),
+            &instance.partition_bind_group_layout(),
+            Some("Partition Buffer"),
+        );
+
         // Update the value stored in this mesh
         world.spawn(MultiResMeshComponent {
             vertex_buffer,
             index_buffer,
+            partition_buffer,
             index_format,
             cluster_data_real_error_buffer,
             cluster_data_layer_error_buffer,
@@ -575,6 +571,9 @@ impl MultiResMeshComponent {
             error_target: 0.5,
             focus_part: 0,
             freeze: false,
+            show_wire: true,
+            show_solid: true,
+            show_bounds: false,
         });
     }
 
