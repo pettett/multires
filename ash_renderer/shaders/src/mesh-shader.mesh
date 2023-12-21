@@ -11,14 +11,10 @@ layout (binding = 0) uniform UniformBufferObject {
 
 struct Vertex {
     vec4 pos;
-    // vec3 col;
-    // vec2 tc;
 };
 
 struct Index {
     uint i;
-    // vec3 col;
-    // vec2 tc;
 };
 
 // https://github.com/KhronosGroup/Vulkan-Samples/blob/26eb94f79f9c2377cbaa28db2fbd7dd6efb55ffe/framework/api_vulkan_sample.h#L89
@@ -76,42 +72,7 @@ void main() {
         vert(i, meshlet);
     }
 
-    // vert(0,  vec4(1.0, 1.0, -1.0, 1));
-    // vert(1,  vec4(1.0, 1.0, -1.0, 1));
-    // vert(2,  vec4(1.0, 1.0, -1.0, 1));
-    // vert(3,  vec4(1.0, -1.0, -1.0, 1));
-    // vert(4,  vec4(1.0, -1.0, -1.0, 1));
-    // vert(5,  vec4(1.0, -1.0, -1.0, 1));
-    // vert(6,  vec4(1.0, 1.0, 1.0, 1));
-    // vert(7,  vec4(1.0, 1.0, 1.0, 1));
-    // vert(8,  vec4(1.0, 1.0, 1.0, 1));
-    // vert(9,  vec4(1.0, -1.0, 1.0, 1));
-    // vert(10, vec4(1.0, -1.0, 1.0, 1));
-    // vert(11, vec4(1.0, -1.0, 1.0, 1));
-    // vert(12, vec4(-1.0, 1.0, -1.0, 1));
-    // vert(13, vec4(-1.0, 1.0, -1.0, 1));
-    // vert(14, vec4(-1.0, 1.0, -1.0, 1));
-    // vert(15, vec4(-1.0, -1.0, -1.0, 1));
-    // vert(16, vec4(-1.0, -1.0, -1.0, 1));
-    // vert(17, vec4(-1.0, -1.0, -1.0, 1));
-    // vert(18, vec4(-1.0, 1.0, 1.0, 1));
-    // vert(19, vec4(-1.0, 1.0, 1.0, 1));
-    // vert(20, vec4(-1.0, 1.0, 1.0, 1));
-    // vert(21, vec4(-1.0, -1.0, 1.0, 1));
-    // vert(22, vec4(-1.0, -1.0, 1.0, 1));
-    // vert(23, vec4(-1.0, -1.0, 1.0, 1));
-
-
     for (uint i = 0; i < meshlet.index_count / 3; i++) {
         gl_PrimitiveTriangleIndicesEXT[i] = uvec3(meshlet.indices[i * 3], meshlet.indices[i * 3 + 1], meshlet.indices[i * 3 + 2]);
     }
-
-    // gl_PrimitiveTriangleIndicesEXT[0] = uvec3(0, 1, 2);
-    // gl_PrimitiveTriangleIndicesEXT[1] = uvec3(1, 20, 7);
-    // gl_PrimitiveTriangleIndicesEXT[2] = uvec3(10, 6, 19);
-    // gl_PrimitiveTriangleIndicesEXT[3] = uvec3(10, 19, 23);
-
-    // for (uint i = 0; i < 100 ; i++){
-    // 	gl_PrimitivePointIndicesEXT[i] = i;
-    // }
 }

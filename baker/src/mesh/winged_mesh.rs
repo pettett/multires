@@ -5,6 +5,8 @@ use idmap::IntegerId;
 use rayon::prelude::*;
 use std::{collections::HashSet, fs};
 
+use crate::pidge::{Key, Pidge};
+
 use super::{
     iter::EdgeIter,
     vertex::{VertID, Vertex},
@@ -62,6 +64,7 @@ impl Into<usize> for FaceID {
         self.0 as usize
     }
 }
+
 impl From<usize> for FaceID {
     fn from(value: usize) -> Self {
         FaceID(value)
@@ -81,6 +84,7 @@ impl IntegerId for FaceID {
         self.0 as u32
     }
 }
+
 impl IntegerId for EdgeID {
     fn from_id(id: u64) -> Self {
         EdgeID(id as usize)
@@ -130,12 +134,9 @@ pub struct Face {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct WingedMesh {
-    faces: Vec<Option<Face>>,
-    face_count: usize,
-    edges: Vec<Option<HalfEdge>>,
-    edge_count: usize,
-    verts: Vec<Option<Vertex>>,
-    vert_count: usize,
+    faces: Pidge<FaceID, Face>,
+    edges: Pidge<EdgeID, HalfEdge>,
+    verts: Pidge<VertID, Vertex>,
     pub partitions: Vec<PartitionInfo>,
     pub groups: Vec<GroupInfo>,
 }
@@ -143,12 +144,9 @@ pub struct WingedMesh {
 impl WingedMesh {
     pub fn new(faces: usize, verts: usize) -> Self {
         Self {
-            faces: Vec::with_capacity(faces),
-            edges: Vec::with_capacity(faces * 3),
-            verts: Vec::with_capacity(verts),
-            face_count: faces,
-            edge_count: faces * 3,
-            vert_count: verts,
+            faces: Pidge::with_capacity(faces),
+            edges: Pidge::with_capacity(faces * 3),
+            verts: Pidge::with_capacity(verts),
             groups: vec![],
             partitions: vec![PartitionInfo {
                 child_group_index: None,
@@ -157,184 +155,148 @@ impl WingedMesh {
             }],
         }
     }
-    pub fn get_face(&self, FaceID(face): FaceID) -> &Face {
-        self.faces[face].as_ref().unwrap()
+    pub fn get_face(&self, face: FaceID) -> &Face {
+        self.faces.get(face)
     }
-    pub fn try_get_face_mut(&mut self, FaceID(face): FaceID) -> &mut Option<Face> {
-        &mut self.faces[face]
+    pub fn try_get_face_mut(&mut self, fid: FaceID) -> Option<&mut Face> {
+        self.faces.try_get_mut(fid)
     }
-    pub fn get_face_mut(&mut self, face: FaceID) -> &mut Face {
-        self.try_get_face_mut(face).as_mut().unwrap()
-    }
-
-    pub fn try_get_edge(&self, EdgeID(edge): EdgeID) -> Result<&HalfEdge, MeshError> {
-        self.edges[edge]
-            .as_ref()
-            .ok_or(MeshError::InvalidEdge(EdgeID(edge)))
+    pub fn get_face_mut(&mut self, fid: FaceID) -> &mut Face {
+        self.faces.get_mut(fid)
     }
 
-    pub fn get_edge(&self, EdgeID(edge): EdgeID) -> &HalfEdge {
-        self.edges[edge].as_ref().unwrap()
-    }
-    pub fn try_get_edge_mut(&mut self, EdgeID(edge): EdgeID) -> &mut Option<HalfEdge> {
-        &mut self.edges[edge]
-    }
-    pub fn get_edge_mut(&mut self, edge: EdgeID) -> &mut HalfEdge {
-        self.try_get_edge_mut(edge).as_mut().unwrap()
+    pub fn try_get_edge(&self, eid: EdgeID) -> Result<&HalfEdge, MeshError> {
+        self.edges.try_get(eid).ok_or(MeshError::InvalidEdge(eid))
     }
 
-    pub fn get_edge_or_insert_none(&mut self, edge: EdgeID) -> &mut Option<HalfEdge> {
-        while edge.0 >= self.edges.len() {
-            self.edges.push(None);
-        }
-
-        self.try_get_edge_mut(edge)
+    pub fn get_edge(&self, eid: EdgeID) -> &HalfEdge {
+        self.edges.get(eid)
     }
-    pub fn get_face_or_insert_none(&mut self, face: FaceID) -> &mut Option<Face> {
-        while face.0 >= self.faces.len() {
-            self.faces.push(None);
-        }
-
-        self.try_get_face_mut(face)
+    pub fn try_get_edge_mut(&mut self, eid: EdgeID) -> Option<&mut HalfEdge> {
+        self.edges.try_get_mut(eid)
+    }
+    pub fn get_edge_mut(&mut self, eid: EdgeID) -> &mut HalfEdge {
+        self.edges.get_mut(eid)
     }
 
-    pub fn try_get_vert(&self, VertID(vert): VertID) -> Result<&Vertex, MeshError> {
-        self.verts
-            .get(vert)
-            .map(|v| v.as_ref())
-            .flatten()
-            .ok_or(MeshError::InvalidVertex(VertID(vert)))
+    pub fn insert_edge(&mut self, eid: EdgeID, half_edge: HalfEdge) {
+        self.edges.insert(eid, half_edge)
+    }
+    pub fn insert_face(&mut self, fid: FaceID, face: Face) {
+        self.faces.insert(fid, face)
+    }
+
+    pub fn try_get_vert(&self, vid: VertID) -> Result<&Vertex, MeshError> {
+        self.verts.try_get(vid).ok_or(MeshError::InvalidVertex(vid))
     }
 
     pub fn get_vert(&self, vert: VertID) -> &Vertex {
         self.try_get_vert(vert).as_ref().unwrap()
     }
-    pub fn get_vert_mut(&mut self, VertID(vert): VertID) -> &mut Vertex {
-        self.verts[vert].as_mut().unwrap()
+    pub fn get_vert_mut(&mut self, vert: VertID) -> &mut Vertex {
+        self.verts.get_mut(vert)
     }
-    pub fn get_vert_or_default(&mut self, VertID(vert): VertID) -> &mut Vertex {
-        while vert >= self.verts.len() {
-            self.verts.push(None);
+    pub fn get_vert_or_default(&mut self, vid: VertID) -> &mut Vertex {
+        if !self.verts.slot_full(vid) {
+            self.verts.insert(vid, Vertex::default());
         }
-
-        if self.verts[vert].is_none() {
-            self.verts[vert] = Some(Vertex::default());
-        }
-
-        self.verts[vert].as_mut().unwrap()
+        self.verts.get_mut(vid)
     }
 
-    pub fn wipe_face(&mut self, FaceID(face): FaceID) {
+    pub fn wipe_face(&mut self, face: FaceID) {
         #[cfg(test)]
         {
-            self.assert_face_valid(FaceID(face)).unwrap();
+            self.assert_face_valid(face).unwrap();
         }
 
-        self.faces[face] = None;
-        self.face_count -= 1;
+        self.faces.wipe(face)
     }
-    pub fn wipe_edge(&mut self, EdgeID(edge): EdgeID) {
-        self.edges[edge] = None;
-        self.edge_count -= 1;
+    pub fn wipe_edge(&mut self, edge: EdgeID) {
+        self.edges.wipe(edge)
     }
 
-    pub fn wipe_vert(&mut self, VertID(vert): VertID) {
-        self.verts[vert] = None;
-        self.vert_count -= 1;
+    pub fn wipe_vert(&mut self, vert: VertID) {
+        self.verts.wipe(vert)
     }
 
     pub fn face_count(&self) -> usize {
-        self.face_count
+        self.faces.len()
     }
 
     pub fn edge_count(&self) -> usize {
-        self.edge_count
+        self.edges.len()
     }
 
     pub fn vert_count(&self) -> usize {
-        self.vert_count
+        self.verts.len()
     }
-
-    // pub fn iter_faces(&self) -> impl Iterator<Item = (FaceID, &Face)> {
-    //     self.faces.iter().enumerate().filter_map(|(i, x)| match x {
-    //         Some(x) => Some((FaceID(i), x)),
-    //         None => None,
-    //     })
-    // }
-
-    // pub fn iter_edges(&self) -> impl Iterator<Item = (EdgeID, &HalfEdge)> {
-    //     self.edges.iter().enumerate().filter_map(|(i, x)| match x {
-    //         Some(x) => Some((EdgeID(i), x)),
-    //         None => None,
-    //     })
-    // }
-    // pub fn iter_faces(&self) -> impl Iterator<Item = FaceID> + '_ {
-    //     self.faces.iter().enumerate().filter_map(|(i, x)| {
-    //         let a = x.read().unwrap();
-    //         if a.is_some() {
-    //             Some(FaceID(i))
-    //         } else {
-    //             None
-    //         }
-    //     })
-    // }
 
     pub fn iter_verts(&self) -> impl Iterator<Item = (VertID, &Vertex)> {
-        self.verts.iter().enumerate().filter_map(|(i, x)| {
-            if x.is_some() {
-                Some((VertID(i), x.as_ref().unwrap()))
-            } else {
-                None
-            }
-        })
+        self.verts
+            .iter_with_empty()
+            .enumerate()
+            .filter_map(|(i, x)| {
+                if x.is_some() {
+                    Some((VertID(i), x.unwrap()))
+                } else {
+                    None
+                }
+            })
     }
+
     pub fn iter_edges(&self) -> impl Iterator<Item = (EdgeID, &HalfEdge)> {
-        self.edges.iter().enumerate().filter_map(|(i, x)| {
-            if x.is_some() {
-                Some((EdgeID(i), x.as_ref().unwrap()))
-            } else {
-                None
-            }
-        })
+        self.edges
+            .iter_with_empty()
+            .enumerate()
+            .filter_map(|(i, x)| {
+                if x.is_some() {
+                    Some((EdgeID(i), x.unwrap()))
+                } else {
+                    None
+                }
+            })
     }
 
     pub fn iter_faces(&self) -> impl Iterator<Item = (FaceID, &Face)> + '_ {
-        self.faces.iter().enumerate().filter_map(|(i, x)| {
-            if x.is_some() {
-                Some((FaceID(i), x.as_ref().unwrap()))
-            } else {
-                None
-            }
-        })
+        self.faces
+            .iter_with_empty()
+            .enumerate()
+            .filter_map(|(i, x)| {
+                if x.is_some() {
+                    Some((FaceID(i), x.unwrap()))
+                } else {
+                    None
+                }
+            })
     }
 
     pub fn iter_faces_mut(&mut self) -> impl Iterator<Item = (FaceID, &mut Face)> {
-        self.faces.iter_mut().enumerate().filter_map(|(i, x)| {
-            if x.is_some() {
-                Some((FaceID(i), x.as_mut().unwrap()))
-            } else {
-                None
-            }
-        })
+        self.faces
+            .iter_mut_with_empty()
+            .enumerate()
+            .filter_map(|(i, x)| match x {
+                Some(x) => Some((FaceID(i), x)),
+                None => None,
+            })
     }
 
     pub fn iter_edges_mut(&mut self) -> impl Iterator<Item = (EdgeID, &mut HalfEdge)> {
-        self.edges.iter_mut().enumerate().filter_map(|(i, x)| {
-            if x.is_some() {
-                Some((EdgeID(i), x.as_mut().unwrap()))
-            } else {
-                None
-            }
-        })
+        self.edges
+            .iter_mut_with_empty()
+            .enumerate()
+            .filter_map(|(i, x)| match x {
+                Some(x) => Some((EdgeID(i), x)),
+                None => None,
+            })
     }
     pub fn iter_verts_mut(&mut self) -> impl Iterator<Item = (VertID, &mut Vertex)> {
-        self.verts.iter_mut().enumerate().filter_map(|(i, x)| {
-            if x.is_some() {
-                Some((VertID(i), x.as_mut().unwrap()))
-            } else {
-                None
-            }
-        })
+        self.verts
+            .iter_mut_with_empty()
+            .enumerate()
+            .filter_map(|(i, x)| match x {
+                Some(x) => Some((VertID(i), x)),
+                None => None,
+            })
     }
 
     pub fn edge_sqr_length(&self, edge: EdgeID, verts: &[Vec3]) -> f32 {
@@ -421,7 +383,7 @@ impl WingedMesh {
 
         self.get_vert_or_default(dest).add_incoming(eid);
 
-        *self.get_edge_or_insert_none(eid) = Some(e);
+        self.insert_edge(eid, e);
     }
 
     pub fn add_tri(&mut self, f: FaceID, a: VertID, b: VertID, c: VertID) {
@@ -433,7 +395,7 @@ impl WingedMesh {
         self.add_half_edge(b, c, f, ieb, iec, iea);
         self.add_half_edge(c, a, f, iec, iea, ieb);
 
-        *self.get_face_or_insert_none(f) = Some(Face { edge: iea, part: 0 });
+        self.insert_face(f, Face { edge: iea, part: 0 });
     }
 
     /// Collapse a triangle, removing it from the graph, and pulling the two triangles on non-eid edges together
@@ -667,14 +629,14 @@ impl WingedMesh {
 
     pub fn get_partition(&self) -> Vec<usize> {
         self.faces
-            .iter()
+            .iter_with_empty()
             .filter_map(|f| f.as_ref().map(|f| f.part))
             .collect()
     }
 
     pub fn get_group(&self) -> Vec<usize> {
         self.faces
-            .iter()
+            .iter_with_empty()
             .filter_map(|f| f.as_ref().map(|f| self.partitions[f.part].group_index))
             .collect()
     }
@@ -688,25 +650,17 @@ impl WingedMesh {
         self.partitions.len()
     }
     pub fn age(&mut self) {
-        self.edges.iter_mut().for_each(|e| {
-            if let Some(e) = e.as_mut() {
+        self.edges.iter_mut_with_empty().for_each(|e| {
+            if let Some(e) = e {
                 e.age += 1;
             }
         });
     }
     pub fn max_edge_age(&self) -> u32 {
-        self.edges
-            .iter()
-            .filter_map(|e| e.as_ref().map(|e| e.age))
-            .max()
-            .unwrap()
+        self.edges.iter().map(|e| e.age).max().unwrap()
     }
     pub fn avg_edge_age(&self) -> f32 {
-        self.edges
-            .iter()
-            .filter_map(|e| e.as_ref().map(|e| e.age))
-            .sum::<u32>() as f32
-            / self.edge_count() as f32
+        self.edges.iter().map(|e| e.age).sum::<u32>() as f32 / self.edge_count() as f32
     }
 }
 #[cfg(test)]
@@ -937,12 +891,7 @@ pub mod test {
         for pi in 0..mesh.partitions.len() {
             // Assert that new parts and the parts in group have the same boundary
 
-            let faces = mesh
-                .faces
-                .iter()
-                .filter_map(|e| e.as_ref())
-                .filter(|f| pi == f.part)
-                .collect();
+            let faces = mesh.faces.iter().filter(|f| pi == f.part).collect();
 
             let boundary = mesh.face_boundary(&faces);
 
@@ -1072,10 +1021,11 @@ pub mod test {
         let mut avg_outgoing = 0.0;
         let mut avg_incoming = 0.0;
 
-        for (outc, inc) in mesh.verts.iter().filter_map(|v| match v.as_ref() {
-            Some(v) => Some((v.outgoing_edges().len(), v.incoming_edges().len())),
-            None => None,
-        }) {
+        for (outc, inc) in mesh
+            .verts
+            .iter()
+            .map(|v| (v.outgoing_edges().len(), v.incoming_edges().len()))
+        {
             avg_outgoing += outc as f32;
             avg_incoming += inc as f32;
         }
