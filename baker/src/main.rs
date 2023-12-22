@@ -4,7 +4,8 @@ use baker::{
 };
 
 fn main() {
-    let mesh_name = "../assets/rock.glb";
+    let mesh_name = "../assets/torrin_main.glb";
+    //let mesh_name = "../assets/rock.glb";
     // let mesh_name = "../assets/sphere.glb";
 
     println!("Loading from gltf!");

@@ -451,7 +451,7 @@ impl WingedMesh {
         Ok(())
     }
 
-    pub fn neighbour_vertices(&self, v: &Vertex) -> HashSet<VertID> {
+    fn neighbour_vertices(&self, v: &Vertex) -> HashSet<VertID> {
         // This is the exact number of neighbours, assuming this is a manifold vertex, otherwise it will still be pretty close.
         let mut neighbours = HashSet::with_capacity(v.incoming_edges().len());
 
@@ -469,38 +469,66 @@ impl WingedMesh {
         neighbours
     }
 
-    /// Returns set of all faces surrounding a vertex
-    pub fn surrounding_faces(&self, v: &Vertex) -> HashSet<FaceID> {
-        v.incoming_edges()
-            .iter()
-            .map(|&e| self.get_edge(e).face)
-            .collect()
-    }
-
-    /// List of all edges on the far side of the triangle they connect to us with
-    pub fn fanning_edges(&self, v: &Vertex) -> HashSet<EdgeID> {
-        v.incoming_edges()
-            .iter()
-            .map(|&e| self.get_edge(e).edge_left_cw)
-            .collect()
-    }
-
-    // https://stackoverflow.com/a/27049418
+    /// Does this edge have the right amount of shared neighbours for edge collapse
+    ///
+    /// Logic sourced from https://stackoverflow.com/a/27049418
     pub fn max_one_joint_neighbour_vertices_per_side(&self, eid: EdgeID) -> bool {
         let (src, dst) = eid.src_dst(&self).unwrap();
-        let v0 = self.get_vert(src);
-        let v1 = self.get_vert(dst);
 
-        let n0 = self.neighbour_vertices(v0);
-        let n1 = self.neighbour_vertices(v1);
-
-        //let f0 = self.fanning_edges(v0);
-        //let f1 = self.fanning_edges(v1);
-
-        let joint_shared = n0.intersection(&n1).count();
+        let v_src = self.get_vert(src);
         let has_twin = self.get_edge(eid).twin.is_some();
 
-        return has_twin && joint_shared == 2 || !has_twin && joint_shared == 1;
+        let mut joint_shared_count = 0;
+
+        for &incoming in v_src.incoming_edges() {
+            // Count every vertex from the incoming first, as these are slightly quicker to find
+            let neighbour = self.get_edge(incoming).vert_origin;
+
+            if self.find_edge(neighbour, dst).is_some() || self.find_edge(dst, neighbour).is_some()
+            {
+                joint_shared_count += 1;
+            }
+        }
+
+        for &outgoing in v_src.outgoing_edges() {
+            // Count every none-incoming-accessible vertex afterwards
+            if self.get_edge(outgoing).twin.is_some() {
+                // Do not double count vertices that can be reached in two ways
+                continue;
+            }
+
+            let (_, neighbour) = outgoing.src_dst(self).unwrap();
+
+            assert!(self.find_edge(neighbour, src).is_none());
+
+            if self.find_edge(neighbour, dst).is_some() || self.find_edge(dst, neighbour).is_some()
+            {
+                joint_shared_count += 1;
+            }
+        }
+
+        let new = has_twin && joint_shared_count == 2 || !has_twin && joint_shared_count == 1;
+
+        #[cfg(test)]
+        {
+            // Regression test / much easier logic to read
+
+            let (src, dst) = eid.src_dst(&self).unwrap();
+            let v0 = self.get_vert(src);
+            let v1 = self.get_vert(dst);
+
+            let n0 = self.neighbour_vertices(v0);
+            let n1 = self.neighbour_vertices(v1);
+
+            let joint_shared = n0.intersection(&n1).count();
+            let has_twin = self.get_edge(eid).twin.is_some();
+
+            let old = has_twin && joint_shared == 2 || !has_twin && joint_shared == 1;
+
+            assert_eq!(old, new);
+        }
+
+        return new;
     }
 
     /// Collapse an edge so it no longer exists, the source vertex is no longer referenced,
@@ -539,6 +567,7 @@ impl WingedMesh {
             .context("Failed to collapse main triangle")
             .context(MeshError::EdgeCollapse(eid, vid_orig, vid_dest))?;
 
+        // Assert the vertexes are still valid, which they should be despite some invalid triangles around us
         #[cfg(test)]
         {
             self.assert_vertex_valid(vid_dest)
@@ -565,6 +594,7 @@ impl WingedMesh {
 
         for b_outgoing in b_outgoings {
             // Don't fix invalid edges
+            #[cfg(test)]
             {
                 let (orig, dest) = b_outgoing.src_dst(self).unwrap();
                 assert_eq!(orig, vid_orig);
