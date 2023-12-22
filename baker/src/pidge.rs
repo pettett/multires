@@ -31,29 +31,35 @@ struct Iter<'a, V> {
     data: &'a Vec<PidgeHole<V>>,
 }
 
-impl<'a, V> Iter<'a, V> {
-    fn new(idx: usize, data: &'a Vec<PidgeHole<V>>) -> Self {
-        Self { idx, data }
-    }
-}
-
 impl<'a, V> Iterator for Iter<'a, V> {
     type Item = &'a V;
 
     fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            match &self.data[self.idx] {
-                PidgeHole::Filled(v) => {
-                    break Some(v);
-                }
-                PidgeHole::Empty { span_end, .. } => {
-                    if span_end + 1 > self.data.len() {
-                        return None;
-                    } else {
-                        self.idx = span_end + 1;
-                    }
+        if self.idx >= self.data.len() {
+            return None;
+        }
+
+        match &self.data[self.idx] {
+            PidgeHole::Filled(v) => {
+                self.idx += 1;
+                return Some(v);
+            }
+            PidgeHole::Empty { span_end, .. } => {
+                if span_end + 1 >= self.data.len() {
+                    // Break the iterator, no data after this span
+                    return None;
+                } else {
+                    self.idx = span_end + 1;
                 }
             }
+        }
+
+        match &self.data[self.idx] {
+            PidgeHole::Filled(v) => {
+                self.idx += 1;
+                Some(v)
+            }
+            _ => panic!("Span end should be followed by a valid filled pidge hole"),
         }
     }
 }
@@ -111,54 +117,63 @@ impl<K: Key, V> Pidge<K, V> {
         self.data[key.into()] = PidgeHole::Filled(val);
         self.len += 1;
     }
+
     pub fn wipe(&mut self, key: K) {
         let id = key.into();
-        self.data[id] = PidgeHole::Empty {
-            span_start: id,
-            span_end: id,
-        };
 
-        let mut new_span_start = id;
-        let mut new_span_end = id;
+        let mut new_span_start = None;
+        let mut new_span_end = None;
 
-		//TODO: test if this improves performance
+        //TODO: test if this improves performance
 
         if id > 1 {
             // Merge with span on the left
             match &self.data[id - 1] {
-                PidgeHole::Filled(_) => (),
-                PidgeHole::Empty { span_start, .. } => new_span_start = *span_start,
+                PidgeHole::Empty { span_start, .. } => new_span_start = Some(*span_start),
+                _ => (),
             }
         }
 
         if id < self.data.len() - 1 {
             // Merge with span on the left
             match &self.data[id + 1] {
-                PidgeHole::Filled(_) => (),
-                PidgeHole::Empty { span_end, .. } => new_span_end = *span_end,
+                PidgeHole::Empty { span_end, .. } => new_span_end = Some(*span_end),
+                _ => (),
             }
         }
 
-        match &mut self.data[new_span_start] {
-            PidgeHole::Filled(_) => panic!("Invalid Span Start"),
-            PidgeHole::Empty {
-                span_start,
-                span_end,
-            } => {
-                *span_start = new_span_start;
-                *span_end = new_span_end;
+        // Write in the new span. Only write over data if it has changed
+        if let Some(new_span_start) = new_span_start {
+            match &mut self.data[new_span_start] {
+                PidgeHole::Empty {
+                    span_start,
+                    span_end,
+                } => {
+                    *span_start = new_span_start;
+                    *span_end = new_span_end.unwrap_or(id);
+                }
+                _ => panic!("Invalid Span Start"),
             }
         }
-        match &mut self.data[new_span_end] {
-            PidgeHole::Filled(_) => panic!("Invalid Span End"),
-            PidgeHole::Empty {
-                span_start,
-                span_end,
-            } => {
-                *span_start = new_span_start;
-                *span_end = new_span_end;
+
+        if let Some(new_span_end) = new_span_end {
+            match &mut self.data[new_span_end] {
+                PidgeHole::Empty {
+                    span_start,
+                    span_end,
+                } => {
+                    *span_start = new_span_start.unwrap_or(id);
+                    *span_end = new_span_end;
+                }
+                _ => panic!("Invalid Span End"),
             }
         }
+
+        // And write in ourself to have correct values, in the case that either of the above span points are still None.
+        self.data[id] = PidgeHole::Empty {
+            span_start: new_span_start.unwrap_or(id),
+            span_end: new_span_end.unwrap_or(id),
+        };
 
         self.len -= 1;
     }
@@ -187,12 +202,46 @@ impl<K: Key, V> Pidge<K, V> {
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &V> + '_ {
-        self.data.iter().filter_map(|x| x.as_ref())
+        Iter {
+            idx: 0,
+            data: &self.data,
+        }
     }
     pub fn iter_with_empty(&self) -> impl Iterator<Item = Option<&V>> + '_ {
         self.data.iter().map(|x| x.as_ref())
     }
     pub fn iter_mut_with_empty(&mut self) -> impl Iterator<Item = Option<&mut V>> + '_ {
         self.data.iter_mut().map(|x| x.as_mut())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Pidge;
+
+    #[test]
+    fn test_general() {
+        let mut pidge = Pidge::with_capacity(10);
+
+        for i in 0..10usize {
+            pidge.insert(i, i);
+        }
+
+        println!("{pidge:?}");
+
+        pidge.wipe(1);
+        pidge.wipe(2);
+        pidge.wipe(3);
+        pidge.wipe(9);
+
+        println!("{pidge:?}");
+
+        let mut t = 0;
+
+        for p in pidge.iter() {
+            t += 1;
+            println!("{p}")
+        }
+        assert_eq!(t, pidge.len());
     }
 }
