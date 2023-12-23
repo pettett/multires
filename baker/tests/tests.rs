@@ -1,5 +1,5 @@
 #![cfg(test)]
-use baker::mesh::{self, winged_mesh::WingedMesh};
+use baker::mesh::{winged_mesh::WingedMesh};
 
 fn group_and_partition_and_simplify(mesh: &mut WingedMesh, verts: &[glam::Vec4]) {
     let config = &metis::PartitioningConfig {

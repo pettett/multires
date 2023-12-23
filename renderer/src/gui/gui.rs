@@ -1,4 +1,4 @@
-use std::{collections::HashMap, thread, time::Instant};
+use std::{thread, time::Instant};
 
 use crate::{
     components::gpu_multi_res_mesh::{
@@ -16,7 +16,7 @@ use common::graph::petgraph_to_svg;
 use common_renderer::components::{
     camera::Camera, camera_controller::CameraController, transform::Transform,
 };
-use egui::{Pos2, Vec2};
+
 use egui_wgpu::renderer::ScreenDescriptor;
 use glam::Vec3;
 use winit::{event::Event, window::Window};
@@ -39,7 +39,7 @@ impl Gui {
         mut mesh_renderer: ResMut<MultiResMeshRenderer>,
         submeshes: &Query<(Entity, &ClusterComponent)>,
         mut camera: Query<(&mut Camera, &mut CameraController, &Transform)>,
-        commands: &mut Commands,
+        _commands: &mut Commands,
     ) {
         let _delta_s = self.last_frame.elapsed();
         let now = Instant::now();
@@ -141,7 +141,7 @@ impl Gui {
                         egui::widgets::Slider::new(&mut mesh_renderer.error_target, 0.1..=10.0)
                             .prefix("Target Error: "),
                     );
-                    for (mesh, trans) in meshes {
+                    for (mesh, _trans) in meshes {
 						ui.label(mesh.name());
 
                         if ui.button("Snapshot Error Graph").clicked() {
@@ -238,9 +238,9 @@ impl Gui {
 
     pub fn init(
         renderer: &Renderer,
-        mut mesh: QueryState<(&MultiResMeshComponent)>,
-        mut submeshes: QueryState<(Entity, &ClusterComponent)>,
-        world: &World,
+        _mesh: QueryState<&MultiResMeshComponent>,
+        _submeshes: QueryState<(Entity, &ClusterComponent)>,
+        _world: &World,
     ) -> Self {
         let renderer =
             egui_wgpu::Renderer::new(renderer.device(), renderer.surface_format(), None, 1);
@@ -250,7 +250,7 @@ impl Gui {
             renderer,
         }
     }
-    pub fn handle_event<T>(&mut self, window: &Window, event: &Event<T>) -> bool {
+    pub fn handle_event<T>(&mut self, _window: &Window, _event: &Event<T>) -> bool {
         //self.platform
         //    .handle_event(self.imgui.io_mut(), window, event);
         //

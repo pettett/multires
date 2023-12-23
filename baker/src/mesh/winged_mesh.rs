@@ -5,7 +5,7 @@ use idmap::IntegerId;
 use rayon::prelude::*;
 use std::{collections::HashSet, fs};
 
-use crate::pidge::{Key, Pidge};
+use crate::pidge::{Pidge};
 
 use super::{
     iter::EdgeIter,
@@ -842,7 +842,7 @@ pub mod test {
                         .context("Invalid vertex edge dest loop");
                 }
 
-                if let Some(other) = origs.insert(orig, eid) {
+                if let Some(_other) = origs.insert(orig, eid) {
                     return Err(MeshError::InvalidVertex(vid))
                         .context("Vert has incoming edges with duplicate sources");
                 }
@@ -912,7 +912,7 @@ pub mod test {
         };
 
         let mesh = TEST_MESH_MID;
-        let (mut mesh, verts) = WingedMesh::from_gltf(mesh);
+        let (mut mesh, _verts) = WingedMesh::from_gltf(mesh);
 
         // Apply primary partition, that will define the lowest level clusterings
         mesh.partition_within_groups(test_config, None)?;
@@ -1046,7 +1046,7 @@ pub mod test {
 
     #[test]
     fn mesh_stats_readout() {
-        let (mut mesh, verts) = WingedMesh::from_gltf(TEST_MESH_CONE);
+        let (mut mesh, _verts) = WingedMesh::from_gltf(TEST_MESH_CONE);
 
         let mut avg_outgoing = 0.0;
         let mut avg_incoming = 0.0;
@@ -1143,7 +1143,7 @@ pub mod test {
 
         let mut quadrics = mesh.create_quadrics(&verts);
 
-        let e = match mesh.reduce_within_groups(&verts, &mut quadrics, &[mesh.face_count() / 4]) {
+        let _e = match mesh.reduce_within_groups(&verts, &mut quadrics, &[mesh.face_count() / 4]) {
             Ok(e) => e,
             Err(e) => {
                 panic!(
@@ -1165,7 +1165,7 @@ pub mod test {
             minimize_subgraph_degree: Some(true),
             ..Default::default()
         };
-        let (mut mesh, verts) = WingedMesh::from_gltf(TEST_MESH_LOW);
+        let (mut mesh, _verts) = WingedMesh::from_gltf(TEST_MESH_LOW);
 
         // Apply primary partition, that will define the lowest level clusterings
         for i in 9..50 {

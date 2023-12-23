@@ -389,7 +389,7 @@ pub fn render(
     ctx: NonSend<egui::Context>,
     mut state: NonSendMut<egui_winit::State>,
     mut meshes: Query<(&mut MultiResMeshComponent, &Transform)>,
-    mut mesh_renderer: ResMut<MultiResMeshRenderer>,
+    mesh_renderer: ResMut<MultiResMeshRenderer>,
     submeshes: Query<(Entity, &ClusterComponent)>,
     camera: Query<(&CameraUniform, &Transform)>,
     cameras: Query<(&mut Camera, &mut CameraController, &Transform)>,
@@ -503,7 +503,7 @@ pub fn render(
             }),
         });
 
-        for (mesh, trans) in meshes.iter() {
+        for (mesh, _trans) in meshes.iter() {
             mesh.render_pass(&renderer, &submeshes, &mut render_pass, &mesh_renderer);
         }
     }

@@ -1,14 +1,12 @@
 use std::{
     cmp,
-    sync::{mpsc, Arc},
-    thread,
 };
 
 use glam::vec4;
 #[cfg(feature = "progress")]
 use indicatif::ProgressStyle;
 
-use parking_lot::RwLock;
+
 use rayon::prelude::*;
 
 use super::{
@@ -375,7 +373,7 @@ impl WingedMesh {
             //#[cfg(feature = "progress")]
             //bar.set_message(format!("{err:.3e}"));
 
-            'outer: for i in 0..requirement {
+            'outer: for _i in 0..requirement {
                 let (orig, dest, eid, err) = loop {
                     let (_, Error(cmp::Reverse(err), eid)) = match collapse_queues[qi].queue.pop() {
                         Some(err) => err,
@@ -457,7 +455,7 @@ impl WingedMesh {
 mod tests {
     use std::error::Error;
 
-    use crate::mesh::winged_mesh::test::{TEST_MESH_MONK, TEST_MESH_PLANE, TEST_MESH_PLANE_LOW};
+    use crate::mesh::winged_mesh::test::{TEST_MESH_MONK};
 
     use super::{
         super::winged_mesh::{test::TEST_MESH_HIGH, WingedMesh},
@@ -579,7 +577,7 @@ mod tests {
         let (mut mesh, verts) = WingedMesh::from_gltf(TEST_MESH_MONK);
         let mut quadrics = mesh.create_quadrics(&verts);
 
-        for i in 0..4 {
+        for _i in 0..4 {
             mesh.assert_valid().unwrap();
             mesh.reduce_within_groups(&verts, &mut quadrics, &[mesh.face_count() / 4])
                 .unwrap();

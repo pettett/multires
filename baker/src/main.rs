@@ -1,5 +1,5 @@
 use baker::{
-    apply_simplification, group_and_partition_and_simplify, group_and_partition_full_res,
+    group_and_partition_and_simplify,
     mesh::winged_mesh::WingedMesh,
 };
 

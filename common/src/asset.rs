@@ -42,7 +42,7 @@ pub trait Asset: Sized + enc::Encode + de::Decode {
     fn load() -> Result<Self, ErrorKind> {
         let config = config::standard();
 
-        let mut file = fs::File::open("asset.bin")?;
+        let file = fs::File::open("asset.bin")?;
         let mut buf = BufReader::new(file);
 
         Ok(bincode::decode_from_reader(&mut buf, config)?)

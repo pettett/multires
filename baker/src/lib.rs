@@ -1,14 +1,14 @@
 pub mod mesh;
 pub mod pidge;
 
-use std::{collections::BTreeSet, sync::Arc};
+use std::{collections::BTreeSet};
 
 use common::{asset::Asset, MeshLevel, Meshlet, MultiResMesh, SubMesh};
 
 use glam::Vec4;
 use mesh::winged_mesh::WingedMesh;
 
-use crate::mesh::winged_mesh::MeshError;
+
 // use meshopt::VertexDataAdapter;
 
 pub fn to_mesh_layer(mesh: &WingedMesh, verts: &[Vec4]) -> MeshLevel {
@@ -230,7 +230,7 @@ pub fn apply_simplification(mut mesh: WingedMesh, verts: &[Vec4], name: String) 
             i + 1
         );
 
-        let e = match mesh.reduce_within_groups(verts, &mut quadrics, &[mesh.face_count() / 4]) {
+        let _e = match mesh.reduce_within_groups(verts, &mut quadrics, &[mesh.face_count() / 4]) {
             Ok(e) => e,
             Err(e) => {
                 println!(
@@ -270,7 +270,7 @@ pub fn apply_simplification(mut mesh: WingedMesh, verts: &[Vec4], name: String) 
 pub fn grab_indicies(mesh: &WingedMesh) -> Vec<u32> {
     let mut indices = Vec::with_capacity(mesh.face_count() * 3);
 
-    for (fid, f) in mesh.iter_faces() {
+    for (_fid, f) in mesh.iter_faces() {
         let [a, b, c] = mesh.triangle_from_face(&f);
         indices.push(a as _);
         indices.push(b as _);
@@ -293,7 +293,7 @@ pub fn generate_meshlets(mesh: &WingedMesh) -> Vec<Meshlet> {
         .map(|_| (Meshlet::default()))
         .collect();
 
-    for (fid, face) in mesh.iter_faces() {
+    for (_fid, face) in mesh.iter_faces() {
         let verts = mesh.triangle_from_face(&face);
 
         let m = meshlets.get_mut(face.part as usize).unwrap();
@@ -330,7 +330,7 @@ pub fn generate_meshlets(mesh: &WingedMesh) -> Vec<Meshlet> {
 }
 
 /// Debug code to generate meshlets with no max size. Used for testing partition trees with no remeshing
-pub fn generate_submeshes(mesh: &WingedMesh, verts: &[Vec4]) -> Vec<SubMesh> {
+pub fn generate_submeshes(mesh: &WingedMesh, _verts: &[Vec4]) -> Vec<SubMesh> {
     println!("Generating meshlets!");
 
     let inds = 5.0 / mesh.face_count() as f32;
@@ -352,7 +352,7 @@ pub fn generate_submeshes(mesh: &WingedMesh, verts: &[Vec4]) -> Vec<SubMesh> {
         })
         .collect();
 
-    for (fid, face) in mesh.iter_faces() {
+    for (_fid, face) in mesh.iter_faces() {
         let verts = mesh.triangle_from_face(&face);
 
         let m = submeshes.get_mut(face.part as usize).unwrap();
@@ -428,7 +428,7 @@ mod test {
     #[test]
     fn test_contiguous_meshes() {
         println!("Loading from gltf!");
-        let (mesh, verts) = WingedMesh::from_gltf("../../assets/dragon_1m.glb");
+        let (mesh, _verts) = WingedMesh::from_gltf("../../assets/dragon_1m.glb");
 
         let mesh_dual = mesh.generate_face_graph();
 

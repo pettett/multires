@@ -1,5 +1,5 @@
 use baker::pidge::Pidge;
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion};
 
 fn use_pidge() {
     let mut pidge = Pidge::with_capacity(10);
@@ -16,7 +16,7 @@ fn use_pidge() {
 
     let mut t = 0;
 
-    for p in pidge.iter() {
+    for _p in pidge.iter() {
         t += 1;
     }
 

@@ -1,6 +1,6 @@
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet};
 
-use bincode::{config, Decode, Encode};
+use bincode::{Decode, Encode};
 use glam::Vec3;
 
 use crate::asset;
@@ -63,7 +63,7 @@ pub struct SubMesh {
 }
 
 impl SubMesh {
-    pub fn new(error: f32, center: Vec3, monotonic_radius: f32, radius: f32, group: usize) -> Self {
+    pub fn new(error: f32, center: Vec3, monotonic_radius: f32, _radius: f32, group: usize) -> Self {
         Self {
             indices: Vec::new(),
             // tight_sphere: BoundingSphere {

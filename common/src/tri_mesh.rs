@@ -1,4 +1,4 @@
-use glam::{Vec3, Vec4};
+use glam::{Vec4};
 use gltf::mesh::util::ReadIndices;
 
 pub struct TriMesh {

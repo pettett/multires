@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap},
     fmt::Debug,
     sync::Arc,
 };
@@ -10,12 +10,11 @@ use bevy_ecs::{
     system::{Query, Resource},
     world::World,
 };
-use common::{asset::Asset, graph::petgraph_to_svg, MultiResMesh};
+use common::{asset::Asset, MultiResMesh};
 use common_renderer::components::{camera::Camera, transform::Transform};
 use glam::{Mat4, Vec3};
 use petgraph::{
-    matrix_graph::node_index,
-    visit::{EdgeRef, IntoEdges, IntoEdgesDirected},
+    visit::{EdgeRef},
 };
 use wgpu::util::DeviceExt;
 
@@ -151,7 +150,7 @@ impl ClusterComponent {
         })
     }
 
-    pub fn error(&self, mesh: &MultiResMeshComponent, renderer: &MultiResMeshRenderer) -> f32 {
+    pub fn error(&self, _mesh: &MultiResMeshComponent, renderer: &MultiResMeshRenderer) -> f32 {
         match &renderer.error_calc {
             ErrorMode::PointDistance {
                 camera_point, cam, ..
@@ -262,7 +261,7 @@ impl MultiResMeshComponent {
         renderer: &'a Renderer,
 		mesh_renderer : & MultiResMeshRenderer,
         camera_trans: &Transform,
-        submeshes: &'a Query<(Entity, &ClusterComponent)>,
+        _submeshes: &'a Query<(Entity, &ClusterComponent)>,
         render_pass: &mut wgpu::ComputePass<'a>,
     ) {
         if mesh_renderer.freeze {
@@ -565,7 +564,7 @@ impl MultiResMeshComponent {
         );
 
         let staging_buffer_size = 100; // std::mem::size_of_val(&cluster_can_draw[..]);
-        let debug_staging_buffer = instance.device().create_buffer(&wgpu::BufferDescriptor {
+        let _debug_staging_buffer = instance.device().create_buffer(&wgpu::BufferDescriptor {
             label: Some("Compute Buffer"),
             size: staging_buffer_size as u64,
             usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
@@ -620,7 +619,7 @@ impl MultiResMeshAsset {
             println!("Loading layer {level}:");
             let mut cluster_nodes = Vec::new();
 
-            for (cluster_layer_idx, submesh) in r.submeshes.iter().enumerate() {
+            for (_cluster_layer_idx, submesh) in r.submeshes.iter().enumerate() {
                 // Map index buffer to global vertex range
 
                 let index_count = submesh.indices.len() as u32;

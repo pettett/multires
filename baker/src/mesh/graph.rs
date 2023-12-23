@@ -14,7 +14,7 @@ impl WingedMesh {
             self.partition_count() * 3,
         );
         let mut ids = HashMap::with_capacity(self.face_count());
-        for (fid, f) in self.iter_faces() {
+        for (fid, _f) in self.iter_faces() {
             // Each node should directly correspond to a partition
             ids.insert(fid, graph.add_node(fid));
         }
@@ -190,7 +190,7 @@ pub mod test {
         graph::petgraph_to_svg(
             &graph,
             FACE_SVG_OUT,
-            &|_, (n, &fid)| {
+            &|_, (_n, &fid)| {
                 let p = fid.center(&mesh, &verts);
                 let part = mesh.get_face(fid).part;
                 format!(
@@ -218,7 +218,7 @@ pub mod test {
         graph::petgraph_to_svg(
             &graph,
             FACE_SVG_OUT_2,
-            &|_, (n, &fid)| {
+            &|_, (_n, &fid)| {
                 let p = fid.center(&mesh, &verts);
                 let part = mesh.get_face(fid).part;
                 format!(
@@ -246,7 +246,7 @@ pub mod test {
             ..Default::default()
         };
         let mesh = TEST_MESH_PLANE_LOW;
-        let (mut mesh, verts) = WingedMesh::from_gltf(mesh);
+        let (mut mesh, _verts) = WingedMesh::from_gltf(mesh);
 
         println!("Faces: {}, Verts: {}", mesh.face_count(), mesh.vert_count());
 
@@ -285,7 +285,7 @@ pub mod test {
         let mut graph: petgraph::Graph<(), ()> = petgraph::Graph::new();
 
         let mut old_part_nodes: Vec<_> =
-            mesh.partitions.iter().map(|o| graph.add_node(())).collect();
+            mesh.partitions.iter().map(|_o| graph.add_node(())).collect();
 
         // Record a big colour map for node indexes, to show grouping
         let mut colouring = HashMap::new();
@@ -302,7 +302,7 @@ pub mod test {
             mesh.partition_within_groups(test_config, Some(2))?;
 
             let new_part_nodes: Vec<_> =
-                mesh.partitions.iter().map(|o| graph.add_node(())).collect();
+                mesh.partitions.iter().map(|_o| graph.add_node(())).collect();
 
             for (new_p_i, new_p) in mesh.partitions.iter().enumerate() {
                 let g_i = new_p.child_group_index.unwrap();

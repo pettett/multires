@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
 use common::tri_mesh::TriMesh;
-use glam::Mat4;
+
 use wgpu::util::DeviceExt;
 
-use crate::core::{BufferGroup, Instance};
+use crate::core::{Instance};
 
 pub struct DebugMesh {
     pub verts: wgpu::Buffer,

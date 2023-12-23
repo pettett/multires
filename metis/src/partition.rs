@@ -15,7 +15,7 @@ use crate::{
     METIS_NOPTIONS,
 };
 use crate::{
-    mdbglvl_et_METIS_DBG_INFO, miptype_et_METIS_IPTYPE_METISRB, moptions_et_METIS_OPTION_DBGLVL,
+    miptype_et_METIS_IPTYPE_METISRB,
     mptype_et_METIS_PTYPE_KWAY, mptype_et_METIS_PTYPE_RB,
 };
 use petgraph::visit::EdgeRef;
@@ -321,7 +321,7 @@ impl PartitioningConfig {
         unsafe {
             METIS_SetDefaultOptions(&mut options as *mut idx_t);
         }
-        let o = options.clone();
+        let _o = options.clone();
         self.apply(&mut options);
 
         //println!("{:?} \n {:?}", o, options);

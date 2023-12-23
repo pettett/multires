@@ -1,7 +1,7 @@
 use core::fmt;
 use anyhow::Context;
 use petgraph::dot;
-use std::{default, error, fs, path, process};
+use std::{fs, path, process};
 
 /// Generate a graph corresponding to the dual mesh of a mesh generated from triangulating a grid
 ///
