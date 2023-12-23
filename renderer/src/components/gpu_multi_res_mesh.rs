@@ -5,9 +5,13 @@ use std::{
 };
 
 use bevy_ecs::{component::Component, entity::Entity, system::Query, world::World};
-use common::{asset::Asset, MultiResMesh};
-use common_renderer::components::camera::Camera;
+use common::{asset::Asset, graph::petgraph_to_svg, MultiResMesh};
+use common_renderer::components::{camera::Camera, transform::Transform};
 use glam::{Mat4, Vec3};
+use petgraph::{
+    matrix_graph::node_index,
+    visit::{EdgeRef, IntoEdges, IntoEdgesDirected},
+};
 use wgpu::util::DeviceExt;
 
 use crate::core::{BufferGroup, Instance, Renderer};
@@ -32,18 +36,30 @@ pub struct ClusterComponent {
     pub model: BufferGroup<1>,
 }
 #[repr(C)]
-#[derive(crevice::std430::AsStd430, bytemuck::Pod, Clone, Copy, bytemuck::Zeroable)]
+#[derive(
+    crevice::std430::AsStd430, bytemuck::Pod, Clone, Copy, bytemuck::Zeroable, PartialEq, Debug,
+)]
 pub struct ClusterData {
+    center: Vec3,
     // Range into the index array that this submesh resides
     index_offset: u32,
     index_count: u32,
     error: f32,
-    //center: Vec3,
     //radius: f32,
     // All of these could be none (-1), if we are a leaf or a root node
     parent0: i32,
     parent1: i32,
     co_parent: i32,
+
+    // Pad alignment to 4 bytes
+    _0: i32,
+    _1: i32,
+    _2: i32,
+
+    _3: i32,
+    _4: i32,
+    _5: i32,
+    _6: i32,
 }
 
 #[derive(PartialEq, Clone)]
@@ -52,6 +68,7 @@ pub enum ErrorMode {
     MaxError,
     ExactLayer,
 }
+
 impl Debug for ErrorMode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -65,24 +82,27 @@ impl Debug for ErrorMode {
 #[repr(C)]
 #[derive(bytemuck::Zeroable, bytemuck::Pod, Clone, Copy)]
 struct DrawData {
+    camera_pos: Vec3,
     error: f32,
+
+    mode: u32,
+    // Having a vec3 always brings fun antics like this
+    _0: i32,
+    _1: i32,
+    _2: i32,
 }
 
 #[derive(Component)]
 pub struct MultiResMeshComponent {
-    index_buffer: BufferGroup<1>,
-    partition_buffer: BufferGroup<2>,
-    vertex_buffer: wgpu::Buffer,
     cluster_count: u32,
-    pub can_draw_buffer: BufferGroup<1>,
-    pub cluster_data_real_error_buffer: BufferGroup<1>,
-    pub cluster_data_layer_error_buffer: BufferGroup<1>,
-    pub draw_data_buffer: BufferGroup<1>,
-    pub debug_staging_buffer: wgpu::Buffer,
-    pub staging_buffer_size: usize,
+    can_draw_buffer: BufferGroup<1>,
+    //FIXME: This really should exist on the camera/part of uniform group
+    draw_data_buffer: BufferGroup<1>,
+    debug_staging_buffer: wgpu::Buffer,
+    staging_buffer_size: usize,
     model: BufferGroup<1>,
     index_format: wgpu::IndexFormat,
-    asset: MultiResMesh,
+    asset: Arc<MultiResMeshAsset>,
     pub error_calc: ErrorMode,
     pub error_target: f32,
     pub focus_part: usize,
@@ -90,6 +110,23 @@ pub struct MultiResMeshComponent {
     pub show_wire: bool,
     pub show_solid: bool,
     pub show_bounds: bool,
+}
+
+/// Stores all immutable DAG data for a mesh, to be referenced by any number of instances.
+pub struct MultiResMeshAsset {
+    index_buffer: BufferGroup<1>,
+    partition_buffer: BufferGroup<2>,
+    vertex_buffer: wgpu::Buffer,
+    cluster_count: u32,
+    index_count: u32,
+    cluster_data_real_error_buffer: BufferGroup<1>,
+    cluster_data_layer_error_buffer: BufferGroup<1>,
+    index_format: wgpu::IndexFormat,
+    root_asset: MultiResMesh,
+}
+
+pub struct MultiResMeshDatabase {
+    assets: HashMap<String, Arc<MultiResMeshAsset>>,
 }
 
 impl ClusterComponent {
@@ -195,6 +232,7 @@ impl MultiResMeshComponent {
     pub fn compute_pass<'a>(
         &'a self,
         renderer: &'a Renderer,
+        camera_trans: &Transform,
         submeshes: &'a Query<(Entity, &ClusterComponent)>,
         render_pass: &mut wgpu::ComputePass<'a>,
     ) {
@@ -203,7 +241,12 @@ impl MultiResMeshComponent {
                 self.draw_data_buffer.buffer(),
                 0,
                 &bytemuck::cast_slice(&[DrawData {
+                    camera_pos: (*camera_trans.get_pos()).into(),
                     error: self.error_target,
+                    mode: 0,
+                    _0: 0,
+                    _1: 0,
+                    _2: 0,
                 }]),
             );
         }
@@ -212,14 +255,14 @@ impl MultiResMeshComponent {
         render_pass.set_bind_group(0, self.can_draw_buffer.bind_group(), &[]);
 
         let bind_1 = if self.error_calc == ErrorMode::ExactLayer {
-            self.cluster_data_layer_error_buffer.bind_group()
+            self.asset.cluster_data_layer_error_buffer.bind_group()
         } else {
-            self.cluster_data_real_error_buffer.bind_group()
+            self.asset.cluster_data_real_error_buffer.bind_group()
         };
 
         render_pass.set_bind_group(1, bind_1, &[]);
 
-        render_pass.set_bind_group(2, self.index_buffer.bind_group(), &[]);
+        render_pass.set_bind_group(2, self.asset.index_buffer.bind_group(), &[]);
         render_pass.set_bind_group(3, self.draw_data_buffer.bind_group(), &[]);
         render_pass.dispatch_workgroups(self.cluster_count, 1, 1);
     }
@@ -238,22 +281,25 @@ impl MultiResMeshComponent {
         //    println!("");
         //}
 
-        render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-        render_pass.set_index_buffer(self.can_draw_buffer.buffer().slice(..), self.index_format);
+        render_pass.set_vertex_buffer(0, self.asset.vertex_buffer.slice(..));
+        render_pass.set_index_buffer(
+            self.can_draw_buffer.buffer().slice(..),
+            self.asset.index_format,
+        );
 
         render_pass.set_bind_group(0, renderer.camera_buffer().bind_group(), &[]);
-        render_pass.set_bind_group(1, self.partition_buffer.bind_group(), &[]);
+        render_pass.set_bind_group(1, self.asset.partition_buffer.bind_group(), &[]);
         render_pass.set_bind_group(2, self.model.bind_group(), &[]);
 
         if self.show_solid {
             render_pass.set_pipeline(renderer.render_pipeline());
 
-            render_pass.draw_indexed(0..(self.index_buffer.buffer().size() as u32 / 4), 0, 0..1);
+            render_pass.draw_indexed(0..self.asset.index_count, 0, 0..1);
         }
         if self.show_wire {
             render_pass.set_pipeline(renderer.render_pipeline_wire());
 
-            render_pass.draw_indexed(0..(self.index_buffer.buffer().size() as u32 / 4), 0, 0..1);
+            render_pass.draw_indexed(0..self.asset.index_count, 0, 0..1);
         }
 
         // Draw bounds gizmos
@@ -306,9 +352,7 @@ impl MultiResMeshComponent {
         graph
     }
 
-    pub fn load_mesh(instance: Arc<Instance>, world: &mut World) {
-        let asset = common::MultiResMesh::load().unwrap();
-
+    pub fn from_asset(instance: Arc<Instance>, world: &mut World, asset: Arc<MultiResMeshAsset>) {
         let mut clusters_per_lod: Vec<Vec<Entity>> = Vec::new();
 
         let mut all_clusters = Vec::new();
@@ -322,7 +366,7 @@ impl MultiResMeshComponent {
 
         let mut cluster_idx = 0;
 
-        for (level, r) in asset.lods.iter().enumerate() {
+        for (level, r) in asset.asset().lods.iter().enumerate() {
             println!("Loading layer {level}:");
             let mut clusters = Vec::new();
 
@@ -367,10 +411,20 @@ impl MultiResMeshComponent {
                 all_clusters_data_real_error.push(ClusterData {
                     index_offset: cluster.index_offset,
                     index_count: cluster.index_count,
-                    error: cluster.error,
+                    error: cluster.radius,
+                    center: cluster.center,
                     parent0: -1,
                     parent1: -1,
                     co_parent: -1,
+                    _0: -1,
+                    _1: -1,
+                    _2: -1,
+
+                    _3: -1,
+                    _4: -1,
+
+                    _5: -1,
+                    _6: -1,
                 });
 
                 // Push to indices *after* recording the offset above
@@ -391,19 +445,20 @@ impl MultiResMeshComponent {
         // Search for [dependencies], group members, and dependants
         for (level, partition_entities) in clusters_per_lod.iter().enumerate() {
             for (i_partition, &partition) in partition_entities.iter().enumerate() {
-                let i_partition_group = asset.lods[level].partitions[i_partition].group_index;
+                let i_partition_group =
+                    asset.asset().lods[level].partitions[i_partition].group_index;
 
-                assert!(asset.lods[level].groups[i_partition_group]
+                assert!(asset.asset().lods[level].groups[i_partition_group]
                     .partitions
                     .contains(&i_partition));
 
                 let Some(i_partition_child_group) =
-                    asset.lods[level].partitions[i_partition].child_group_index
+                    asset.asset().lods[level].partitions[i_partition].child_group_index
                 else {
                     continue;
                 };
 
-                let child_partitions: Vec<_> = asset.lods[level - 1].groups
+                let child_partitions: Vec<_> = asset.asset().lods[level - 1].groups
                     [i_partition_child_group]
                     .partitions
                     .iter()
@@ -445,8 +500,8 @@ impl MultiResMeshComponent {
                     // Set parent pointers for ourself
 
                     let this = world.get::<ClusterComponent>(cluster).unwrap();
-                    all_clusters_data_real_error[this.id].parent0 = id0;
-                    all_clusters_data_real_error[this.id].parent1 = id1;
+                    all_clusters_data_real_error[this.id].parent0 = id0.min(id1);
+                    all_clusters_data_real_error[this.id].parent1 = id0.max(id1);
                 } else if parents.len() != 0 {
                     panic!("Non-binary parented DAG, not currently (or ever) supported");
                 }
@@ -472,7 +527,14 @@ impl MultiResMeshComponent {
         );
 
         let draw_data_buffer = BufferGroup::create_single(
-            &[DrawData { error: 1.5 }],
+            &[DrawData {
+                camera_pos: Vec3::ZERO,
+                error: 1.5,
+                mode: 0,
+                _0: 0,
+                _1: 0,
+                _2: 0,
+            }],
             wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             instance.device(),
             instance.read_compute_bind_group_layout(),
@@ -484,7 +546,7 @@ impl MultiResMeshComponent {
                 .device()
                 .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("Vertex Buffer"),
-                    contents: bytemuck::cast_slice(&asset.verts[..]),
+                    contents: bytemuck::cast_slice(&asset.asset().verts[..]),
                     usage: wgpu::BufferUsages::VERTEX,
                 });
 
@@ -554,12 +616,7 @@ impl MultiResMeshComponent {
 
         // Update the value stored in this mesh
         world.spawn(MultiResMeshComponent {
-            vertex_buffer,
-            index_buffer,
-            partition_buffer,
             index_format,
-            cluster_data_real_error_buffer,
-            cluster_data_layer_error_buffer,
             draw_data_buffer,
             can_draw_buffer: compute_can_draw_buffer,
             debug_staging_buffer,
@@ -577,7 +634,226 @@ impl MultiResMeshComponent {
         });
     }
 
-    pub fn asset(&self) -> &MultiResMesh {
+    pub fn asset(&self) -> &MultiResMeshAsset {
         &self.asset
+    }
+}
+
+impl MultiResMeshAsset {
+    pub fn load_mesh(instance: Arc<Instance>) -> Self {
+        let asset = common::MultiResMesh::load().unwrap();
+
+        let mut clusters_per_lod = Vec::new();
+
+        let mut all_clusters_data_real_error = Vec::new();
+        let mut all_clusters_data_layer_error = Vec::new();
+        let mut indices = Vec::new();
+        // Face indexed array
+        let mut partitions = Vec::new();
+        // Partition indexed array
+        let mut groups = Vec::new();
+
+        let mut cluster_idx = 0;
+
+        let mut dag = petgraph::Graph::new();
+
+        for (level, r) in asset.lods.iter().enumerate() {
+            println!("Loading layer {level}:");
+            let mut cluster_nodes = Vec::new();
+
+            for (cluster_layer_idx, submesh) in r.submeshes.iter().enumerate() {
+                // Map index buffer to global vertex range
+
+                let index_count = submesh.indices.len() as u32;
+
+                for _ in 0..(index_count / 3) {
+                    partitions.push(cluster_idx as i32);
+                }
+                groups.push(submesh.debug_group as i32);
+
+                cluster_idx += 1;
+
+                // let model = BufferGroup::create_single(
+                //     &[Mat4::from_translation(submesh.saturated_sphere.center())
+                //         * Mat4::from_scale(Vec3::ONE * submesh.saturated_sphere.radius())],
+                //     wgpu::BufferUsages::UNIFORM,
+                //     instance.device(),
+                //     instance.model_bind_group_layout(),
+                //     Some("Uniform Debug Model Buffer"),
+                // );
+
+                all_clusters_data_real_error.push(ClusterData {
+                    index_offset: indices.len() as u32,
+                    index_count,
+                    error: submesh.saturated_sphere.radius(),
+                    center: submesh.saturated_sphere.center(),
+                    parent0: -1,
+                    parent1: -1,
+                    co_parent: -1,
+                    _0: -1,
+                    _1: -1,
+                    _2: -1,
+
+                    _3: -1,
+                    _4: -1,
+
+                    _5: -1,
+                    _6: -1,
+                });
+
+                cluster_nodes.push(dag.add_node(level));
+
+                // Push to indices *after* recording the offset above
+                indices.extend_from_slice(&submesh.indices);
+            }
+            clusters_per_lod.push(cluster_nodes);
+        }
+
+        assert_eq!(partitions.len(), indices.len() / 3);
+        // The last partition should be the largest
+        assert_eq!(groups.len(), *partitions.last().unwrap() as usize + 1);
+
+        // Search for [dependencies], group members, and dependants
+        for (level, cluster_nodes) in clusters_per_lod.iter().enumerate() {
+            for (cluster_idx, &cluster_node_idx) in cluster_nodes.iter().enumerate() {
+                let cluster_group_idx = asset.lods[level].partitions[cluster_idx].group_index;
+
+                assert!(asset.lods[level].groups[cluster_group_idx]
+                    .partitions
+                    .contains(&cluster_idx));
+
+                let Some(child_group_idx) =
+                    asset.lods[level].partitions[cluster_idx].child_group_index
+                else {
+                    continue;
+                };
+
+                // To have a child group, level > 0
+
+                let child_clusters: Vec<_> = asset.lods[level - 1].groups[child_group_idx]
+                    .partitions
+                    .iter()
+                    .map(|&child_partition| clusters_per_lod[level - 1][child_partition])
+                    .collect();
+
+                // println!("{}", child_partitions.len());
+
+                for &child in &child_clusters {
+                    // only the partitions with a shared boundary should be listed as dependants
+
+                    dag.add_edge(cluster_node_idx, child, ());
+                }
+            }
+        }
+
+        // petgraph_to_svg(
+        //     &dag,
+        //     "svg\\asset_dag.svg",
+        //     &|_, _| String::new(),
+        //     common::graph::GraphSVGRender::Directed {
+        //         node_label: common::graph::Label::Weight,
+        //     },
+        // )
+        // .unwrap();
+
+        // Search for Co-parents
+        for i in 0..all_clusters_data_real_error.len() {
+            let parents = dag
+                .neighbors_directed(
+                    petgraph::graph::node_index(i),
+                    petgraph::Direction::Incoming,
+                )
+                .collect::<Vec<_>>();
+
+            match parents[..] {
+                [p0, p1] => {
+                    // Set co-parent pointers to each other. This work will be duplicated a lot of times, but it's convenient
+                    let id0 = p0.index();
+                    let id1 = p1.index();
+
+                    all_clusters_data_real_error[id0].co_parent = id1 as _;
+                    all_clusters_data_real_error[id1].co_parent = id0 as _;
+
+                    // Set parent pointers for ourself
+                    all_clusters_data_real_error[i].parent0 = (id0 as i32).min(id1 as i32);
+                    all_clusters_data_real_error[i].parent1 = (id0 as i32).max(id1 as i32);
+                }
+                [] => (), // No parents is allowed. Indexes are already -1 by default.
+                _ => {
+                    for p in parents {
+                        println!("{:?}", dag[p])
+                    }
+
+                    panic!("Non-binary parented DAG, not currently (or ever) supported");
+                }
+            };
+        }
+
+        // all_clusters_data_real_error is now completely valid
+        for i in 0..all_clusters_data_real_error.len() {
+            all_clusters_data_layer_error.push(ClusterData {
+                error: *dag.node_weight(petgraph::graph::node_index(i)).unwrap() as _,
+                ..all_clusters_data_real_error[i].clone()
+            });
+        }
+
+        let index_buffer = BufferGroup::create_single(
+            &indices,
+            wgpu::BufferUsages::INDEX | wgpu::BufferUsages::STORAGE,
+            instance.device(),
+            instance.read_compute_bind_group_layout(),
+            Some("U32 Index Buffer"),
+        );
+
+        let vertex_buffer =
+            instance
+                .device()
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Vertex Buffer"),
+                    contents: bytemuck::cast_slice(&asset.verts[..]),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+
+        let index_format = wgpu::IndexFormat::Uint32;
+
+        let cluster_data_real_error_buffer = BufferGroup::create_single(
+            &all_clusters_data_real_error,
+            wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            instance.device(),
+            instance.read_compute_bind_group_layout(),
+            Some("all_clusters_data_real_error"),
+        );
+        let cluster_data_layer_error_buffer = BufferGroup::create_single(
+            &all_clusters_data_layer_error,
+            wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            instance.device(),
+            instance.read_compute_bind_group_layout(),
+            Some("all_clusters_data_layer_error"),
+        );
+
+        let partition_buffer = BufferGroup::create_plural_storage(
+            &[&partitions, &groups],
+            instance.device(),
+            &instance.partition_bind_group_layout(),
+            Some("Partition Buffer"),
+        );
+
+        // Update the value stored in this mesh
+
+        MultiResMeshAsset {
+            vertex_buffer,
+            index_buffer,
+            partition_buffer,
+            index_format,
+            index_count: indices.len() as _,
+            cluster_data_real_error_buffer,
+            cluster_data_layer_error_buffer,
+            cluster_count: all_clusters_data_real_error.len() as _,
+            root_asset: asset,
+        }
+    }
+
+    pub fn asset(&self) -> &MultiResMesh {
+        &self.root_asset
     }
 }

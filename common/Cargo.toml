@@ -11,4 +11,5 @@ glam.workspace = true
 bytemuck.workspace = true
 gltf.workspace = true
 petgraph.workspace = true
+anyhow.workspace = true
 open = "5.0"

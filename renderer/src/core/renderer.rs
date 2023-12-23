@@ -387,7 +387,7 @@ pub fn render(
     mut state: NonSendMut<egui_winit::State>,
     mut meshes: Query<&mut MultiResMeshComponent>,
     submeshes: Query<(Entity, &ClusterComponent)>,
-    camera: Query<&CameraUniform>,
+    camera: Query<(&CameraUniform, &Transform)>,
     cameras: Query<(&mut Camera, &mut CameraController, &Transform)>,
     mut commands: Commands,
 ) {
@@ -396,7 +396,7 @@ pub fn render(
         .texture
         .create_view(&wgpu::TextureViewDescriptor::default());
 
-    let mut encoder =
+    let mut compute_encoder =
         renderer
             .instance
             .device()
@@ -404,58 +404,58 @@ pub fn render(
                 label: Some("Compute Encoder"),
             });
 
-    for camera in camera.iter() {
-        renderer.instance.queue().write_buffer(
-            renderer.camera_buffer.buffer(),
-            0,
-            bytemuck::cast_slice(&[*camera]),
-        );
-    }
+    let (camera, camera_trans) = camera.single();
+
+    renderer.instance.queue().write_buffer(
+        renderer.camera_buffer.buffer(),
+        0,
+        bytemuck::cast_slice(&[*camera]),
+    );
 
     {
-        let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+        let mut compute_pass = compute_encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("Compute Pass"),
         });
 
         for mesh in meshes.iter() {
-            mesh.compute_pass(&renderer, &submeshes, &mut compute_pass);
+            mesh.compute_pass(&renderer, camera_trans, &submeshes, &mut compute_pass);
         }
     }
 
-    {
-        for mesh in meshes.iter() {
-            // Sets adds copy operation to command encoder.
-            // Will copy data from storage buffer on GPU to staging buffer on CPU.
-            encoder.copy_buffer_to_buffer(
-                &mesh.cluster_data_real_error_buffer.buffer(),
-                0,
-                &mesh.debug_staging_buffer,
-                0,
-                mesh.staging_buffer_size as _,
-            );
-        }
-    }
+    // {
+    //     for mesh in meshes.iter() {
+    //         // Sets adds copy operation to command encoder.
+    //         // Will copy data from storage buffer on GPU to staging buffer on CPU.
+    //         encoder.copy_buffer_to_buffer(
+    //             &mesh.asset().cluster_data_real_error_buffer.buffer(),
+    //             0,
+    //             &mesh.debug_staging_buffer,
+    //             0,
+    //             mesh.staging_buffer_size as _,
+    //         );
+    //     }
+    // }
 
     renderer
         .instance
         .queue()
-        .submit(std::iter::once(encoder.finish()));
+        .submit(std::iter::once(compute_encoder.finish()));
 
-    {
-        for mesh in meshes.iter() {
-            // Note that we're not calling `.await` here.
-            let buffer_slice = mesh.debug_staging_buffer.slice(..);
-            // Gets the future representing when `staging_buffer` can be read from
-            buffer_slice.map_async(wgpu::MapMode::Read, |_| {});
-        }
-    }
+    // {
+    //     for mesh in meshes.iter() {
+    //         // Note that we're not calling `.await` here.
+    //         let buffer_slice = mesh.debug_staging_buffer.slice(..);
+    //         // Gets the future representing when `staging_buffer` can be read from
+    //         buffer_slice.map_async(wgpu::MapMode::Read, |_| {});
+    //     }
+    // }
 
     // Poll the device in a blocking manner so that our future resolves.
     // In an actual application, `device.poll(...)` should
     // be called in an event loop or on another thread.
-    renderer.device().poll(wgpu::Maintain::Wait);
+    //renderer.device().poll(wgpu::Maintain::Wait);
 
-    let mut encoder =
+    let mut render_encoder =
         renderer
             .instance
             .device()
@@ -464,7 +464,7 @@ pub fn render(
             });
 
     {
-        let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        let mut render_pass = render_encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Mesh Render Pass"),
             color_attachments: &[
                 // This is what @location(0) in the fragment shader targets
@@ -501,7 +501,7 @@ pub fn render(
         &renderer,
         &mut state,
         &ctx,
-        &mut encoder,
+        &mut render_encoder,
         &view,
         &mut meshes,
         &submeshes,
@@ -513,14 +513,14 @@ pub fn render(
     renderer
         .instance
         .queue()
-        .submit(std::iter::once(encoder.finish()));
+        .submit(std::iter::once(render_encoder.finish()));
     output.present();
 
-    {
-        for mesh in meshes.iter() {
-            mesh.debug_staging_buffer.unmap();
-        }
-    }
+    // {
+    //     for mesh in meshes.iter() {
+    //         mesh.debug_staging_buffer.unmap();
+    //     }
+    // }
 }
 
 pub fn handle_screen_events(

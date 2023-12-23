@@ -1,7 +1,7 @@
 use core::fmt;
+use anyhow::Context;
 use petgraph::dot;
 use std::{default, error, fs, path, process};
-const OUT: &str = "C:\\Users\\maxwe\\OneDriveC\\sync\\projects\\multires";
 
 /// Generate a graph corresponding to the dual mesh of a mesh generated from triangulating a grid
 ///
@@ -91,13 +91,18 @@ pub fn petgraph_to_svg<
     out: impl AsRef<path::Path>,
     get_node_attrs: &dyn Fn(&G, G::NodeRef) -> String,
     render: GraphSVGRender,
-) -> Result<(), Box<dyn error::Error>>
+) -> anyhow::Result<()>
 where
     <G as petgraph::visit::Data>::EdgeWeight: fmt::Debug,
     <G as petgraph::visit::Data>::NodeWeight: fmt::Debug,
 {
-    let dot_out_path = path::Path::new(OUT).join("svg\\dot.gv");
-    let out_path = path::Path::new(OUT).join(out);
+	let root = std::env::current_dir().unwrap();
+
+	
+    let dot_out_path = root.join("svg\\dot.gv");
+    let out_path = root.join(out);
+	
+	println!("Writing svg output to {out_path:?}");
 
     match &render {
         GraphSVGRender::Directed { node_label } => fs::write(
@@ -115,7 +120,7 @@ where
                     get_node_attrs
                 )
             ),
-        )?,
+        ).context("Failed to write directed DOT output")?,
         GraphSVGRender::Undirected { edge_label, .. } => fs::write(
             &dot_out_path,
             format!(
@@ -139,7 +144,7 @@ where
                     get_node_attrs
                 )
             ),
-        )?,
+        ).context("Failed to write undirected DOT output")?,
     };
 
     let dot_out = match render {
@@ -159,17 +164,17 @@ where
         }
     }
     .arg("-Tsvg")
-    .output()?;
+    .output().context("Failed to execute graphviz process")?;
 
     //fs::remove_file(DOT_OUT)?;
 
-    println!("{}", std::str::from_utf8(&dot_out.stderr)?);
+    println!("{}", std::str::from_utf8(&dot_out.stderr).context("STDERR from graphviz is not unicode")?);
 
     assert!(dot_out.status.success());
 
-    fs::write(&out_path, dot_out.stdout)?;
+    fs::write(&out_path, dot_out.stdout).context("Failed to write output SVG")?;
 
-    open::that(out_path).unwrap();
+    open::with(out_path, "firefox").context("Failed to trigger auto-open of SVG")?;
 
     Ok(())
 }
