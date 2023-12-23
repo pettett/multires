@@ -3,7 +3,7 @@ use std::sync::Arc;
 use crate::{
     components::{
         camera_uniform::{update_view_proj, CameraUniform},
-        gpu_multi_res_mesh::{MultiResMeshComponent, MultiResMeshAsset},
+        gpu_multi_res_mesh::{MultiResMeshAsset, MultiResMeshComponent, MultiResMeshRenderer},
     },
     gui::gui::Gui,
 };
@@ -52,9 +52,34 @@ impl App {
         world.insert_resource(Events::<KeyIn>::default());
         world.insert_resource(Events::<ScreenEvent>::default());
 
-		let asset = Arc::new(MultiResMeshAsset::load_mesh(renderer.instance()));
+        let asset = Arc::new(MultiResMeshAsset::load_mesh(renderer.instance()));
 
-        MultiResMeshComponent::from_asset(renderer.instance(), &mut world, asset);
+        MultiResMeshComponent::from_asset(
+            "Mesh 0".to_owned(),
+            renderer.instance(),
+            &mut world,
+            asset.clone(),
+            Transform::new_pos(Vec3A::ZERO),
+        );
+
+        MultiResMeshComponent::from_asset(
+            "Mesh 1".to_owned(),
+            renderer.instance(),
+            &mut world,
+            asset,
+            Transform::new_pos(Vec3A::X * 40.0),
+        );
+
+        world.insert_resource(MultiResMeshRenderer {
+            error_calc: crate::components::gpu_multi_res_mesh::ErrorMode::ExactLayer,
+            error_target: 0.5,
+            focus_part: 0,
+            freeze: false,
+            show_wire: true,
+            show_solid: true,
+            show_bounds: false,
+        });
+
         //GUI state
         let q0 = world.query();
         let q1 = world.query();

@@ -2,7 +2,9 @@ use std::sync::Arc;
 
 use crate::components::camera_uniform::CameraUniform;
 use crate::components::debug_mesh::DebugMesh;
-use crate::components::gpu_multi_res_mesh::{ClusterComponent, MultiResMeshComponent};
+use crate::components::gpu_multi_res_mesh::{
+    ClusterComponent, MultiResMeshComponent, MultiResMeshRenderer,
+};
 use crate::gui::gui::Gui;
 use crate::vertex::Vertex;
 use bevy_ecs::entity::Entity;
@@ -213,6 +215,7 @@ impl Renderer {
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Compute Pipeline Layout"),
                 bind_group_layouts: &[
+                    // Reminder: Max of 4 for these, don't add any more
                     (&write_compute_bind_group_layout).into(),
                     (&read_compute_buffer_bind_group).into(),
                     (&read_compute_buffer_bind_group).into(),
@@ -385,7 +388,8 @@ pub fn render(
     mut gui: ResMut<Gui>,
     ctx: NonSend<egui::Context>,
     mut state: NonSendMut<egui_winit::State>,
-    mut meshes: Query<&mut MultiResMeshComponent>,
+    mut meshes: Query<(&mut MultiResMeshComponent, &Transform)>,
+    mut mesh_renderer: ResMut<MultiResMeshRenderer>,
     submeshes: Query<(Entity, &ClusterComponent)>,
     camera: Query<(&CameraUniform, &Transform)>,
     cameras: Query<(&mut Camera, &mut CameraController, &Transform)>,
@@ -417,8 +421,15 @@ pub fn render(
             label: Some("Compute Pass"),
         });
 
-        for mesh in meshes.iter() {
-            mesh.compute_pass(&renderer, camera_trans, &submeshes, &mut compute_pass);
+        for (mesh, trans) in meshes.iter() {
+            mesh.compute_pass(
+                trans,
+                &renderer,
+                &mesh_renderer,
+                camera_trans,
+                &submeshes,
+                &mut compute_pass,
+            );
         }
     }
 
@@ -492,8 +503,8 @@ pub fn render(
             }),
         });
 
-        for mesh in meshes.iter() {
-            mesh.render_pass(&renderer, &submeshes, &mut render_pass);
+        for (mesh, trans) in meshes.iter() {
+            mesh.render_pass(&renderer, &submeshes, &mut render_pass, &mesh_renderer);
         }
     }
 
@@ -504,6 +515,7 @@ pub fn render(
         &mut render_encoder,
         &view,
         &mut meshes,
+        mesh_renderer,
         &submeshes,
         cameras,
         &mut commands,

@@ -13,7 +13,7 @@ struct ClusterData {
     parent1: i32,
 
     co_parent: i32,
-	// Filler data for alignment
+	// Filler draw_data for alignment
     _0: i32,
     _1: i32,
     _2: i32,
@@ -25,22 +25,22 @@ struct ClusterData {
 }
 
 struct DrawData {
+	model: mat4x4<f32>,
 	camera_pos : vec3<f32>,
     error: f32,
 	mode: i32,
 }
 
-@group(0) @binding(0) var<storage, write> draw: array<i32>;
+@group(0) @binding(0) var<storage, write> should_draw: array<i32>;
 
 @group(1) @binding(0) var<storage, read> clusters: array<ClusterData>;
 
 @group(2) @binding(0) var<storage, read> indices: array<i32>;
 
-@group(3) @binding(0) var<storage, read> data: DrawData;
-
+@group(3) @binding(0) var<storage, read> draw_data: DrawData;
 
 fn cluster_error(idx: u32) -> f32{
-	return clusters[idx].error / distance(clusters[idx].center, data.camera_pos);
+	return clusters[idx].error / distance((draw_data.model * vec4<f32>(clusters[idx].center, 1.0)).xyz, draw_data.camera_pos);
 }
 
 @compute @workgroup_size(1)
@@ -48,7 +48,7 @@ fn main(
     @builtin(global_invocation_id) id: vec3<u32>
 ) {
     let i = id.x;
-    // draw[i] = i32(clusters[i].index_offset);
+    // should_draw[i] = i32(clusters[i].index_offset);
 
     let start = clusters[i].index_offset;
     let end = start + clusters[i].index_count;
@@ -71,12 +71,12 @@ fn main(
         parent_error = min(cluster_error(u32(clusters[i].parent0)), cluster_error(u32(clusters[i].parent1)));
     }
 
-    let cull = i32(data.error >= this_error && data.error < parent_error);
+    let cull = i32(draw_data.error >= this_error && draw_data.error < parent_error);
 
 
 	// Ideally, compute this in a step after writing cull to a buffer and compacting it down
 
     for (var ind: u32 = start; ind < end; ind++) {
-        draw[ind] = indices[ind] * cull;
+        should_draw[ind] = indices[ind] * cull;
     }
 }

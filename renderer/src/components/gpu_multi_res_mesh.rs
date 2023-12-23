@@ -4,7 +4,12 @@ use std::{
     sync::Arc,
 };
 
-use bevy_ecs::{component::Component, entity::Entity, system::Query, world::World};
+use bevy_ecs::{
+    component::Component,
+    entity::Entity,
+    system::{Query, Resource},
+    world::World,
+};
 use common::{asset::Asset, graph::petgraph_to_svg, MultiResMesh};
 use common_renderer::components::{camera::Camera, transform::Transform};
 use glam::{Mat4, Vec3};
@@ -82,6 +87,7 @@ impl Debug for ErrorMode {
 #[repr(C)]
 #[derive(bytemuck::Zeroable, bytemuck::Pod, Clone, Copy)]
 struct DrawData {
+    model: Mat4,
     camera_pos: Vec3,
     error: f32,
 
@@ -94,15 +100,18 @@ struct DrawData {
 
 #[derive(Component)]
 pub struct MultiResMeshComponent {
+    name: String,
     cluster_count: u32,
     can_draw_buffer: BufferGroup<1>,
     //FIXME: This really should exist on the camera/part of uniform group
     draw_data_buffer: BufferGroup<1>,
-    debug_staging_buffer: wgpu::Buffer,
-    staging_buffer_size: usize,
     model: BufferGroup<1>,
     index_format: wgpu::IndexFormat,
     asset: Arc<MultiResMeshAsset>,
+}
+
+#[derive(Resource)]
+pub struct MultiResMeshRenderer {
     pub error_calc: ErrorMode,
     pub error_target: f32,
     pub focus_part: usize,
@@ -134,15 +143,16 @@ impl ClusterComponent {
         &self,
         submeshes: &Query<(Entity, &ClusterComponent)>,
         mesh: &MultiResMeshComponent,
+        renderer: &MultiResMeshRenderer,
     ) -> f32 {
-        self.error(mesh).min(match self.co_parent {
-            Some(co_parent) => submeshes.get(co_parent).unwrap().1.error(mesh),
+        self.error(mesh, renderer).min(match self.co_parent {
+            Some(co_parent) => submeshes.get(co_parent).unwrap().1.error(mesh, renderer),
             None => f32::MAX, // Leaf nodes have no co parent, as have no children
         })
     }
 
-    pub fn error(&self, mesh: &MultiResMeshComponent) -> f32 {
-        match &mesh.error_calc {
+    pub fn error(&self, mesh: &MultiResMeshComponent, renderer: &MultiResMeshRenderer) -> f32 {
+        match &renderer.error_calc {
             ErrorMode::PointDistance {
                 camera_point, cam, ..
             } => {
@@ -163,14 +173,19 @@ impl ClusterComponent {
     // taking the smaller of the two's errors to ensure other things in the group can still be drawn at the exact same time.
     // (Group != siblings, but everything in a group and every sibling must *both* be in agreement on whether to draw)
 
-    pub fn error_within_bounds(&self, mesh: &MultiResMeshComponent) -> bool {
-        self.error(mesh) < mesh.error_target
+    pub fn error_within_bounds(
+        &self,
+        mesh: &MultiResMeshComponent,
+        renderer: &MultiResMeshRenderer,
+    ) -> bool {
+        self.error(mesh, renderer) < renderer.error_target
     }
 
     pub fn should_draw(
         &self,
         submeshes: &Query<(Entity, &ClusterComponent)>,
         mesh: &MultiResMeshComponent,
+        renderer: &MultiResMeshRenderer,
     ) -> bool {
         //TODO: Give each partition a unique parent. This parent should be a
 
@@ -188,7 +203,12 @@ impl ClusterComponent {
 
         // For each parent, if any are within bounds, they all will be
         for &dep in &self.parents {
-            if submeshes.get(dep).unwrap().1.error_within_bounds(mesh) {
+            if submeshes
+                .get(dep)
+                .unwrap()
+                .1
+                .error_within_bounds(mesh, renderer)
+            {
                 parent_error_too_large = false;
             }
         }
@@ -197,13 +217,13 @@ impl ClusterComponent {
         // and we should draw the child
 
         parent_error_too_large
-            && (self.error_within_bounds(mesh)
+            && (self.error_within_bounds(mesh, renderer)
                 || match self.co_parent {
                     Some(co_parent) => submeshes
                         .get(co_parent)
                         .unwrap()
                         .1
-                        .error_within_bounds(mesh),
+                        .error_within_bounds(mesh, renderer),
                     None => true, // Leaf nodes have no co parent, as have no children
                 })
     }
@@ -212,11 +232,18 @@ impl ClusterComponent {
         &self,
         submeshes: &Query<(Entity, &ClusterComponent)>,
         mesh: &MultiResMeshComponent,
+        renderer: &MultiResMeshRenderer,
     ) -> bool {
-        let should_draw = self.should_draw(submeshes, mesh);
+        let should_draw = self.should_draw(submeshes, mesh, renderer);
 
         for g in &self.group {
-            if should_draw != submeshes.get(*g).unwrap().1.should_draw(submeshes, mesh) {
+            if should_draw
+                != submeshes
+                    .get(*g)
+                    .unwrap()
+                    .1
+                    .should_draw(submeshes, mesh, renderer)
+            {
                 println!("WARNING: Not all members of a group are drawing")
             }
         }
@@ -231,18 +258,25 @@ impl ClusterComponent {
 impl MultiResMeshComponent {
     pub fn compute_pass<'a>(
         &'a self,
+        transform: &Transform,
         renderer: &'a Renderer,
+		mesh_renderer : & MultiResMeshRenderer,
         camera_trans: &Transform,
         submeshes: &'a Query<(Entity, &ClusterComponent)>,
         render_pass: &mut wgpu::ComputePass<'a>,
     ) {
+        if mesh_renderer.freeze {
+            return;
+        }
+
         {
             renderer.queue().write_buffer(
                 self.draw_data_buffer.buffer(),
                 0,
                 &bytemuck::cast_slice(&[DrawData {
+                    model: transform.get_local_to_world(),
                     camera_pos: (*camera_trans.get_pos()).into(),
-                    error: self.error_target,
+                    error: mesh_renderer.error_target,
                     mode: 0,
                     _0: 0,
                     _1: 0,
@@ -254,7 +288,7 @@ impl MultiResMeshComponent {
         render_pass.set_pipeline(&renderer.compute_pipeline);
         render_pass.set_bind_group(0, self.can_draw_buffer.bind_group(), &[]);
 
-        let bind_1 = if self.error_calc == ErrorMode::ExactLayer {
+        let bind_1 = if mesh_renderer.error_calc == ErrorMode::ExactLayer {
             self.asset.cluster_data_layer_error_buffer.bind_group()
         } else {
             self.asset.cluster_data_real_error_buffer.bind_group()
@@ -264,6 +298,7 @@ impl MultiResMeshComponent {
 
         render_pass.set_bind_group(2, self.asset.index_buffer.bind_group(), &[]);
         render_pass.set_bind_group(3, self.draw_data_buffer.bind_group(), &[]);
+
         render_pass.dispatch_workgroups(self.cluster_count, 1, 1);
     }
 
@@ -272,6 +307,7 @@ impl MultiResMeshComponent {
         renderer: &'a Renderer,
         submeshes: &'a Query<(Entity, &ClusterComponent)>,
         render_pass: &mut wgpu::RenderPass<'a>,
+		mesh_renderer: &MultiResMeshRenderer ,
     ) {
         //{
         //    for i in 0..self.staging_buffer_size {
@@ -291,26 +327,26 @@ impl MultiResMeshComponent {
         render_pass.set_bind_group(1, self.asset.partition_buffer.bind_group(), &[]);
         render_pass.set_bind_group(2, self.model.bind_group(), &[]);
 
-        if self.show_solid {
+        if mesh_renderer.show_solid {
             render_pass.set_pipeline(renderer.render_pipeline());
 
             render_pass.draw_indexed(0..self.asset.index_count, 0, 0..1);
         }
-        if self.show_wire {
+        if mesh_renderer.show_wire {
             render_pass.set_pipeline(renderer.render_pipeline_wire());
 
             render_pass.draw_indexed(0..self.asset.index_count, 0, 0..1);
         }
 
         // Draw bounds gizmos
-        if self.show_bounds {
+        if mesh_renderer.show_bounds {
             render_pass.set_vertex_buffer(0, renderer.sphere_gizmo.verts.slice(..));
 
             render_pass.set_pipeline(renderer.render_pipeline_wire());
 
             for (_, submesh) in submeshes.iter() {
-                if submesh.cluster_layer_idx == self.focus_part {
-                    if submesh.should_draw(submeshes, self) {
+                if submesh.cluster_layer_idx == mesh_renderer.focus_part {
+                    if submesh.should_draw(submeshes, self, mesh_renderer) {
                         render_pass.set_index_buffer(
                             renderer.sphere_gizmo.indices.slice(..),
                             wgpu::IndexFormat::Uint32,
@@ -327,13 +363,14 @@ impl MultiResMeshComponent {
     pub fn submesh_error_graph(
         &self,
         submeshes: &Query<(Entity, &ClusterComponent)>,
+        renderer: &MultiResMeshRenderer,
     ) -> petgraph::prelude::Graph<f32, ()> {
         let mut graph = petgraph::Graph::new();
 
         let mut nodes = HashMap::new();
 
         for (e, s) in submeshes.iter() {
-            nodes.insert(e, graph.add_node(s.co_error(submeshes, &self)));
+            nodes.insert(e, graph.add_node(s.co_error(submeshes, &self, renderer)));
         }
 
         for (e, s) in submeshes.iter() {
@@ -352,12 +389,16 @@ impl MultiResMeshComponent {
         graph
     }
 
-    pub fn from_asset(instance: Arc<Instance>, world: &mut World, asset: Arc<MultiResMeshAsset>) {
+    pub fn from_asset(
+        name: String,
+        instance: Arc<Instance>,
+        world: &mut World,
+        asset: Arc<MultiResMeshAsset>,
+        trans: Transform,
+    ) {
         let mut clusters_per_lod: Vec<Vec<Entity>> = Vec::new();
 
         let mut all_clusters = Vec::new();
-        let mut all_clusters_data_real_error = Vec::new();
-        let mut all_clusters_data_layer_error = Vec::new();
         let mut indices = Vec::new();
         // Face indexed array
         let mut partitions = Vec::new();
@@ -382,7 +423,7 @@ impl MultiResMeshComponent {
 
                 cluster_idx += 1;
 
-                let model = BufferGroup::create_single(
+                let cluster_model = BufferGroup::create_single(
                     &[Mat4::from_translation(submesh.saturated_sphere.center())
                         * Mat4::from_scale(Vec3::ONE * submesh.saturated_sphere.radius())],
                     wgpu::BufferUsages::UNIFORM,
@@ -392,7 +433,7 @@ impl MultiResMeshComponent {
                 );
 
                 let cluster = ClusterComponent {
-                    id: all_clusters_data_real_error.len(),
+                    id: all_clusters.len(),
                     //partitions: info_buffer,
                     index_offset: indices.len() as u32,
                     index_count,
@@ -400,32 +441,13 @@ impl MultiResMeshComponent {
                     cluster_layer_idx,
                     center: submesh.saturated_sphere.center(),
                     error: submesh.error,
-                    model,
+                    model: cluster_model,
                     radius: submesh.saturated_sphere.radius(),
                     //    children: vec![],
                     parents: vec![],
                     group: vec![],
                     co_parent: None,
                 };
-
-                all_clusters_data_real_error.push(ClusterData {
-                    index_offset: cluster.index_offset,
-                    index_count: cluster.index_count,
-                    error: cluster.radius,
-                    center: cluster.center,
-                    parent0: -1,
-                    parent1: -1,
-                    co_parent: -1,
-                    _0: -1,
-                    _1: -1,
-                    _2: -1,
-
-                    _3: -1,
-                    _4: -1,
-
-                    _5: -1,
-                    _6: -1,
-                });
 
                 // Push to indices *after* recording the offset above
                 indices.extend_from_slice(&submesh.indices);
@@ -478,56 +500,23 @@ impl MultiResMeshComponent {
 
             // Search for Co-parents
             for &cluster in &all_clusters {
-                let parents = world
-                    .get::<ClusterComponent>(cluster)
-                    .unwrap()
-                    .parents
-                    .clone();
+                match world.get::<ClusterComponent>(cluster).unwrap().parents[..] {
+                    [p0, p1] => {
+                        // Set co-parent pointers to each other
 
-                if parents.len() == 2 {
-                    // Set co-parent pointers to each other
-                    let id0 = world.get::<ClusterComponent>(parents[0]).unwrap().id as _;
-                    let id1 = world.get::<ClusterComponent>(parents[1]).unwrap().id as _;
+                        world.get_mut::<ClusterComponent>(p1).unwrap().co_parent = Some(p0);
 
-                    let mut p1 = world.get_mut::<ClusterComponent>(parents[1]).unwrap();
-                    p1.co_parent = Some(parents[0]);
-                    all_clusters_data_real_error[p1.id].co_parent = id0;
-
-                    let mut p0 = world.get_mut::<ClusterComponent>(parents[0]).unwrap();
-                    p0.co_parent = Some(parents[1]);
-                    all_clusters_data_real_error[p0.id].co_parent = id1;
-
-                    // Set parent pointers for ourself
-
-                    let this = world.get::<ClusterComponent>(cluster).unwrap();
-                    all_clusters_data_real_error[this.id].parent0 = id0.min(id1);
-                    all_clusters_data_real_error[this.id].parent1 = id0.max(id1);
-                } else if parents.len() != 0 {
-                    panic!("Non-binary parented DAG, not currently (or ever) supported");
+                        world.get_mut::<ClusterComponent>(p0).unwrap().co_parent = Some(p1);
+                    }
+                    [] => (),
+                    _ => panic!("Non-binary parented DAG, not currently (or ever) supported"),
                 }
             }
         }
 
-        for i in 0..all_clusters.len() {
-            all_clusters_data_layer_error.push(ClusterData {
-                error: world
-                    .get::<ClusterComponent>(all_clusters[i])
-                    .unwrap()
-                    .layer as _,
-                ..all_clusters_data_real_error[i].clone()
-            });
-        }
-
-        let index_buffer = BufferGroup::create_single(
-            &indices,
-            wgpu::BufferUsages::INDEX | wgpu::BufferUsages::STORAGE,
-            instance.device(),
-            instance.read_compute_bind_group_layout(),
-            Some("U32 Index Buffer"),
-        );
-
         let draw_data_buffer = BufferGroup::create_single(
             &[DrawData {
+                model: trans.get_local_to_world(),
                 camera_pos: Vec3::ZERO,
                 error: 1.5,
                 mode: 0,
@@ -541,23 +530,14 @@ impl MultiResMeshComponent {
             Some("Draw Data Buffer"),
         );
 
-        let vertex_buffer =
-            instance
-                .device()
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("Vertex Buffer"),
-                    contents: bytemuck::cast_slice(&asset.asset().verts[..]),
-                    usage: wgpu::BufferUsages::VERTEX,
-                });
-
         let index_format = wgpu::IndexFormat::Uint32;
 
         let model = BufferGroup::create_single(
-            &[Mat4::IDENTITY],
-            wgpu::BufferUsages::UNIFORM,
+            &[trans.get_local_to_world()],
+            wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::STORAGE,
             instance.device(),
             instance.model_bind_group_layout(),
-            Some("Uniform Model Buffer"),
+            Some("Mesh Uniform Model Buffer"),
         );
 
         // let mut sizer = crevice::std430::Sizer::new();
@@ -576,21 +556,6 @@ impl MultiResMeshComponent {
 
         let cluster_can_draw = vec![1i32; indices.len()];
 
-        let cluster_data_real_error_buffer = BufferGroup::create_single(
-            &all_clusters_data_real_error,
-            wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-            instance.device(),
-            instance.read_compute_bind_group_layout(),
-            Some("all_clusters_data_real_error"),
-        );
-        let cluster_data_layer_error_buffer = BufferGroup::create_single(
-            &all_clusters_data_layer_error,
-            wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-            instance.device(),
-            instance.read_compute_bind_group_layout(),
-            Some("all_clusters_data_layer_error"),
-        );
-
         let compute_can_draw_buffer = BufferGroup::create_single(
             &cluster_can_draw,
             wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::INDEX,
@@ -607,35 +572,29 @@ impl MultiResMeshComponent {
             mapped_at_creation: false,
         });
 
-        let partition_buffer = BufferGroup::create_plural_storage(
-            &[&partitions, &groups],
-            instance.device(),
-            &instance.partition_bind_group_layout(),
-            Some("Partition Buffer"),
-        );
-
         // Update the value stored in this mesh
-        world.spawn(MultiResMeshComponent {
-            index_format,
-            draw_data_buffer,
-            can_draw_buffer: compute_can_draw_buffer,
-            debug_staging_buffer,
-            staging_buffer_size,
-            cluster_count: all_clusters_data_real_error.len() as _,
-            model,
-            asset,
-            error_calc: ErrorMode::ExactLayer,
-            error_target: 0.5,
-            focus_part: 0,
-            freeze: false,
-            show_wire: true,
-            show_solid: true,
-            show_bounds: false,
-        });
+        world.spawn((
+            MultiResMeshComponent {
+                name,
+                index_format,
+                draw_data_buffer,
+                can_draw_buffer: compute_can_draw_buffer,
+                //debug_staging_buffer,
+                //staging_buffer_size,
+                cluster_count: all_clusters.len() as _,
+                model,
+                asset,
+            },
+            trans,
+        ));
     }
 
     pub fn asset(&self) -> &MultiResMeshAsset {
         &self.asset
+    }
+
+    pub fn name(&self) -> &str {
+        self.name.as_ref()
     }
 }
 

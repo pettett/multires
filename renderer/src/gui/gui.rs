@@ -1,13 +1,15 @@
 use std::{collections::HashMap, thread, time::Instant};
 
 use crate::{
-    components::gpu_multi_res_mesh::{ClusterComponent, ErrorMode, MultiResMeshComponent},
+    components::gpu_multi_res_mesh::{
+        ClusterComponent, ErrorMode, MultiResMeshComponent, MultiResMeshRenderer,
+    },
     core::Renderer,
 };
 use bevy_ecs::{
     entity::Entity,
     query::QueryState,
-    system::{Commands, Query, Resource},
+    system::{Commands, Query, ResMut, Resource},
     world::World,
 };
 use common::graph::petgraph_to_svg;
@@ -33,7 +35,8 @@ impl Gui {
         ctx: &egui::Context,
         encoder: &mut wgpu::CommandEncoder,
         view: &wgpu::TextureView,
-        meshes: &mut Query<&mut MultiResMeshComponent>,
+        meshes: &mut Query<(&mut MultiResMeshComponent, &Transform)>,
+        mut mesh_renderer: ResMut<MultiResMeshRenderer>,
         submeshes: &Query<(Entity, &ClusterComponent)>,
         mut camera: Query<(&mut Camera, &mut CameraController, &Transform)>,
         commands: &mut Commands,
@@ -72,76 +75,78 @@ impl Gui {
                     });
 
                 //FIXME: This is really nothing to do with gui.
-                for mut mesh in meshes.iter_mut() {
-                    let freeze = mesh.freeze;
+                let freeze = mesh_renderer.freeze;
 
-                    match &mut mesh.error_calc {
-                        ErrorMode::PointDistance { camera_point, cam } => {
-                            if !freeze {
-                                *camera_point = (*transform.get_pos()).into();
-                                *cam = camera.clone();
-                            }
+                match &mut mesh_renderer.error_calc {
+                    ErrorMode::PointDistance { camera_point, cam } => {
+                        if !freeze {
+                            *camera_point = (*transform.get_pos()).into();
+                            *cam = camera.clone();
                         }
-                        _ => (),
                     }
+                    _ => (),
                 }
             }
 
-            for mut mesh in meshes.iter_mut() {
-                egui::Window::new("Mesh View")
-                    .min_height(100.0)
-                    .min_width(100.0)
-                    .show(&ctx, |ui| {
-                        ui.add(
-                            egui::widgets::DragValue::new(&mut mesh.focus_part)
-                                .prefix("focus partition: "),
-                        );
+            egui::Window::new("Mesh Renderer")
+                .min_height(100.0)
+                .min_width(100.0)
+                .show(&ctx, |ui| {
+                    ui.add(
+                        egui::widgets::DragValue::new(&mut mesh_renderer.focus_part)
+                            .prefix("focus partition: "),
+                    );
 
-                        ui.add(egui::widgets::Checkbox::new(&mut mesh.freeze, "Freeze"));
-                        ui.add(egui::widgets::Checkbox::new(
-                            &mut mesh.show_solid,
-                            "Show Solid",
-                        ));
-                        ui.add(egui::widgets::Checkbox::new(
-                            &mut mesh.show_wire,
-                            "Show Wire",
-                        ));
-                        ui.add(egui::widgets::Checkbox::new(
-                            &mut mesh.show_bounds,
-                            "Show Bounds",
-                        ));
+                    ui.add(egui::widgets::Checkbox::new(
+                        &mut mesh_renderer.freeze,
+                        "Freeze",
+                    ));
+                    ui.add(egui::widgets::Checkbox::new(
+                        &mut mesh_renderer.show_solid,
+                        "Show Solid",
+                    ));
+                    ui.add(egui::widgets::Checkbox::new(
+                        &mut mesh_renderer.show_wire,
+                        "Show Wire",
+                    ));
+                    ui.add(egui::widgets::Checkbox::new(
+                        &mut mesh_renderer.show_bounds,
+                        "Show Bounds",
+                    ));
 
-                        egui::ComboBox::from_label("Mode ")
-                            .selected_text(format!("{:?}", &mut mesh.error_calc))
-                            .show_ui(ui, |ui| {
-                                ui.selectable_value(
-                                    &mut mesh.error_calc,
-                                    ErrorMode::MaxError,
-                                    "Max Error",
-                                );
-                                ui.selectable_value(
-                                    &mut mesh.error_calc,
-                                    ErrorMode::PointDistance {
-                                        camera_point: Vec3::ZERO,
-                                        cam: Camera::new(1.0),
-                                    },
-                                    "Point distance",
-                                );
-                                ui.selectable_value(
-                                    &mut mesh.error_calc,
-                                    ErrorMode::ExactLayer,
-                                    "Exact Layer",
-                                );
-                            });
+                    egui::ComboBox::from_label("Mode ")
+                        .selected_text(format!("{:?}", &mut mesh_renderer.error_calc))
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(
+                                &mut mesh_renderer.error_calc,
+                                ErrorMode::MaxError,
+                                "Max Error",
+                            );
+                            ui.selectable_value(
+                                &mut mesh_renderer.error_calc,
+                                ErrorMode::PointDistance {
+                                    camera_point: Vec3::ZERO,
+                                    cam: Camera::new(1.0),
+                                },
+                                "Point distance",
+                            );
+                            ui.selectable_value(
+                                &mut mesh_renderer.error_calc,
+                                ErrorMode::ExactLayer,
+                                "Exact Layer",
+                            );
+                        });
 
-                        ui.add(
-                            egui::widgets::Slider::new(&mut mesh.error_target, 0.1..=10.0)
-                                .prefix("Target Error: "),
-                        );
+                    ui.add(
+                        egui::widgets::Slider::new(&mut mesh_renderer.error_target, 0.1..=10.0)
+                            .prefix("Target Error: "),
+                    );
+                    for (mesh, trans) in meshes {
+						ui.label(mesh.name());
 
                         if ui.button("Snapshot Error Graph").clicked() {
-                            let g = mesh.submesh_error_graph(submeshes);
-                            let error_target = mesh.error_target;
+                            let g = mesh.submesh_error_graph(submeshes, &mesh_renderer);
+                            let error_target = mesh_renderer.error_target;
 
                             thread::spawn(move || {
                                 petgraph_to_svg(
@@ -161,8 +166,8 @@ impl Gui {
                                 .unwrap();
                             });
                         }
-                    });
-            }
+                    }
+                });
             // for mut window in windows.iter_mut() {
             //     window.draw_window(ctx, renderer, &mut self.renderer, commands);
             // }
@@ -239,8 +244,6 @@ impl Gui {
     ) -> Self {
         let renderer =
             egui_wgpu::Renderer::new(renderer.device(), renderer.surface_format(), None, 1);
-
-        let mesh = mesh.get_single(world).unwrap();
 
         Self {
             last_frame: Instant::now(),
