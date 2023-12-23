@@ -6,7 +6,7 @@ members = [
 	"common_renderer",
 	"renderer",
 	# "vk_renderer",
-	"ash_renderer",
+	# "ash_renderer",
 ]
 resolver = "2"
 
