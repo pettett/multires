@@ -13,4 +13,6 @@ glam.workspace = true
 gltf.workspace = true
 pollster.workspace = true
 bevy_ecs.workspace = true
+petgraph.workspace = true
 common = { path = "../common" }
+crevice.workspace = true

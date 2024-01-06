@@ -31,7 +31,18 @@ struct DrawData {
 	mode: i32,
 }
 
-@group(0) @binding(0) var<storage, write> should_draw: array<i32>;
+struct DrawIndirect {
+    vertex_count: u32,
+    instance_count: u32,
+    base_vertex: u32,
+    base_instance: u32,
+}
+
+@group(0) @binding(0) var<storage, write> result_indicies: array<i32>;
+
+//@group(0) @binding(1) var<storage, read_write> should_draw: array<i32>;
+
+//@group(0) @binding(2) var<storage, write> draw_indirect_params: DrawIndirect;
 
 @group(1) @binding(0) var<storage, read> indices: array<i32>;
 
@@ -78,6 +89,6 @@ fn main(
 	// Ideally, compute this in a step after writing cull to a buffer and compacting it down
 
     for (var ind: u32 = start; ind < end; ind++) {
-        should_draw[ind] = indices[ind] * cull;
+        result_indicies[ind] = indices[ind] * cull;
     }
 }

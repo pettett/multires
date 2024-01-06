@@ -28,6 +28,7 @@ winit = "0.28"
 pollster = "0.3"
 anyhow = "1.0"
 thiserror = "1.0"
+crevice = { version = "0.14" }
 
 [profile.release]
 debug = true

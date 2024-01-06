@@ -7,7 +7,11 @@ use bevy_ecs::{
     world::World,
 };
 use common::{asset::Asset, MultiResMesh};
-use common_renderer::components::{camera::Camera, transform::Transform};
+use common_renderer::components::{
+    camera::Camera,
+    gpu_mesh_util::{cluster_data_from_asset, ClusterData},
+    transform::Transform,
+};
 use glam::{Mat4, Vec3};
 use petgraph::visit::EdgeRef;
 use wgpu::util::DeviceExt;
@@ -32,34 +36,6 @@ pub struct ClusterComponent {
     pub group: Vec<Entity>,
     pub co_parent: Option<Entity>,
     pub model: BufferGroup<1>,
-}
-#[repr(C)]
-#[derive(
-    crevice::std430::AsStd430, bytemuck::Pod, Clone, Copy, bytemuck::Zeroable, PartialEq, Debug,
-)]
-pub struct ClusterData {
-    center_x: f32,
-    center_y: f32,
-    center_z: f32,
-    // Range into the index array that this submesh resides
-    index_offset: u32,
-    index_count: u32,
-    error: f32,
-    //radius: f32,
-    // All of these could be none (-1), if we are a leaf or a root node
-    parent0: i32,
-    parent1: i32,
-    co_parent: i32,
-
-    // Pad alignment to 4 bytes
-    radius: f32,
-    _1: i32,
-    _2: i32,
-
-    _3: i32,
-    _4: i32,
-    _5: i32,
-    _6: i32,
 }
 
 #[derive(PartialEq, Clone)]
@@ -595,161 +571,13 @@ impl MultiResMeshAsset {
     pub fn load_mesh(instance: Arc<Instance>) -> Self {
         let asset = common::MultiResMesh::load().unwrap();
 
-        let mut clusters_per_lod = Vec::new();
-
-        let mut all_clusters_data_real_error = Vec::new();
-        let mut all_clusters_data_layer_error = Vec::new();
-        let mut indices = Vec::new();
-        // Face indexed array
-        let mut partitions = Vec::new();
-        // Partition indexed array
-        let mut groups = Vec::new();
-
-        let mut cluster_idx = 0;
-
-        let mut dag = petgraph::Graph::new();
-
-        for (level, r) in asset.lods.iter().enumerate() {
-            println!("Loading layer {level}:");
-            let mut cluster_nodes = Vec::new();
-
-            for (_cluster_layer_idx, submesh) in r.submeshes.iter().enumerate() {
-                // Map index buffer to global vertex range
-
-                let index_count = submesh.indices.len() as u32;
-
-                for _ in 0..(index_count / 3) {
-                    partitions.push(cluster_idx as i32);
-                }
-                groups.push(submesh.debug_group as i32);
-
-                cluster_idx += 1;
-
-                // let model = BufferGroup::create_single(
-                //     &[Mat4::from_translation(submesh.saturated_sphere.center())
-                //         * Mat4::from_scale(Vec3::ONE * submesh.saturated_sphere.radius())],
-                //     wgpu::BufferUsages::UNIFORM,
-                //     instance.device(),
-                //     instance.model_bind_group_layout(),
-                //     Some("Uniform Debug Model Buffer"),
-                // );
-
-                all_clusters_data_real_error.push(ClusterData {
-                    index_offset: indices.len() as u32,
-                    index_count,
-                    error: submesh.error,
-                    center_x: submesh.saturated_sphere.center().x,
-                    center_y: submesh.saturated_sphere.center().y,
-                    center_z: submesh.saturated_sphere.center().z,
-                    parent0: -1,
-                    parent1: -1,
-                    co_parent: -1,
-                    radius: submesh.saturated_sphere.radius(),
-                    _1: -1,
-                    _2: -1,
-
-                    _3: -1,
-                    _4: -1,
-
-                    _5: -1,
-                    _6: -1,
-                });
-
-                cluster_nodes.push(dag.add_node(level));
-
-                // Push to indices *after* recording the offset above
-                indices.extend_from_slice(&submesh.indices);
-            }
-            clusters_per_lod.push(cluster_nodes);
-        }
-
-        assert_eq!(partitions.len(), indices.len() / 3);
-        // The last partition should be the largest
-        assert_eq!(groups.len(), *partitions.last().unwrap() as usize + 1);
-
-        // Search for [dependencies], group members, and dependants
-        for (level, cluster_nodes) in clusters_per_lod.iter().enumerate() {
-            for (cluster_idx, &cluster_node_idx) in cluster_nodes.iter().enumerate() {
-                let cluster_group_idx = asset.lods[level].partitions[cluster_idx].group_index;
-
-                assert!(asset.lods[level].groups[cluster_group_idx]
-                    .partitions
-                    .contains(&cluster_idx));
-
-                let Some(child_group_idx) =
-                    asset.lods[level].partitions[cluster_idx].child_group_index
-                else {
-                    continue;
-                };
-
-                // To have a child group, level > 0
-
-                let child_clusters: Vec<_> = asset.lods[level - 1].groups[child_group_idx]
-                    .partitions
-                    .iter()
-                    .map(|&child_partition| clusters_per_lod[level - 1][child_partition])
-                    .collect();
-
-                // println!("{}", child_partitions.len());
-
-                for &child in &child_clusters {
-                    // only the partitions with a shared boundary should be listed as dependants
-
-                    dag.add_edge(cluster_node_idx, child, ());
-                }
-            }
-        }
-
-        // petgraph_to_svg(
-        //     &dag,
-        //     "svg\\asset_dag.svg",
-        //     &|_, _| String::new(),
-        //     common::graph::GraphSVGRender::Directed {
-        //         node_label: common::graph::Label::Weight,
-        //     },
-        // )
-        // .unwrap();
-
-        // Search for Co-parents
-        for i in 0..all_clusters_data_real_error.len() {
-            let parents = dag
-                .neighbors_directed(
-                    petgraph::graph::node_index(i),
-                    petgraph::Direction::Incoming,
-                )
-                .collect::<Vec<_>>();
-
-            match parents[..] {
-                [p0, p1] => {
-                    // Set co-parent pointers to each other. This work will be duplicated a lot of times, but it's convenient
-                    let id0 = p0.index();
-                    let id1 = p1.index();
-
-                    all_clusters_data_real_error[id0].co_parent = id1 as _;
-                    all_clusters_data_real_error[id1].co_parent = id0 as _;
-
-                    // Set parent pointers for ourself
-                    all_clusters_data_real_error[i].parent0 = (id0 as i32).min(id1 as i32);
-                    all_clusters_data_real_error[i].parent1 = (id0 as i32).max(id1 as i32);
-                }
-                [] => (), // No parents is allowed. Indexes are already -1 by default.
-                _ => {
-                    for p in parents {
-                        println!("{:?}", dag[p])
-                    }
-
-                    panic!("Non-binary parented DAG, not currently (or ever) supported");
-                }
-            };
-        }
-
-        // all_clusters_data_real_error is now completely valid
-        for i in 0..all_clusters_data_real_error.len() {
-            all_clusters_data_layer_error.push(ClusterData {
-                error: *dag.node_weight(petgraph::graph::node_index(i)).unwrap() as _,
-                ..all_clusters_data_real_error[i].clone()
-            });
-        }
+        let (
+            all_clusters_data_real_error,
+            all_clusters_data_layer_error,
+            indices,
+            partitions,
+            groups,
+        ) = cluster_data_from_asset(&asset);
 
         let index_buffer = Arc::new(instance.device().create_buffer_init(
             &wgpu::util::BufferInitDescriptor {

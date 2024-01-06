@@ -20,4 +20,4 @@ egui = "0.23.0"
 egui-wgpu = { version = "0.23", features = ["winit"] }
 egui-winit = "0.23.0"
 anyhow.workspace = true
-crevice = { version = "0.14" }
+crevice.workspace = true
