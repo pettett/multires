@@ -14,7 +14,7 @@ struct ClusterData {
 
     co_parent: i32,
 	// Filler draw_data for alignment
-    _0: i32,
+    radius: f32,
     _1: i32,
     _2: i32,
 
@@ -26,7 +26,7 @@ struct ClusterData {
 
 struct DrawData {
 	model: mat4x4<f32>,
-	camera_pos : vec3<f32>,
+	camera_pos: vec3<f32>,
     error: f32,
 	mode: i32,
 }
@@ -39,8 +39,8 @@ struct DrawData {
 
 @group(3) @binding(0) var<storage, read> draw_data: DrawData;
 
-fn cluster_error(idx: u32) -> f32{
-	return clusters[idx].error / distance((draw_data.model * vec4<f32>(clusters[idx].center, 1.0)).xyz, draw_data.camera_pos);
+fn cluster_error(idx: u32) -> f32 {
+    return clusters[idx].error * (clusters[idx].radius / distance((draw_data.model * vec4<f32>(clusters[idx].center, 1.0)).xyz, draw_data.camera_pos));
 }
 
 @compute @workgroup_size(1)

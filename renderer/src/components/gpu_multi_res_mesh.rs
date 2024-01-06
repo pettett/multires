@@ -1,8 +1,4 @@
-use std::{
-    collections::{HashMap},
-    fmt::Debug,
-    sync::Arc,
-};
+use std::{collections::HashMap, fmt::Debug, sync::Arc};
 
 use bevy_ecs::{
     component::Component,
@@ -13,9 +9,7 @@ use bevy_ecs::{
 use common::{asset::Asset, MultiResMesh};
 use common_renderer::components::{camera::Camera, transform::Transform};
 use glam::{Mat4, Vec3};
-use petgraph::{
-    visit::{EdgeRef},
-};
+use petgraph::visit::EdgeRef;
 use wgpu::util::DeviceExt;
 
 use crate::core::{BufferGroup, Instance, Renderer};
@@ -56,7 +50,7 @@ pub struct ClusterData {
     co_parent: i32,
 
     // Pad alignment to 4 bytes
-    _0: i32,
+    radius: f32,
     _1: i32,
     _2: i32,
 
@@ -259,7 +253,7 @@ impl MultiResMeshComponent {
         &'a self,
         transform: &Transform,
         renderer: &'a Renderer,
-		mesh_renderer : & MultiResMeshRenderer,
+        mesh_renderer: &MultiResMeshRenderer,
         camera_trans: &Transform,
         _submeshes: &'a Query<(Entity, &ClusterComponent)>,
         render_pass: &mut wgpu::ComputePass<'a>,
@@ -306,7 +300,7 @@ impl MultiResMeshComponent {
         renderer: &'a Renderer,
         submeshes: &'a Query<(Entity, &ClusterComponent)>,
         render_pass: &mut wgpu::RenderPass<'a>,
-		mesh_renderer: &MultiResMeshRenderer ,
+        mesh_renderer: &MultiResMeshRenderer,
     ) {
         //{
         //    for i in 0..self.staging_buffer_size {
@@ -643,12 +637,12 @@ impl MultiResMeshAsset {
                 all_clusters_data_real_error.push(ClusterData {
                     index_offset: indices.len() as u32,
                     index_count,
-                    error: submesh.saturated_sphere.radius(),
+                    error: submesh.error,
                     center: submesh.saturated_sphere.center(),
                     parent0: -1,
                     parent1: -1,
                     co_parent: -1,
-                    _0: -1,
+                    radius: submesh.saturated_sphere.radius(),
                     _1: -1,
                     _2: -1,
 

@@ -2,10 +2,9 @@ use anyhow::Context;
 use common::{tri_mesh::TriMesh, BoundingSphere, GroupInfo, PartitionInfo};
 use glam::{Vec3, Vec4};
 use idmap::IntegerId;
-use rayon::prelude::*;
 use std::{collections::HashSet, fs};
 
-use crate::pidge::{Pidge};
+use crate::pidge::Pidge;
 
 use super::{
     iter::EdgeIter,

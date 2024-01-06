@@ -1,11 +1,8 @@
-use std::{
-    cmp,
-};
+use std::cmp;
 
 use glam::vec4;
 #[cfg(feature = "progress")]
 use indicatif::ProgressStyle;
-
 
 use rayon::prelude::*;
 
@@ -455,7 +452,7 @@ impl WingedMesh {
 mod tests {
     use std::error::Error;
 
-    use crate::mesh::winged_mesh::test::{TEST_MESH_MONK};
+    use crate::mesh::winged_mesh::test::TEST_MESH_MONK;
 
     use super::{
         super::winged_mesh::{test::TEST_MESH_HIGH, WingedMesh},
