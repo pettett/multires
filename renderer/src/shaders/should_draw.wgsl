@@ -33,11 +33,12 @@ struct DrawData {
 
 @group(0) @binding(0) var<storage, write> should_draw: array<i32>;
 
-@group(1) @binding(0) var<storage, read> clusters: array<ClusterData>;
+@group(1) @binding(0) var<storage, read> indices: array<i32>;
 
-@group(2) @binding(0) var<storage, read> indices: array<i32>;
+@group(1) @binding(1) var<storage, read> clusters: array<ClusterData>;
 
-@group(3) @binding(0) var<storage, read> draw_data: DrawData;
+
+@group(2) @binding(0) var<storage, read> draw_data: DrawData;
 
 fn cluster_error(idx: u32) -> f32 {
     return clusters[idx].error * (clusters[idx].radius / distance((draw_data.model * vec4<f32>(clusters[idx].center, 1.0)).xyz, draw_data.camera_pos));

@@ -38,7 +38,9 @@ pub struct ClusterComponent {
     crevice::std430::AsStd430, bytemuck::Pod, Clone, Copy, bytemuck::Zeroable, PartialEq, Debug,
 )]
 pub struct ClusterData {
-    center: Vec3,
+    center_x: f32,
+    center_y: f32,
+    center_z: f32,
     // Range into the index array that this submesh resides
     index_offset: u32,
     index_count: u32,
@@ -116,13 +118,12 @@ pub struct MultiResMeshRenderer {
 
 /// Stores all immutable DAG data for a mesh, to be referenced by any number of instances.
 pub struct MultiResMeshAsset {
-    index_buffer: BufferGroup<1>,
     partition_buffer: BufferGroup<2>,
     vertex_buffer: wgpu::Buffer,
     cluster_count: u32,
     index_count: u32,
-    cluster_data_real_error_buffer: BufferGroup<1>,
-    cluster_data_layer_error_buffer: BufferGroup<1>,
+    cluster_data_real_error_group: BufferGroup<2>,
+    cluster_data_layer_error_group: BufferGroup<2>,
     index_format: wgpu::IndexFormat,
     root_asset: MultiResMesh,
 }
@@ -282,15 +283,14 @@ impl MultiResMeshComponent {
         render_pass.set_bind_group(0, self.can_draw_buffer.bind_group(), &[]);
 
         let bind_1 = if mesh_renderer.error_calc == ErrorMode::ExactLayer {
-            self.asset.cluster_data_layer_error_buffer.bind_group()
+            self.asset.cluster_data_layer_error_group.bind_group()
         } else {
-            self.asset.cluster_data_real_error_buffer.bind_group()
+            self.asset.cluster_data_real_error_group.bind_group()
         };
 
         render_pass.set_bind_group(1, bind_1, &[]);
 
-        render_pass.set_bind_group(2, self.asset.index_buffer.bind_group(), &[]);
-        render_pass.set_bind_group(3, self.draw_data_buffer.bind_group(), &[]);
+        render_pass.set_bind_group(2, self.draw_data_buffer.bind_group(), &[]);
 
         render_pass.dispatch_workgroups(self.cluster_count, 1, 1);
     }
@@ -421,7 +421,7 @@ impl MultiResMeshComponent {
                         * Mat4::from_scale(Vec3::ONE * submesh.saturated_sphere.radius())],
                     wgpu::BufferUsages::UNIFORM,
                     instance.device(),
-                    instance.model_bind_group_layout(),
+                    &instance.model_bind_group_layout,
                     Some("Uniform Debug Model Buffer"),
                 );
 
@@ -519,7 +519,7 @@ impl MultiResMeshComponent {
             }],
             wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             instance.device(),
-            instance.read_compute_bind_group_layout(),
+            &instance.read_compute_bind_group_layout,
             Some("Draw Data Buffer"),
         );
 
@@ -529,7 +529,7 @@ impl MultiResMeshComponent {
             &[trans.get_local_to_world()],
             wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::STORAGE,
             instance.device(),
-            instance.model_bind_group_layout(),
+            &instance.model_bind_group_layout,
             Some("Mesh Uniform Model Buffer"),
         );
 
@@ -553,7 +553,7 @@ impl MultiResMeshComponent {
             &cluster_can_draw,
             wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::INDEX,
             instance.device(),
-            instance.write_compute_bind_group_layout(),
+            &instance.write_compute_bind_group_layout,
             Some("cluster_can_draw"),
         );
 
@@ -638,7 +638,9 @@ impl MultiResMeshAsset {
                     index_offset: indices.len() as u32,
                     index_count,
                     error: submesh.error,
-                    center: submesh.saturated_sphere.center(),
+                    center_x: submesh.saturated_sphere.center().x,
+                    center_y: submesh.saturated_sphere.center().y,
+                    center_z: submesh.saturated_sphere.center().z,
                     parent0: -1,
                     parent1: -1,
                     co_parent: -1,
@@ -749,13 +751,13 @@ impl MultiResMeshAsset {
             });
         }
 
-        let index_buffer = BufferGroup::create_single(
-            &indices,
-            wgpu::BufferUsages::INDEX | wgpu::BufferUsages::STORAGE,
-            instance.device(),
-            instance.read_compute_bind_group_layout(),
-            Some("U32 Index Buffer"),
-        );
+        let index_buffer = Arc::new(instance.device().create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("U32 Index Buffer"),
+                contents: bytemuck::cast_slice(&indices),
+                usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::STORAGE,
+            },
+        ));
 
         let vertex_buffer =
             instance
@@ -768,25 +770,41 @@ impl MultiResMeshAsset {
 
         let index_format = wgpu::IndexFormat::Uint32;
 
-        let cluster_data_real_error_buffer = BufferGroup::create_single(
-            &all_clusters_data_real_error,
-            wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+        let cluster_data_real_error_buffer = Arc::new(instance.device().create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("all_clusters_data_real_error"),
+                contents: bytemuck::cast_slice(&all_clusters_data_real_error),
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            },
+        ));
+        let cluster_data_layer_error_buffer = Arc::new(instance.device().create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("all_clusters_data_layer_error"),
+                contents: bytemuck::cast_slice(&all_clusters_data_layer_error),
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            },
+        ));
+
+        let cluster_data_real_error_group = BufferGroup::from_existing(
+            [index_buffer.clone(), cluster_data_real_error_buffer.clone()],
             instance.device(),
-            instance.read_compute_bind_group_layout(),
+            &instance.cluster_info_buffer_bind_group_layout,
             Some("all_clusters_data_real_error"),
         );
-        let cluster_data_layer_error_buffer = BufferGroup::create_single(
-            &all_clusters_data_layer_error,
-            wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+        let cluster_data_layer_error_group = BufferGroup::from_existing(
+            [
+                index_buffer.clone(),
+                cluster_data_layer_error_buffer.clone(),
+            ],
             instance.device(),
-            instance.read_compute_bind_group_layout(),
-            Some("all_clusters_data_layer_error"),
+            &instance.cluster_info_buffer_bind_group_layout,
+            Some("all_clusters_data_real_error"),
         );
 
         let partition_buffer = BufferGroup::create_plural_storage(
             &[&partitions, &groups],
             instance.device(),
-            &instance.partition_bind_group_layout(),
+            &instance.partition_bind_group_layout,
             Some("Partition Buffer"),
         );
 
@@ -794,12 +812,11 @@ impl MultiResMeshAsset {
 
         MultiResMeshAsset {
             vertex_buffer,
-            index_buffer,
             partition_buffer,
             index_format,
             index_count: indices.len() as _,
-            cluster_data_real_error_buffer,
-            cluster_data_layer_error_buffer,
+            cluster_data_real_error_group,
+            cluster_data_layer_error_group,
             cluster_count: all_clusters_data_real_error.len() as _,
             root_asset: asset,
         }

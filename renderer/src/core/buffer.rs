@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use wgpu::util::DeviceExt;
 
 /// Buffer layout group with typed const length, to held invalidate any bugs for mismatched layouts and groups
@@ -25,7 +27,7 @@ impl<const N: usize> BindGroupLayout<N> {
 }
 /// Buffer group that can be slotted into any bindings with the originating bind group layout
 pub struct BufferGroup<const N: usize> {
-    buffers: [wgpu::Buffer; N],
+    buffers: [Arc<wgpu::Buffer>; N],
     bind_group: wgpu::BindGroup,
 }
 
@@ -91,16 +93,47 @@ impl<const N: usize> BufferGroup<N> {
             .iter()
             .enumerate()
             .map(|(i, datum)| {
-                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label,
-                    contents: bytemuck::cast_slice(datum),
-                    usage: usages[i],
-                })
+                Arc::new(
+                    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label,
+                        contents: bytemuck::cast_slice(datum),
+                        usage: usages[i],
+                    }),
+                )
             })
             .collect::<Vec<_>>()
             .try_into()
             .unwrap();
 
+        let entries: [_; N] = buffers
+            .iter()
+            .enumerate()
+            .map(|(i, buffer)| wgpu::BindGroupEntry {
+                binding: i as u32,
+                resource: buffer.as_entire_binding(),
+            })
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap();
+
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label,
+            layout: layout.into(),
+            entries: &entries[..],
+        });
+
+        Self {
+            buffers,
+            bind_group,
+        }
+    }
+
+    pub fn from_existing(
+        buffers: [Arc<wgpu::Buffer>; N],
+        device: &wgpu::Device,
+        layout: &BindGroupLayout<N>,
+        label: Option<&str>,
+    ) -> Self {
         let entries: [_; N] = buffers
             .iter()
             .enumerate()
@@ -135,12 +168,12 @@ impl<const N: usize> BufferGroup<N> {
             .iter()
             .enumerate()
             .map(|(i, &size)| {
-                device.create_buffer(&wgpu::BufferDescriptor {
+                Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
                     label,
                     size: size as _,
                     usage: usages[i],
                     mapped_at_creation: true,
-                })
+                }))
             })
             .collect::<Vec<_>>()
             .try_into()

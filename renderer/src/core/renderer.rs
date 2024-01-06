@@ -144,7 +144,7 @@ impl Renderer {
             Some("model_bind_group_layout"),
         );
 
-        let write_compute_bind_group_layout: BindGroupLayout<1> = BindGroupLayout::create(
+        let write_compute_bind_group_layout = BindGroupLayout::create(
             &device,
             &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
@@ -158,7 +158,34 @@ impl Renderer {
             }],
             Some("writeable_compute_buffer_bind_group"),
         );
-        let read_compute_buffer_bind_group: BindGroupLayout<1> = BindGroupLayout::create(
+        let cluster_info_buffer_bind_group_layout = BindGroupLayout::create(
+            &device,
+            &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+            Some("cluster_info_buffer_bind_group_layout"),
+        );
+
+        let read_compute_buffer_bind_group = BindGroupLayout::create(
             &device,
             &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
@@ -217,8 +244,7 @@ impl Renderer {
                 bind_group_layouts: &[
                     // Reminder: Max of 4 for these, don't add any more
                     (&write_compute_bind_group_layout).into(),
-                    (&read_compute_buffer_bind_group).into(),
-                    (&read_compute_buffer_bind_group).into(),
+                    (&cluster_info_buffer_bind_group_layout).into(),
                     (&read_compute_buffer_bind_group).into(),
                 ],
                 push_constant_ranges: &[],
@@ -260,6 +286,7 @@ impl Renderer {
             model_bind_group_layout,
             partition_bind_group_layout,
             write_compute_bind_group_layout,
+            cluster_info_buffer_bind_group_layout,
             read_compute_buffer_bind_group,
         ));
 
