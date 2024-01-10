@@ -102,7 +102,7 @@ where
         .unwrap()
         .to_owned();
 
-    let dot_out_path = root.join("svg\\dot.gv");
+    let dot_out_path = root.join("dot.gv");
     let out_path = root.join(out);
 
     println!("Writing svg output to {out_path:?}");

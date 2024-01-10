@@ -46,7 +46,7 @@ layout (location = 0) out Interpolants {
 } OUT[];
 
 struct MeshTaskPayload {
-    uint meshlet_index[2];
+    uint meshlet_index[1];
 };
 
 taskPayloadSharedEXT MeshTaskPayload payload;

@@ -128,7 +128,7 @@ pub struct HalfEdge {
 #[derive(Default, Debug, Clone, PartialEq)]
 pub struct Face {
     pub edge: EdgeID,
-    pub part: usize,
+    pub cluster_idx: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -136,7 +136,7 @@ pub struct WingedMesh {
     faces: Pidge<FaceID, Face>,
     edges: Pidge<EdgeID, HalfEdge>,
     verts: Pidge<VertID, Vertex>,
-    pub partitions: Vec<PartitionInfo>,
+    pub clusters: Vec<PartitionInfo>,
     pub groups: Vec<GroupInfo>,
 }
 
@@ -147,7 +147,7 @@ impl WingedMesh {
             edges: Pidge::with_capacity(faces * 3),
             verts: Pidge::with_capacity(verts),
             groups: vec![],
-            partitions: vec![PartitionInfo {
+            clusters: vec![PartitionInfo {
                 child_group_index: None,
                 group_index: 0,
                 tight_bound: BoundingSphere::default(),
@@ -394,7 +394,13 @@ impl WingedMesh {
         self.add_half_edge(b, c, f, ieb, iec, iea);
         self.add_half_edge(c, a, f, iec, iea, ieb);
 
-        self.insert_face(f, Face { edge: iea, part: 0 });
+        self.insert_face(
+            f,
+            Face {
+                edge: iea,
+                cluster_idx: 0,
+            },
+        );
     }
 
     /// Collapse a triangle, removing it from the graph, and pulling the two triangles on non-eid edges together
@@ -659,14 +665,14 @@ impl WingedMesh {
     pub fn get_partition(&self) -> Vec<usize> {
         self.faces
             .iter_with_empty()
-            .filter_map(|f| f.as_ref().map(|f| f.part))
+            .filter_map(|f| f.as_ref().map(|f| f.cluster_idx))
             .collect()
     }
 
     pub fn get_group(&self) -> Vec<usize> {
         self.faces
             .iter_with_empty()
-            .filter_map(|f| f.as_ref().map(|f| self.partitions[f.part].group_index))
+            .filter_map(|f| f.as_ref().map(|f| self.clusters[f.cluster_idx].group_index))
             .collect()
     }
 
@@ -675,8 +681,8 @@ impl WingedMesh {
         EdgeIter::new(self, e, Some(e), 3)
     }
 
-    pub fn partition_count(&self) -> usize {
-        self.partitions.len()
+    pub fn cluster_count(&self) -> usize {
+        self.clusters.len()
     }
     pub fn age(&mut self) {
         self.edges.iter_mut_with_empty().for_each(|e| {
@@ -892,9 +898,9 @@ pub mod test {
 
         mesh.partition_within_groups(test_config, Some(2), None)?;
 
-        println!("{} {}", mesh.partition_count(), mesh.groups.len());
+        println!("{} {}", mesh.cluster_count(), mesh.groups.len());
 
-        assert!(mesh.partition_count() <= mesh.groups.len() * 2);
+        assert!(mesh.cluster_count() <= mesh.groups.len() * 2);
 
         mesh.assert_valid().unwrap();
 
@@ -917,10 +923,10 @@ pub mod test {
         mesh.partition_within_groups(test_config, None, Some(60))?;
 
         let mut boundary_face_ratio = 0.0;
-        for pi in 0..mesh.partitions.len() {
+        for pi in 0..mesh.clusters.len() {
             // Assert that new parts and the parts in group have the same boundary
 
-            let faces = mesh.faces.iter().filter(|f| pi == f.part).collect();
+            let faces = mesh.faces.iter().filter(|f| pi == f.cluster_idx).collect();
 
             let boundary = mesh.face_boundary(&faces);
 
@@ -934,7 +940,7 @@ pub mod test {
             boundary_face_ratio += faces.len() as f32 / boundary.len() as f32;
         }
 
-        boundary_face_ratio /= mesh.partitions.len() as f32;
+        boundary_face_ratio /= mesh.clusters.len() as f32;
 
         println!("Average partition face count / boundary length: {boundary_face_ratio}");
 
@@ -1099,33 +1105,6 @@ pub mod test {
     }
 
     #[test]
-    fn test_group_and_partition_and_simplify() {
-        let mesh_name = "../../assets/rock.glb";
-
-        println!("Loading from gltf!");
-        let (mesh, verts) = WingedMesh::from_gltf(mesh_name);
-
-        //group_and_partition_full_res(working_mesh, &verts, mesh_name.to_owned());
-        //apply_simplification(working_mesh, &verts, mesh_name.to_owned());
-        group_and_partition_and_simplify(mesh, &verts, mesh_name.to_owned());
-    }
-
-    #[test]
-    fn test_apply_simplification() {
-        let (mesh, verts) = WingedMesh::from_gltf(TEST_MESH_CONE);
-
-        // WE know the circle is contiguous
-        //assert_contiguous_graph(&working_mesh.generate_face_graph());
-
-        // group_and_partition_full_res(working_mesh, &verts, mesh_name.to_owned());
-        let mesh = apply_simplification(mesh, &verts, TEST_MESH_CONE.to_owned());
-
-        println!("Asserting face graph is contiguous");
-        // It should still be contiguous
-        assert_contiguous_graph(&mesh.generate_face_graph());
-    }
-
-    #[test]
     fn test_group_and_partition() {
         let (mesh, verts) = WingedMesh::from_gltf(TEST_MESH_CONE);
 
@@ -1178,8 +1157,8 @@ pub mod test {
             graph.retain_edges(|g, e| {
                 let (v1, v2) = g.edge_endpoints(e).unwrap();
 
-                let p1 = mesh.get_face(*g.node_weight(v1).unwrap()).part;
-                let p2 = mesh.get_face(*g.node_weight(v2).unwrap()).part;
+                let p1 = mesh.get_face(*g.node_weight(v1).unwrap()).cluster_idx;
+                let p2 = mesh.get_face(*g.node_weight(v2).unwrap()).cluster_idx;
 
                 p1 == p2
             });

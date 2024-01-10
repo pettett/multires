@@ -16,7 +16,7 @@ pub fn to_mesh_layer(mesh: &WingedMesh, verts: &[Vec4]) -> MeshLevel {
         group_indices: mesh.get_group(),
         indices: grab_indicies(&mesh),
         submeshes: generate_submeshes(mesh, verts),
-        partitions: mesh.partitions.clone(),
+        partitions: mesh.clusters.clone(),
         groups: mesh.groups.clone(),
     }
 }
@@ -99,7 +99,7 @@ pub fn group_and_partition_and_simplify(mut mesh: WingedMesh, verts: &[Vec4], na
     let config = &metis::PartitioningConfig {
         method: metis::PartitioningMethod::MultilevelKWay,
         force_contiguous_partitions: true,
-        minimize_subgraph_degree: Some(true),
+        //minimize_subgraph_degree: Some(true), // this will sometimes break contiguous partitions
         ..Default::default()
     };
 
@@ -290,9 +290,9 @@ pub fn generate_submeshes(mesh: &WingedMesh, _verts: &[Vec4]) -> Vec<SubMesh> {
     let inds = 5.0 / mesh.face_count() as f32;
 
     // Precondition: partition indexes completely span in some range 0..N
-    let mut submeshes: Vec<_> = (0..mesh.partition_count())
+    let mut submeshes: Vec<_> = (0..mesh.cluster_count())
         .map(|part| {
-            let gi = mesh.partitions[part].group_index;
+            let gi = mesh.clusters[part].group_index;
             let g = &mesh.groups[gi];
 
             SubMesh::new(
@@ -300,7 +300,7 @@ pub fn generate_submeshes(mesh: &WingedMesh, _verts: &[Vec4]) -> Vec<SubMesh> {
                 1.0,
                 g.monotonic_bound.center(),
                 g.monotonic_bound.radius(),
-                mesh.partitions[part].tight_bound.radius(),
+                mesh.clusters[part].tight_bound.radius(),
                 gi,
             )
         })
@@ -309,7 +309,7 @@ pub fn generate_submeshes(mesh: &WingedMesh, _verts: &[Vec4]) -> Vec<SubMesh> {
     for (_fid, face) in mesh.iter_faces() {
         let verts = mesh.triangle_from_face(&face);
 
-        let m = submeshes.get_mut(face.part as usize).unwrap();
+        let m = submeshes.get_mut(face.cluster_idx as usize).unwrap();
 
         for v in 0..3 {
             let vert = verts[v] as u32;
@@ -375,7 +375,7 @@ pub fn generate_submeshes(mesh: &WingedMesh, _verts: &[Vec4]) -> Vec<SubMesh> {
 
 #[cfg(test)]
 mod test {
-    use crate::mesh::graph::test::assert_contiguous_graph;
+    use crate::mesh::{graph::test::assert_contiguous_graph, winged_mesh::test::TEST_MESH_CONE};
 
     use super::*;
 
@@ -388,5 +388,32 @@ mod test {
 
         println!("Testing Contiguous!");
         assert_contiguous_graph(&mesh_dual);
+    }
+
+    #[test]
+    fn test_group_and_partition_and_simplify() {
+        let mesh_name = "../../assets/torrin_main.glb";
+
+        println!("Loading from gltf!");
+        let (mesh, verts) = WingedMesh::from_gltf(mesh_name);
+
+        //group_and_partition_full_res(working_mesh, &verts, mesh_name.to_owned());
+        //apply_simplification(working_mesh, &verts, mesh_name.to_owned());
+        group_and_partition_and_simplify(mesh, &verts, mesh_name.to_owned());
+    }
+
+    #[test]
+    fn test_apply_simplification() {
+        let (mesh, verts) = WingedMesh::from_gltf(TEST_MESH_CONE);
+
+        // WE know the circle is contiguous
+        //assert_contiguous_graph(&working_mesh.generate_face_graph());
+
+        // group_and_partition_full_res(working_mesh, &verts, mesh_name.to_owned());
+        let mesh = apply_simplification(mesh, &verts, TEST_MESH_CONE.to_owned());
+
+        println!("Asserting face graph is contiguous");
+        // It should still be contiguous
+        assert_contiguous_graph(&mesh.generate_face_graph());
     }
 }

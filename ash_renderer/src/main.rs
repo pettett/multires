@@ -336,7 +336,7 @@ impl VulkanApp26 {
 
         let camera = world
             .spawn((
-                CameraController::new(0.5),
+                CameraController::new(0.005),
                 Camera::new(1.0),
                 Transform::new(Vec3A::ZERO, Quat::IDENTITY),
             ))
@@ -619,7 +619,7 @@ impl VulkanApp26 {
 
                 device
                     .fn_mesh_shader
-                    .cmd_draw_mesh_tasks(command_buffer, meshlet_count / 2, 1, 1);
+                    .cmd_draw_mesh_tasks(command_buffer, meshlet_count, 1, 1);
                 // device.cmd_draw_indexed(
                 //     command_buffer,
                 //     RECT_TEX_COORD_INDICES_DATA.len() as u32,

@@ -9,7 +9,7 @@ impl WingedMesh {
         println!("Wiping partitions");
         // Wipe partitions
         for (_, f) in self.iter_faces_mut() {
-            f.part = 0;
+            f.cluster_idx = 0;
         }
 
         let mut p = 1;
@@ -23,7 +23,7 @@ impl WingedMesh {
             // select a random face to start the search
 
             for (fid, f) in self.iter_faces() {
-                if f.part == 0 {
+                if f.cluster_idx == 0 {
                     search.push(fid);
                     break;
                 }
@@ -41,7 +41,7 @@ impl WingedMesh {
                 // Mark
                 #[cfg(feature = "progress")]
                 bar.inc(1);
-                self.get_face_mut(fid).part = p;
+                self.get_face_mut(fid).cluster_idx = p;
 
                 // Search for unmarked
                 let e0 = self.get_face(fid).edge;
@@ -51,12 +51,12 @@ impl WingedMesh {
                 for e in [e0, e1, e2] {
                     if let Some(t) = self.get_edge(e).twin {
                         let f = self.get_edge(t).face;
-                        if self.get_face(f).part == 0 {
+                        if self.get_face(f).cluster_idx == 0 {
                             // splitting by contiguous, we should not be able to access others
 
                             search.push(f);
                         } else {
-                            assert_eq!(self.get_face(f).part, p);
+                            assert_eq!(self.get_face(f).cluster_idx, p);
                         }
                     }
                 }
@@ -81,24 +81,29 @@ impl WingedMesh {
             //    }
         }
 
-        let part = config.partition_from_graph(partitions, &mesh_dual)?;
+        let cluster_indexes = config.partition_from_graph(partitions, &mesh_dual)?;
 
-        assert_eq!(part.len(), self.face_count());
+        assert_eq!(cluster_indexes.len(), self.face_count());
 
-        let mut max_part = 0;
+        let cluster_count = *cluster_indexes.iter().max().unwrap() as usize + 1;
+
+        let mut occupancies = vec![0; cluster_count];
+
         for (fid, face) in self.iter_faces_mut() {
             // Some faces will have already been removed
-            face.part = part[fid.0] as usize;
-            max_part = max_part.max(face.part)
+            face.cluster_idx = cluster_indexes[fid.0] as usize;
+            occupancies[face.cluster_idx] += 1;
         }
 
-        self.partitions = vec![
+        //assert!(*occupancies.iter().max().unwrap() <= 126);
+
+        self.clusters = vec![
             common::PartitionInfo {
                 child_group_index: None,
                 group_index: usize::MAX,
                 tight_bound: Default::default()
             };
-            max_part + 1
+            cluster_count
         ];
 
         Ok(())
@@ -110,16 +115,16 @@ impl WingedMesh {
         config: &metis::PartitioningConfig,
         verts: &[glam::Vec4],
     ) -> Result<usize, metis::PartitioningError> {
-        let group_count = self.partitions.len().div_ceil(4);
+        let group_count = self.clusters.len().div_ceil(4);
 
         assert!(config.force_contiguous_partitions);
 
         println!(
             "Partitioning into {group_count} groups from {} partitions",
-            self.partitions.len()
+            self.clusters.len()
         );
 
-        let graph = self.generate_partition_graph();
+        let cluster_graph = self.generate_cluster_graph();
 
         // create new array of groups, and remember the old groups
         let mut new_groups = vec![
@@ -137,32 +142,32 @@ impl WingedMesh {
         // Tell each partition what group they now belong to.
         if group_count != 1 {
             for (part, &group) in config
-                .partition_from_graph(group_count as u32, &graph)?
+                .partition_from_graph(group_count as u32, &cluster_graph)?
                 .iter()
                 .enumerate()
             {
-                self.partitions[part].group_index = group as usize;
+                self.clusters[part].group_index = group as usize;
             }
         } else {
-            for p in &mut self.partitions {
+            for p in &mut self.clusters {
                 p.group_index = 0;
             }
         };
 
         // Record the partitions that each of these groups come from
-        for (part, info) in self.partitions.iter().enumerate() {
+        for (part, info) in self.clusters.iter().enumerate() {
             new_groups[info.group_index].partitions.push(part);
 
-            for n in graph.neighbors(petgraph::graph::node_index(part)) {
+            for n in cluster_graph.neighbors(petgraph::graph::node_index(part)) {
                 new_groups[info.group_index]
                     .group_neighbours
-                    .insert(self.partitions[n.index()].group_index);
+                    .insert(self.clusters[n.index()].group_index);
             }
         }
 
         // MONOTONIC BOUND ------ get sums of positions
         for (_fid, f) in self.iter_faces() {
-            let f_group_info = &mut new_groups[self.partitions[f.part].group_index];
+            let f_group_info = &mut new_groups[self.clusters[f.cluster_idx].group_index];
             f_group_info.tris += 1;
             f_group_info
                 .monotonic_bound
@@ -176,7 +181,7 @@ impl WingedMesh {
 
         // Find radii of groups, now that they have accurate positions
         for (_fid, f) in self.iter_faces() {
-            let f_group_info = &mut new_groups[self.partitions[f.part].group_index];
+            let f_group_info = &mut new_groups[self.clusters[f.cluster_idx].group_index];
 
             f_group_info
                 .monotonic_bound
@@ -195,7 +200,7 @@ impl WingedMesh {
             // as our partitions must do the same, as we base them off group info
 
             for p in &g.partitions {
-                if let Some(child_group_index) = self.partitions[*p].child_group_index {
+                if let Some(child_group_index) = self.clusters[*p].child_group_index {
                     let child_group = &self.groups[child_group_index];
                     // combine groups radius
                     g.monotonic_bound
@@ -210,12 +215,11 @@ impl WingedMesh {
         {
             //Assert that we have made good groups
             //TODO: Split graph into contiguous segments beforehand
-            if config.force_contiguous_partitions {
-                let groups = self.generate_group_graphs();
 
-                for g in &groups {
-                    super::graph::test::assert_contiguous_graph(g);
-                }
+            let groups = self.generate_group_graphs();
+
+            for g in &groups {
+                super::graph::test::assert_contiguous_graph(g);
             }
         }
 
@@ -276,15 +280,17 @@ impl WingedMesh {
             };
 
             // Each new part needs to register its dependence on the group we were a part of before
-            let child_group = self.partitions
-                [self.get_face(graph[petgraph::graph::node_index(0)]).part]
+            let child_group = self.clusters[self
+                .get_face(graph[petgraph::graph::node_index(0)])
+                .cluster_idx]
                 .group_index;
 
             assert_eq!(i_group, child_group);
 
             // Update partitions of the actual triangles
             for x in graph.node_indices() {
-                self.get_face_mut(graph[x]).part = new_partitions.len() + part[x.index()] as usize;
+                self.get_face_mut(graph[x]).cluster_idx =
+                    new_partitions.len() + part[x.index()] as usize;
             }
             // If we have not been grouped yet,
             let child_group_index = if self.groups.len() == 0 {
@@ -303,9 +309,9 @@ impl WingedMesh {
                 })
             }
         }
-        self.partitions = new_partitions;
+        self.clusters = new_partitions;
 
-        Ok(self.partitions.len())
+        Ok(self.clusters.len())
         //Ok(groups)
     }
 }
@@ -348,12 +354,12 @@ pub mod tests {
 
             for &out in vert.outgoing_edges() {
                 groups.insert(
-                    mesh.partitions[mesh.get_face(mesh.get_edge(out).face).part].group_index,
+                    mesh.clusters[mesh.get_face(mesh.get_edge(out).face).cluster_idx].group_index,
                 );
             }
             for &out in vert.incoming_edges() {
                 groups.insert(
-                    mesh.partitions[mesh.get_face(mesh.get_edge(out).face).part].group_index,
+                    mesh.clusters[mesh.get_face(mesh.get_edge(out).face).cluster_idx].group_index,
                 );
             }
 

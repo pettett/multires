@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use super::winged_mesh::{FaceID, WingedMesh};
 
@@ -9,9 +9,9 @@ impl WingedMesh {
         // constantly overwriting old borders with remeshes
 
         let mut graph = petgraph::Graph::with_capacity(
-            self.partition_count(),
+            self.cluster_count(),
             // Estimate each partition hits roughly 3 other partitions
-            self.partition_count() * 3,
+            self.cluster_count() * 3,
         );
         let mut ids = HashMap::with_capacity(self.face_count());
         for (fid, _f) in self.iter_faces() {
@@ -46,7 +46,7 @@ impl WingedMesh {
 
         // Give every triangle a node
         for (fid, face) in self.iter_faces() {
-            let g = self.partitions[face.part].group_index;
+            let g = self.clusters[face.cluster_idx].group_index;
             let n = graphs[g].add_node(fid);
 
             // indexes should correspond
@@ -57,12 +57,12 @@ impl WingedMesh {
         }
         // Apply links between nodes
         for (fid, face) in self.iter_faces() {
-            let g = self.partitions[face.part].group_index;
+            let g = self.clusters[face.cluster_idx].group_index;
 
             for e in self.iter_edge_loop(face.edge) {
                 if let Some(twin) = self.get_edge(e).twin {
                     let other_face = self.get_edge(twin).face;
-                    let o_g = self.partitions[self.get_face(other_face).part].group_index;
+                    let o_g = self.clusters[self.get_face(other_face).cluster_idx].group_index;
 
                     if g == o_g {
                         graphs[g].update_edge(faces[&fid], faces[&other_face], ());
@@ -76,38 +76,78 @@ impl WingedMesh {
     /// Generates a graph of all partitions and their neighbours.
     /// A partition neighbours another one iff there is some triangle in each that share an edge.
     /// We add an edge for each linking triangle, to record 'weights' for partitioning.
-    pub fn generate_partition_graph(&self) -> petgraph::graph::UnGraph<(), ()> {
+    pub fn generate_cluster_graph(&self) -> petgraph::graph::UnGraph<(), ()> {
         //TODO: Give lower weight to grouping partitions that have not been recently grouped, to ensure we are
         // constantly overwriting old borders with remeshes
 
         let mut graph = petgraph::Graph::with_capacity(
-            self.partition_count(),
+            self.cluster_count(),
             // Estimate each partition hits roughly 3 other partitions
-            self.partition_count() * 3,
+            self.cluster_count() * 3,
         );
 
-        for p in 0..self.partition_count() {
+        for p in 0..self.cluster_count() {
             // Each node should directly correspond to a partition
             assert_eq!(p, graph.add_node(()).index());
         }
+
+        //    let mut map: HashMap<usize, HashMap<usize, usize>> = HashMap::new();
 
         for (_fid, face) in self.iter_faces() {
             for e in self.iter_edge_loop(face.edge) {
                 if let Some(twin) = self.get_edge(e).twin {
                     let other_face = &self.get_face(self.get_edge(twin).face);
 
-                    if face.part != other_face.part {
-                        // Add an edge for *each* shared edge, recording how
-                        // linked the two partitions are (how much 'cruft' is shared)
+                    //let c0 = face.cluster_idx.min(other_face.cluster_idx);
+                    //let c1 = face.cluster_idx.max(other_face.cluster_idx);
+
+                    if face.cluster_idx != other_face.cluster_idx {
+                        //*map.entry(c0).or_default().entry(c1).or_default() += 1;
                         graph.add_edge(
-                            petgraph::graph::NodeIndex::new(face.part),
-                            petgraph::graph::NodeIndex::new(other_face.part),
+                            petgraph::graph::NodeIndex::new(face.cluster_idx),
+                            petgraph::graph::NodeIndex::new(other_face.cluster_idx),
                             (),
                         );
                     }
                 }
             }
         }
+
+        //let mut min_count = 100000;
+        //let mut max_count = 0;
+        //for (c0, connectings) in &map {
+        //    for (c1, &count) in connectings {
+        //        min_count = min_count.min(count);
+        //        max_count = max_count.max(count);
+        //    }
+        //}
+        //
+        //println!("{min_count} - {max_count}");
+        //
+        //let mid1 = (min_count + max_count * 3) / 4;
+        //let mid2 = (min_count * 3 + max_count) / 4;
+        //
+        //for (c0, connectings) in map {
+        //    for (c1, count) in connectings {
+        //        // Add an edge for *each* shared edge, recording how
+        //        // linked the two partitions are (how much 'cruft' is shared)
+        //
+        //        let num = if count > mid1 {
+        //            5
+        //        } else if count > mid2 {
+        //            1
+        //        } else {
+        //            1
+        //        };
+        //        for _ in 0..num {
+        //            graph.add_edge(
+        //                petgraph::graph::NodeIndex::new(c0),
+        //                petgraph::graph::NodeIndex::new(c1),
+        //                (),
+        //            );
+        //        }
+        //    }
+        //}
 
         graph
     }
@@ -182,7 +222,7 @@ pub mod test {
             "Faces: {}, Verts: {}, Partitions: {}",
             mesh.face_count(),
             mesh.vert_count(),
-            mesh.partitions.len()
+            mesh.clusters.len()
         );
 
         let mut graph = mesh.generate_face_graph();
@@ -192,7 +232,7 @@ pub mod test {
             FACE_SVG_OUT,
             &|_, (_n, &fid)| {
                 let p = fid.center(&mesh, &verts);
-                let part = mesh.get_face(fid).part;
+                let part = mesh.get_face(fid).cluster_idx;
                 format!(
                     "shape=point, color={}, pos=\"{},{}\"",
                     COLS[part % COLS.len()],
@@ -220,7 +260,7 @@ pub mod test {
             FACE_SVG_OUT_2,
             &|_, (_n, &fid)| {
                 let p = fid.center(&mesh, &verts);
-                let part = mesh.get_face(fid).part;
+                let part = mesh.get_face(fid).cluster_idx;
                 format!(
                     "shape=point, color={}, pos=\"{},{}\"",
                     COLS[part % COLS.len()],
@@ -254,7 +294,7 @@ pub mod test {
         mesh.partition_within_groups(test_config, None, Some(60))?;
 
         graph::petgraph_to_svg(
-            &mesh.generate_partition_graph(),
+            &mesh.generate_cluster_graph(),
             PART_SVG_OUT,
             &|_, _| format!("shape=point"),
             graph::GraphSVGRender::Directed {
@@ -284,11 +324,8 @@ pub mod test {
         mesh.group(test_config, &verts)?;
         let mut graph: petgraph::Graph<(), ()> = petgraph::Graph::new();
 
-        let mut old_part_nodes: Vec<_> = mesh
-            .partitions
-            .iter()
-            .map(|_o| graph.add_node(()))
-            .collect();
+        let mut old_part_nodes: Vec<_> =
+            mesh.clusters.iter().map(|_o| graph.add_node(())).collect();
 
         // Record a big colour map for node indexes, to show grouping
         let mut colouring = HashMap::new();
@@ -297,20 +334,17 @@ pub mod test {
 
         loop {
             for (i, &n) in old_part_nodes.iter().enumerate() {
-                colouring.insert(n, mesh.partitions[i].group_index + seen_groups);
+                colouring.insert(n, mesh.clusters[i].group_index + seen_groups);
             }
 
             seen_groups += mesh.groups.len();
 
             mesh.partition_within_groups(test_config, Some(2), None)?;
 
-            let new_part_nodes: Vec<_> = mesh
-                .partitions
-                .iter()
-                .map(|_o| graph.add_node(()))
-                .collect();
+            let new_part_nodes: Vec<_> =
+                mesh.clusters.iter().map(|_o| graph.add_node(())).collect();
 
-            for (new_p_i, new_p) in mesh.partitions.iter().enumerate() {
+            for (new_p_i, new_p) in mesh.clusters.iter().enumerate() {
                 let g_i = new_p.child_group_index.unwrap();
 
                 for &old_p_i in &mesh.groups[g_i].partitions {
@@ -322,13 +356,13 @@ pub mod test {
 
             mesh.group(test_config, &verts)?;
 
-            if mesh.partitions.len() <= 2 {
+            if mesh.clusters.len() <= 2 {
                 break;
             }
         }
 
         for (i, &n) in old_part_nodes.iter().enumerate() {
-            colouring.insert(n, mesh.partitions[i].group_index + seen_groups);
+            colouring.insert(n, mesh.clusters[i].group_index + seen_groups);
         }
 
         graph::petgraph_to_svg(

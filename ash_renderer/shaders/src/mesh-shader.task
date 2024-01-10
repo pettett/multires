@@ -3,10 +3,41 @@
 
 #extension GL_ARB_separate_shader_objects: enable
 
-layout (local_size_x = 2, local_size_y = 1, local_size_z = 1) in;
+layout (local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+
+
+struct ClusterData {
+    // Range into the index array that this submesh resides
+    vec3 center;
+
+    uint _index_offset ;
+    uint _index_count ;
+
+	float error;
+    //radius: f32,
+    // All of these could be none (-1), if we are a leaf or a root node
+    int parent0  ;
+    int parent1  ;
+
+    int co_parent  ;
+	// Filler draw_data for alignment
+    float radius  ;
+    int _1  ;
+    int _2  ;
+
+	int _3  ;
+    int _4  ;
+    int _5  ;
+	int _6  ;
+}
+
+layout (std430, binding = 5) readonly buffer InputBufferI {
+    ClusterData clusters[];
+} cluster_data;
+
 
 struct MeshTaskPayload {
-    uint meshlet_index[2];
+    uint meshlet_index[1];
 };
 
 taskPayloadSharedEXT MeshTaskPayload payload;
@@ -15,6 +46,6 @@ void main() {
     uint meshlet_index = gl_WorkGroupID.x;
     uint thread_id = gl_LocalInvocationID.x;
 
-    payload.meshlet_index[thread_id] = 2 * meshlet_index + thread_id;
-    EmitMeshTasksEXT(2, 1, 1);
+    payload.meshlet_index[thread_id] = meshlet_index + thread_id;
+    EmitMeshTasksEXT(1, 1, 1);
 } 

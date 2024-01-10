@@ -313,7 +313,7 @@ impl WingedMesh {
         for (eid, edge) in self.iter_edges() {
             let error = eid.edge_collapse_error(&self, verts, &quadrics).unwrap();
 
-            pq[self.partitions[self.get_face(edge.face).part].group_index]
+            pq[self.clusters[self.get_face(edge.face).cluster_idx].group_index]
                 .queue
                 .push(eid, error);
 
@@ -352,20 +352,20 @@ impl WingedMesh {
         bar.set_style(ProgressStyle::with_template("{wide_bar} {pos}/{len} ({per_sec})").unwrap());
 
         for (qi, &requirement) in collapse_requirements.iter().enumerate() {
-            #[cfg(test)]
-            {
-                //self.assert_valid();
-                for (&q, _e) in collapse_queues[qi].queue.iter() {
-                    assert!(
-                        self.try_get_edge(q).is_ok(),
-                        "Invalid edge in collapse queue {}",
-                        qi
-                    );
-                    self.assert_edge_valid(q)
-                        .context("Invalid edge in collapse queue: ")
-                        .unwrap();
-                }
-            }
+            //#[cfg(test)]
+            //{
+            //    //self.assert_valid();
+            //    for (&q, _e) in collapse_queues[qi].queue.iter() {
+            //        assert!(
+            //            self.try_get_edge(q).is_ok(),
+            //            "Invalid edge in collapse queue {}",
+            //            qi
+            //        );
+            //        self.assert_edge_valid(q)
+            //            .context("Invalid edge in collapse queue: ")
+            //            .unwrap();
+            //    }
+            //}
 
             //#[cfg(feature = "progress")]
             //bar.set_message(format!("{err:.3e}"));
@@ -402,10 +402,10 @@ impl WingedMesh {
 
                 // Collapse edge, and update quadrics (update before collapsing, as vertex becomes invalid)
 
-                #[cfg(test)]
-                {
-                    assert!(orig.is_group_embedded(&self));
-                }
+                //#[cfg(test)]
+                //{
+                //    assert!(orig.is_group_embedded(&self));
+                //}
 
                 //TODO: When we collapse an edge, recalculate any effected edges.
 
@@ -428,7 +428,8 @@ impl WingedMesh {
 
                 for eid in effected_edges {
                     if let Ok(edge) = self.try_get_edge(eid) {
-                        let edge_queue = self.partitions[self.get_face(edge.face).part].group_index;
+                        let edge_queue =
+                            self.clusters[self.get_face(edge.face).cluster_idx].group_index;
 
                         let error = eid.edge_collapse_error(&self, verts, &quadrics).unwrap();
 

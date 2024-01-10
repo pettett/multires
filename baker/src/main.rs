@@ -1,8 +1,8 @@
 use baker::{group_and_partition_and_simplify, mesh::winged_mesh::WingedMesh};
 
 fn main() {
-    //let mesh_name = "../assets/torrin_main.glb";
-    let mesh_name = "../assets/rock.glb";
+    let mesh_name = "../assets/torrin_main.glb";
+    //let mesh_name = "../assets/rock.glb";
     //let mesh_name = "../assets/sphere.glb";
 
     println!("Loading from gltf!");

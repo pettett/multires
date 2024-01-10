@@ -148,11 +148,11 @@ impl VertID {
 
         let outgoings = &vert.outgoing_edges;
         let group_index =
-            mesh.partitions[mesh.get_face(mesh.get_edge(outgoings[0]).face).part].group_index;
+            mesh.clusters[mesh.get_face(mesh.get_edge(outgoings[0]).face).cluster_idx].group_index;
 
         for &eid in &outgoings[1..] {
             if group_index
-                != mesh.partitions[mesh.get_face(mesh.get_edge(eid).face).part].group_index
+                != mesh.clusters[mesh.get_face(mesh.get_edge(eid).face).cluster_idx].group_index
             {
                 return false;
             }
@@ -162,7 +162,7 @@ impl VertID {
         for &eid in &vert.incoming_edges {
             assert_eq!(
                 group_index,
-                mesh.partitions[mesh.get_face(mesh.get_edge(eid).face).part].group_index
+                mesh.clusters[mesh.get_face(mesh.get_edge(eid).face).cluster_idx].group_index
             );
         }
 
