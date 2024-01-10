@@ -8,6 +8,7 @@ pub struct Instance {
     pub partition_bind_group_layout: super::buffer::BindGroupLayout<2>,
     pub write_compute_bind_group_layout: super::buffer::BindGroupLayout<1>,
     pub cluster_info_buffer_bind_group_layout: super::buffer::BindGroupLayout<2>,
+    pub result_indices_buffer_bind_group_layout: super::buffer::BindGroupLayout<2>,
     pub read_compute_bind_group_layout: super::buffer::BindGroupLayout<1>,
 }
 
@@ -21,6 +22,7 @@ impl Instance {
         partition_bind_group_layout: super::buffer::BindGroupLayout<2>,
         write_compute_bind_group_layout: super::buffer::BindGroupLayout<1>,
         cluster_info_buffer_bind_group_layout: super::buffer::BindGroupLayout<2>,
+        result_indices_buffer_bind_group_layout: super::buffer::BindGroupLayout<2>,
         read_compute_bind_group_layout: super::buffer::BindGroupLayout<1>,
     ) -> Self {
         Self {
@@ -32,6 +34,7 @@ impl Instance {
             partition_bind_group_layout,
             write_compute_bind_group_layout,
             cluster_info_buffer_bind_group_layout,
+            result_indices_buffer_bind_group_layout,
             read_compute_bind_group_layout,
         }
     }

@@ -30,7 +30,8 @@ pub struct Renderer {
     camera_buffer: BufferGroup<1>,
     render_pipeline: wgpu::RenderPipeline,
     render_pipeline_wire: wgpu::RenderPipeline,
-    pub compute_pipeline: wgpu::ComputePipeline,
+    pub culling_compute_pipeline: wgpu::ComputePipeline,
+    pub compacting_compute_pipeline: wgpu::ComputePipeline,
     depth_texture: Texture,
     surface_format: wgpu::TextureFormat,
     pub sphere_gizmo: DebugMesh,
@@ -101,8 +102,13 @@ impl Renderer {
         surface.configure(&device, &config);
 
         let shader = device.create_shader_module(wgpu::include_wgsl!("../shaders/shader.wgsl"));
-        let shader_compute =
+
+        let cull_meshlets_shader =
             device.create_shader_module(wgpu::include_wgsl!("../shaders/should_draw.wgsl"));
+
+        let compact_indices_shader =
+            device.create_shader_module(wgpu::include_wgsl!("../shaders/compact_indices.wgsl"));
+
         let shader_wire =
             device.create_shader_module(wgpu::include_wgsl!("../shaders/shader_wire.wgsl"));
 
@@ -185,6 +191,33 @@ impl Renderer {
             Some("cluster_info_buffer_bind_group_layout"),
         );
 
+        let result_indices_buffer_bind_group_layout = BindGroupLayout::create(
+            &device,
+            &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+            Some("indirect_draw_info_buffer_bind_group_layout"),
+        );
+
         let read_compute_buffer_bind_group = BindGroupLayout::create(
             &device,
             &[wgpu::BindGroupLayoutEntry {
@@ -238,12 +271,24 @@ impl Renderer {
                 push_constant_ranges: &[],
             });
 
-        let compute_pipeline_layout =
+        let culling_compute_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Compute Pipeline Layout"),
                 bind_group_layouts: &[
                     // Reminder: Max of 4 for these, don't add any more
                     (&write_compute_bind_group_layout).into(),
+                    (&cluster_info_buffer_bind_group_layout).into(),
+                    (&read_compute_buffer_bind_group).into(),
+                ],
+                push_constant_ranges: &[],
+            });
+
+        let compacting_compute_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Compacting Compute Pipeline Layout"),
+                bind_group_layouts: &[
+                    // Reminder: Max of 4 for these, don't add any more
+                    (&result_indices_buffer_bind_group_layout).into(),
                     (&cluster_info_buffer_bind_group_layout).into(),
                     (&read_compute_buffer_bind_group).into(),
                 ],
@@ -267,12 +312,21 @@ impl Renderer {
             None,
         );
 
-        let compute_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("Culling compute pipeline"),
-            layout: Some(&compute_pipeline_layout),
-            module: &shader_compute,
-            entry_point: "main",
-        });
+        let culling_compute_pipeline =
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("Culling compute pipeline"),
+                layout: Some(&culling_compute_pipeline_layout),
+                module: &cull_meshlets_shader,
+                entry_point: "main",
+            });
+
+        let compacting_compute_pipeline =
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("Compacting compute pipeline"),
+                layout: Some(&compacting_compute_pipeline_layout),
+                module: &compact_indices_shader,
+                entry_point: "main",
+            });
 
         let depth_texture = Texture::create_depth_texture(&device, &config, "Depth Texture");
 
@@ -287,6 +341,7 @@ impl Renderer {
             partition_bind_group_layout,
             write_compute_bind_group_layout,
             cluster_info_buffer_bind_group_layout,
+            result_indices_buffer_bind_group_layout,
             read_compute_buffer_bind_group,
         ));
 
@@ -296,7 +351,8 @@ impl Renderer {
             instance,
             config,
             size,
-            compute_pipeline,
+            culling_compute_pipeline,
+            compacting_compute_pipeline,
             surface_format,
             depth_texture,
             render_pipeline,
@@ -423,9 +479,16 @@ pub fn render(
     mut commands: Commands,
 ) {
     let output = renderer.instance.surface().get_current_texture().unwrap();
-    let view = output
-        .texture
-        .create_view(&wgpu::TextureViewDescriptor::default());
+    let view = output.texture.create_view(&wgpu::TextureViewDescriptor {
+        label: Some("Output View"),
+        format: None,
+        dimension: None,
+        aspect: wgpu::TextureAspect::All,
+        base_mip_level: 0,
+        mip_level_count: None,
+        base_array_layer: 0,
+        array_layer_count: None,
+    });
 
     let mut compute_encoder =
         renderer

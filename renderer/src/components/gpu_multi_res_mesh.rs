@@ -73,7 +73,9 @@ struct DrawData {
 pub struct MultiResMeshComponent {
     name: String,
     cluster_count: u32,
-    can_draw_buffer: BufferGroup<1>,
+    write_can_draw_buffer: BufferGroup<1>,
+    read_can_draw_buffer: BufferGroup<1>,
+    result_indices_buffer: BufferGroup<2>,
     //FIXME: This really should exist on the camera/part of uniform group
     draw_data_buffer: BufferGroup<1>,
     model: BufferGroup<1>,
@@ -255,18 +257,27 @@ impl MultiResMeshComponent {
             );
         }
 
-        render_pass.set_pipeline(&renderer.compute_pipeline);
-        render_pass.set_bind_group(0, self.can_draw_buffer.bind_group(), &[]);
-
-        let bind_1 = if mesh_renderer.error_calc == ErrorMode::ExactLayer {
+        let cluster_data = if mesh_renderer.error_calc == ErrorMode::ExactLayer {
             self.asset.cluster_data_layer_error_group.bind_group()
         } else {
             self.asset.cluster_data_real_error_group.bind_group()
         };
 
-        render_pass.set_bind_group(1, bind_1, &[]);
+        render_pass.set_pipeline(&renderer.culling_compute_pipeline);
+        render_pass.set_bind_group(0, self.write_can_draw_buffer.bind_group(), &[]);
+
+        render_pass.set_bind_group(1, cluster_data, &[]);
 
         render_pass.set_bind_group(2, self.draw_data_buffer.bind_group(), &[]);
+
+        render_pass.dispatch_workgroups(self.cluster_count, 1, 1);
+
+        render_pass.set_pipeline(&renderer.compacting_compute_pipeline);
+        render_pass.set_bind_group(0, self.result_indices_buffer.bind_group(), &[]);
+
+        render_pass.set_bind_group(1, cluster_data, &[]);
+
+        render_pass.set_bind_group(2, self.read_can_draw_buffer.bind_group(), &[]);
 
         render_pass.dispatch_workgroups(self.cluster_count, 1, 1);
     }
@@ -288,7 +299,7 @@ impl MultiResMeshComponent {
 
         render_pass.set_vertex_buffer(0, self.asset.vertex_buffer.slice(..));
         render_pass.set_index_buffer(
-            self.can_draw_buffer.buffer().slice(..),
+            self.result_indices_buffer.get_buffer(0).slice(..),
             self.asset.index_format,
         );
 
@@ -299,12 +310,12 @@ impl MultiResMeshComponent {
         if mesh_renderer.show_solid {
             render_pass.set_pipeline(renderer.render_pipeline());
 
-            render_pass.draw_indexed(0..self.asset.index_count, 0, 0..1);
+            render_pass.draw_indexed_indirect(self.result_indices_buffer.get_buffer(1), 0);
         }
         if mesh_renderer.show_wire {
             render_pass.set_pipeline(renderer.render_pipeline_wire());
 
-            render_pass.draw_indexed(0..self.asset.index_count, 0, 0..1);
+            render_pass.draw_indexed_indirect(self.result_indices_buffer.get_buffer(1), 0);
         }
 
         // Draw bounds gizmos
@@ -523,14 +534,30 @@ impl MultiResMeshComponent {
         //    writer.write(data).unwrap();
         //}
 
-        let cluster_can_draw = vec![1i32; indices.len()];
+        let cluster_can_draw = vec![1i32; all_clusters.len() as _];
+        let cluster_result_indices = vec![1i32; indices.len()];
 
-        let compute_can_draw_buffer = BufferGroup::create_single(
+        let can_draw_buffer = BufferGroup::create_single(
             &cluster_can_draw,
-            wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::INDEX,
+            wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
             instance.device(),
             &instance.write_compute_bind_group_layout,
             Some("cluster_can_draw"),
+        );
+
+        let result_indices_buffer = BufferGroup::create_plural(
+            &[&cluster_result_indices, &[0i32, 1, 0, 0, 0]],
+            &[
+                wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_SRC
+                    | wgpu::BufferUsages::INDEX,
+                wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_SRC
+                    | wgpu::BufferUsages::INDIRECT,
+            ],
+            instance.device(),
+            &instance.result_indices_buffer_bind_group_layout,
+            Some("cluster_result_indices"),
         );
 
         let staging_buffer_size = 100; // std::mem::size_of_val(&cluster_can_draw[..]);
@@ -547,7 +574,14 @@ impl MultiResMeshComponent {
                 name,
                 index_format,
                 draw_data_buffer,
-                can_draw_buffer: compute_can_draw_buffer,
+                read_can_draw_buffer: can_draw_buffer.alternate_bind_group(
+                    instance.device(),
+                    &instance.read_compute_bind_group_layout,
+                    Some("read_cluster_can_draw"),
+                ),
+                write_can_draw_buffer: can_draw_buffer,
+
+                result_indices_buffer,
                 //debug_staging_buffer,
                 //staging_buffer_size,
                 cluster_count: all_clusters.len() as _,

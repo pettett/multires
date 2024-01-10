@@ -38,16 +38,13 @@ struct DrawIndirect {
     base_instance: u32,
 }
 
-@group(0) @binding(0) var<storage, write> result_indicies: array<i32>;
+//@group(0) @binding(0) var<storage, write> result_indicies: array<i32>;
 
-//@group(0) @binding(1) var<storage, read_write> should_draw: array<i32>;
-
-//@group(0) @binding(2) var<storage, write> draw_indirect_params: DrawIndirect;
+@group(0) @binding(0) var<storage, write> should_draw: array<i32>;
 
 @group(1) @binding(0) var<storage, read> indices: array<i32>;
 
 @group(1) @binding(1) var<storage, read> clusters: array<ClusterData>;
-
 
 @group(2) @binding(0) var<storage, read> draw_data: DrawData;
 
@@ -85,10 +82,11 @@ fn main(
 
     let cull = i32(draw_data.error >= this_error && draw_data.error < parent_error);
 
-
+    should_draw[i] = cull;
+	
 	// Ideally, compute this in a step after writing cull to a buffer and compacting it down
 
-    for (var ind: u32 = start; ind < end; ind++) {
-        result_indicies[ind] = indices[ind] * cull;
-    }
+    //for (var ind: u32 = start; ind < end; ind++) {
+    //    result_indicies[ind] = indices[ind] * cull;
+    //}
 }

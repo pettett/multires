@@ -62,6 +62,8 @@ impl Gui {
                     .min_height(100.0)
                     .min_width(100.0)
                     .show(&ctx, |ui| {
+                        ui.label(format!("FPS: {}", 1.0 / _delta_s.as_secs_f32()));
+
                         ui.add(
                             egui::widgets::DragValue::new(&mut camera.part_highlight)
                                 .prefix("highlight partition: "),
@@ -142,7 +144,7 @@ impl Gui {
                             .prefix("Target Error: "),
                     );
                     for (mesh, _trans) in meshes {
-						ui.label(mesh.name());
+                        ui.label(mesh.name());
 
                         if ui.button("Snapshot Error Graph").clicked() {
                             let g = mesh.submesh_error_graph(submeshes, &mesh_renderer);

@@ -77,7 +77,7 @@ pub fn create_descriptor_sets(
             .expect("Failed to allocate descriptor sets!")
     };
 
-    for (i, &descritptor_set) in descriptor_sets.iter().enumerate() {
+    for (i, &descriptor_set) in descriptor_sets.iter().enumerate() {
         let descriptor_buffer_infos = [vk::DescriptorBufferInfo {
             buffer: uniform_buffers[i].buffer(),
             offset: 0,
@@ -106,7 +106,7 @@ pub fn create_descriptor_sets(
                 // transform uniform
                 s_type: vk::StructureType::WRITE_DESCRIPTOR_SET,
                 p_next: ptr::null(),
-                dst_set: descritptor_set,
+                dst_set: descriptor_set,
                 dst_binding: 0,
                 dst_array_element: 0,
                 descriptor_count: 1,
@@ -119,7 +119,7 @@ pub fn create_descriptor_sets(
                 // transform uniform
                 s_type: vk::StructureType::WRITE_DESCRIPTOR_SET,
                 p_next: ptr::null(),
-                dst_set: descritptor_set,
+                dst_set: descriptor_set,
                 dst_binding: 4,
                 dst_array_element: 0,
                 descriptor_count: 1,
@@ -132,7 +132,7 @@ pub fn create_descriptor_sets(
                 // transform uniform
                 s_type: vk::StructureType::WRITE_DESCRIPTOR_SET,
                 p_next: ptr::null(),
-                dst_set: descritptor_set,
+                dst_set: descriptor_set,
                 dst_binding: 3,
                 dst_array_element: 0,
                 descriptor_count: 1,
@@ -145,7 +145,7 @@ pub fn create_descriptor_sets(
                 // sampler uniform
                 s_type: vk::StructureType::WRITE_DESCRIPTOR_SET,
                 p_next: ptr::null(),
-                dst_set: descritptor_set,
+                dst_set: descriptor_set,
                 dst_binding: 1,
                 dst_array_element: 0,
                 descriptor_count: 1,

@@ -126,48 +126,48 @@ impl<K: Key, V> Pidge<K, V> {
 
         //TODO: test if this improves performance
 
-        if id > 1 {
-            // Merge with span on the left
-            match &self.data[id - 1] {
-                PidgeHole::Empty { span_start, .. } => new_span_start = Some(*span_start),
-                _ => (),
-            }
-        }
+        // if id > 1 {
+        //     // Merge with span on the left
+        //     match &self.data[id - 1] {
+        //         PidgeHole::Empty { span_start, .. } => new_span_start = Some(*span_start),
+        //         _ => (),
+        //     }
+        // }
 
-        if id < self.data.len() - 1 {
-            // Merge with span on the left
-            match &self.data[id + 1] {
-                PidgeHole::Empty { span_end, .. } => new_span_end = Some(*span_end),
-                _ => (),
-            }
-        }
+        // if id < self.data.len() - 1 {
+        //     // Merge with span on the left
+        //     match &self.data[id + 1] {
+        //         PidgeHole::Empty { span_end, .. } => new_span_end = Some(*span_end),
+        //         _ => (),
+        //     }
+        // }
 
-        // Write in the new span. Only write over data if it has changed
-        if let Some(new_span_start) = new_span_start {
-            match &mut self.data[new_span_start] {
-                PidgeHole::Empty {
-                    span_start,
-                    span_end,
-                } => {
-                    *span_start = new_span_start;
-                    *span_end = new_span_end.unwrap_or(id);
-                }
-                _ => panic!("Invalid Span Start"),
-            }
-        }
+        // // Write in the new span. Only write over data if it has changed
+        // if let Some(new_span_start) = new_span_start {
+        //     match &mut self.data[new_span_start] {
+        //         PidgeHole::Empty {
+        //             span_start,
+        //             span_end,
+        //         } => {
+        //             *span_start = new_span_start;
+        //             *span_end = new_span_end.unwrap_or(id);
+        //         }
+        //         _ => panic!("Invalid Span Start"),
+        //     }
+        // }
 
-        if let Some(new_span_end) = new_span_end {
-            match &mut self.data[new_span_end] {
-                PidgeHole::Empty {
-                    span_start,
-                    span_end,
-                } => {
-                    *span_start = new_span_start.unwrap_or(id);
-                    *span_end = new_span_end;
-                }
-                _ => panic!("Invalid Span End"),
-            }
-        }
+        // if let Some(new_span_end) = new_span_end {
+        //     match &mut self.data[new_span_end] {
+        //         PidgeHole::Empty {
+        //             span_start,
+        //             span_end,
+        //         } => {
+        //             *span_start = new_span_start.unwrap_or(id);
+        //             *span_end = new_span_end;
+        //         }
+        //         _ => panic!("Invalid Span End"),
+        //     }
+        // }
 
         // And write in ourself to have correct values, in the case that either of the above span points are still None.
         self.data[id] = PidgeHole::Empty {

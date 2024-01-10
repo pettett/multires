@@ -61,6 +61,36 @@ impl BufferGroup<1> {
         Self::init_plural::<T>(&[size], &[usage], device, layout, label)
     }
 
+    pub fn alternate_bind_group(
+        &self,
+        device: &wgpu::Device,
+        layout: &BindGroupLayout<1>,
+        label: Option<&str>,
+    ) -> Self {
+        let entries: [_; 1] = self
+            .buffers
+            .iter()
+            .enumerate()
+            .map(|(i, buffer)| wgpu::BindGroupEntry {
+                binding: i as u32,
+                resource: buffer.as_entire_binding(),
+            })
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap();
+
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label,
+            layout: layout.into(),
+            entries: &entries[..],
+        });
+
+        Self {
+            buffers: self.buffers.clone(),
+            bind_group,
+        }
+    }
+
     pub fn buffer(&self) -> &wgpu::Buffer {
         &self.buffers[0]
     }
@@ -201,7 +231,9 @@ impl<const N: usize> BufferGroup<N> {
             bind_group,
         }
     }
-
+    pub fn get_buffer(&self, i: usize) -> &wgpu::Buffer {
+        &self.buffers[i]
+    }
     pub fn bind_group(&self) -> &wgpu::BindGroup {
         &self.bind_group
     }
