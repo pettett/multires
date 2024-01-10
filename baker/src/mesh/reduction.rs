@@ -180,11 +180,11 @@ impl EdgeID {
             return Ok(false);
         }
 
-        if !orig.is_group_embedded(mesh) {
-            // Cannot change group boundary
-            // Cannot move a vertex unless it is in the center of a partition
-            return Ok(false);
-        }
+        //if !orig.is_group_embedded(mesh) {
+        //    // Cannot change group boundary
+        //    // Cannot move a vertex unless it is in the center of a partition
+        //    return Ok(false);
+        //}
 
         if mesh.get_edge(self).twin.is_some() {
             // This edge has a twin, so a bad collapse risks splitting the group into 2 pieces.

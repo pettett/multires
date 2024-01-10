@@ -882,7 +882,7 @@ pub mod test {
 
         mesh.assert_valid().unwrap();
 
-        mesh.partition_within_groups(test_config, None)?;
+        mesh.partition_within_groups(test_config, None, Some(60))?;
 
         mesh.assert_valid().unwrap();
 
@@ -890,7 +890,7 @@ pub mod test {
 
         mesh.assert_valid().unwrap();
 
-        mesh.partition_within_groups(test_config, Some(2))?;
+        mesh.partition_within_groups(test_config, Some(2), None)?;
 
         println!("{} {}", mesh.partition_count(), mesh.groups.len());
 
@@ -914,7 +914,7 @@ pub mod test {
         let (mut mesh, _verts) = WingedMesh::from_gltf(mesh);
 
         // Apply primary partition, that will define the lowest level clusterings
-        mesh.partition_within_groups(test_config, None)?;
+        mesh.partition_within_groups(test_config, None, Some(60))?;
 
         let mut boundary_face_ratio = 0.0;
         for pi in 0..mesh.partitions.len() {

@@ -17,6 +17,7 @@ use crate::utility::{
 
 use ash::{extensions::ext::MeshShader, vk};
 use bevy_ecs::{entity::Entity, event::Events, schedule::Schedule, world::World};
+use bytemuck::Zeroable;
 use common::{asset::Asset, MultiResMesh};
 use common_renderer::components::{
     camera::Camera,
@@ -86,6 +87,57 @@ pub struct VulkanApp26 {
     is_framebuffer_resized: bool,
 
     meshlet_count: u32,
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct Meshlet {
+    pub vertices: [u32; 64],
+    pub indices: [u32; 378], // 126 triangles => 378 indices
+    pub vertex_count: u32,
+    pub index_count: u32,
+}
+
+unsafe impl bytemuck::Zeroable for Meshlet {}
+unsafe impl bytemuck::Pod for Meshlet {}
+
+pub fn generate_meshlets(mesh: &MultiResMesh) -> Vec<Meshlet> {
+    println!("Generating meshlets!");
+
+    // Precondition: partition indexes completely span in some range 0..N
+    let mut meshlets = Vec::new();
+
+    for layer in &mesh.lods {
+        for c in &layer.submeshes {
+            assert!(c.indices.len() <= 378);
+
+            let mut m = Meshlet::zeroed();
+
+            for &vert in &c.indices {
+                // If unique, add to list
+                let idx = (0..m.vertex_count as usize).find(|j| m.vertices[*j] == vert);
+
+                let idx = if let Some(idx) = idx {
+                    idx as u32
+                } else {
+                    assert!((m.vertex_count as usize) < m.vertices.len());
+
+                    m.vertex_count += 1;
+
+                    m.vertices[m.vertex_count as usize - 1] = vert;
+                    m.vertex_count - 1
+                };
+
+                m.indices[m.index_count as usize] = idx;
+
+                m.index_count += 1;
+            }
+
+            meshlets.push(m);
+        }
+    }
+
+    meshlets
 }
 
 impl VulkanApp26 {
@@ -216,11 +268,8 @@ impl VulkanApp26 {
 
         let data = MultiResMesh::load().unwrap();
 
-        println!(
-            "V: {:?} I: {:?}",
-            data.verts.len(),
-            data.lods[0].meshlets.len()
-        );
+        let meshlets = generate_meshlets(&data);
+        println!("V: {:?} I: {:?}", data.verts.len(), meshlets.len());
 
         let vertex_buffer = create_storage_buffer(
             device.clone(),
@@ -235,7 +284,7 @@ impl VulkanApp26 {
             &physical_device_memory_properties,
             command_pool.clone(),
             graphics_queue,
-            &data.lods[0].meshlets,
+            &meshlets,
         );
         let uniform_buffers = create_uniform_buffers(
             device.clone(),
@@ -260,7 +309,7 @@ impl VulkanApp26 {
         println!("Loading command buffers");
 
         let command_buffers = VulkanApp26::create_command_buffers(
-            data.lods[0].meshlets.len() as u32,
+            meshlets.len() as u32,
             &device,
             command_pool.pool,
             graphics_pipeline.pipeline(),
@@ -287,7 +336,7 @@ impl VulkanApp26 {
 
         let camera = world
             .spawn((
-                CameraController::new(0.005),
+                CameraController::new(0.5),
                 Camera::new(1.0),
                 Transform::new(Vec3A::ZERO, Quat::IDENTITY),
             ))
@@ -350,7 +399,7 @@ impl VulkanApp26 {
 
             is_framebuffer_resized: false,
 
-            meshlet_count: data.lods[0].meshlets.len() as u32,
+            meshlet_count: meshlets.len() as u32,
         }
     }
 

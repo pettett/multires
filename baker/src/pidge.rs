@@ -38,29 +38,29 @@ impl<'a, V> Iterator for Iter<'a, V> {
         if self.idx >= self.data.len() {
             return None;
         }
-
-        match &self.data[self.idx] {
-            PidgeHole::Filled(v) => {
-                self.idx += 1;
-                return Some(v);
-            }
-            PidgeHole::Empty { span_end, .. } => {
-                if span_end + 1 >= self.data.len() {
-                    // Break the iterator, no data after this span
-                    return None;
-                } else {
-                    self.idx = span_end + 1;
+        loop {
+            match &self.data[self.idx] {
+                PidgeHole::Filled(v) => {
+                    self.idx += 1;
+                    return Some(v);
+                }
+                PidgeHole::Empty { span_end, .. } => {
+                    if self.idx + 1 >= self.data.len() {
+                        // Break the iterator, no data after this span
+                        return None;
+                    } else {
+                        self.idx += 1;
+                    }
                 }
             }
         }
-
-        match &self.data[self.idx] {
-            PidgeHole::Filled(v) => {
-                self.idx += 1;
-                Some(v)
-            }
-            _ => panic!("Span end should be followed by a valid filled pidge hole"),
-        }
+        // match &self.data[self.idx] {
+        //     PidgeHole::Filled(v) => {
+        //         self.idx += 1;
+        //         Some(v)
+        //     }
+        //     _ => panic!("Span end should be followed by a valid filled pidge hole"),
+        // }
     }
 }
 

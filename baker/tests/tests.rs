@@ -1,5 +1,5 @@
 #![cfg(test)]
-use baker::mesh::{winged_mesh::WingedMesh};
+use baker::mesh::winged_mesh::WingedMesh;
 
 fn group_and_partition_and_simplify(mesh: &mut WingedMesh, verts: &[glam::Vec4]) {
     let config = &metis::PartitioningConfig {
@@ -53,7 +53,7 @@ fn group_and_partition_and_simplify(mesh: &mut WingedMesh, verts: &[glam::Vec4])
 
         //layers.push(to_mesh_layer(&working_mesh, &verts));
 
-        let partition_count = match mesh.partition_within_groups(&config, Some(2)) {
+        let partition_count = match mesh.partition_within_groups(&config, Some(2), None) {
             Ok(partition_count) => partition_count,
             Err(e) => {
                 println!("{}", e);

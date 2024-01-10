@@ -1,5 +1,5 @@
-use core::fmt;
 use anyhow::Context;
+use core::fmt;
 use petgraph::dot;
 use std::{fs, path, process};
 
@@ -96,13 +96,16 @@ where
     <G as petgraph::visit::Data>::EdgeWeight: fmt::Debug,
     <G as petgraph::visit::Data>::NodeWeight: fmt::Debug,
 {
-	let root = std::env::current_dir().unwrap();
+    let root = std::env::current_dir()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .to_owned();
 
-	
     let dot_out_path = root.join("svg\\dot.gv");
     let out_path = root.join(out);
-	
-	println!("Writing svg output to {out_path:?}");
+
+    println!("Writing svg output to {out_path:?}");
 
     match &render {
         GraphSVGRender::Directed { node_label } => fs::write(
@@ -120,7 +123,9 @@ where
                     get_node_attrs
                 )
             ),
-        ).context("Failed to write directed DOT output")?,
+        )
+        .context("Failed to write directed DOT output")?,
+
         GraphSVGRender::Undirected { edge_label, .. } => fs::write(
             &dot_out_path,
             format!(
@@ -144,7 +149,8 @@ where
                     get_node_attrs
                 )
             ),
-        ).context("Failed to write undirected DOT output")?,
+        )
+        .context("Failed to write undirected DOT output")?,
     };
 
     let dot_out = match render {
@@ -164,11 +170,15 @@ where
         }
     }
     .arg("-Tsvg")
-    .output().context("Failed to execute graphviz process")?;
+    .output()
+    .context("Failed to execute graphviz process")?;
 
     //fs::remove_file(DOT_OUT)?;
 
-    println!("{}", std::str::from_utf8(&dot_out.stderr).context("STDERR from graphviz is not unicode")?);
+    println!(
+        "{}",
+        std::str::from_utf8(&dot_out.stderr).context("STDERR from graphviz is not unicode")?
+    );
 
     assert!(dot_out.status.success());
 

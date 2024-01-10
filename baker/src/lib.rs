@@ -1,13 +1,12 @@
 pub mod mesh;
 pub mod pidge;
 
-use std::{collections::BTreeSet};
+use std::collections::BTreeSet;
 
-use common::{asset::Asset, MeshLevel, Meshlet, MultiResMesh, SubMesh};
+use common::{asset::Asset, MeshLevel, MultiResMesh, SubMesh};
 
 use glam::Vec4;
 use mesh::winged_mesh::WingedMesh;
-
 
 // use meshopt::VertexDataAdapter;
 
@@ -16,7 +15,6 @@ pub fn to_mesh_layer(mesh: &WingedMesh, verts: &[Vec4]) -> MeshLevel {
         partition_indices: mesh.get_partition(),
         group_indices: mesh.get_group(),
         indices: grab_indicies(&mesh),
-        meshlets: vec![], //generate_meshlets(&mesh),
         submeshes: generate_submeshes(mesh, verts),
         partitions: mesh.partitions.clone(),
         groups: mesh.groups.clone(),
@@ -49,7 +47,7 @@ pub fn group_and_partition_full_res(mut working_mesh: WingedMesh, verts: &[Vec4]
 
         println!("Face count L{}: {}", i + 1, working_mesh.face_count());
 
-        match working_mesh.partition_within_groups(&config, Some(2)) {
+        match working_mesh.partition_within_groups(&config, Some(2), None) {
             Ok(partition_count) => {
                 // View a snapshot of the mesh without any re-groupings applied
                 //layers.push(to_mesh_layer(&next_mesh));
@@ -108,7 +106,7 @@ pub fn group_and_partition_and_simplify(mut mesh: WingedMesh, verts: &[Vec4], na
     let mut quadrics = mesh.create_quadrics(verts);
 
     // Apply primary partition, that will define the lowest level clusterings
-    mesh.partition_full_mesh(config, mesh.face_count().div_ceil(200) as _)
+    mesh.partition_full_mesh(config, mesh.face_count().div_ceil(60) as _)
         .unwrap();
 
     mesh.group(config, &verts).unwrap();
@@ -161,7 +159,7 @@ pub fn group_and_partition_and_simplify(mut mesh: WingedMesh, verts: &[Vec4], na
 
         //layers.push(to_mesh_layer(&working_mesh, &verts));
 
-        let partition_count = match mesh.partition_within_groups(&config, Some(2)) {
+        let partition_count = match mesh.partition_within_groups(&config, Some(2), None) {
             Ok(partition_count) => partition_count,
             Err(e) => {
                 println!("{}", e);
@@ -283,50 +281,6 @@ pub fn grab_indicies(mesh: &WingedMesh) -> Vec<u32> {
     //}
 
     indices
-}
-
-pub fn generate_meshlets(mesh: &WingedMesh) -> Vec<Meshlet> {
-    println!("Generating meshlets!");
-
-    // Precondition: partition indexes completely span in some range 0..N
-    let mut meshlets: Vec<_> = (0..=mesh.partition_count())
-        .map(|_| (Meshlet::default()))
-        .collect();
-
-    for (_fid, face) in mesh.iter_faces() {
-        let verts = mesh.triangle_from_face(&face);
-
-        let m = meshlets.get_mut(face.part as usize).unwrap();
-
-        for v in 0..3 {
-            let vert = verts[v] as u32;
-
-            // If unique, add to list
-            let idx = (0..m.vertex_count as usize).find(|j| m.vertices[*j] == vert);
-
-            let idx = if let Some(idx) = idx {
-                idx as u32
-            } else {
-                m.vertex_count += 1;
-                m.vertices[m.vertex_count as usize - 1] = vert;
-                m.vertex_count - 1
-            };
-
-            m.indices[m.index_count as usize + v] = idx;
-        }
-        m.index_count += 3;
-    }
-
-    let total_indices: u32 = meshlets.iter().map(|m| m.index_count).sum();
-    let avg_indices = total_indices / meshlets.len() as u32;
-    let max_indices = meshlets.iter().map(|m| m.index_count).max().unwrap();
-    let total_verts: u32 = meshlets.iter().map(|m| m.vertex_count).sum();
-    let avg_verts = total_verts / meshlets.len() as u32;
-    let max_verts = meshlets.iter().map(|m| m.vertex_count).max().unwrap();
-
-    println!("avg_indices: {avg_indices}/378 max_indices: {max_indices}/378 avg_verts: {avg_verts}/64 max_verts: {max_verts}/64");
-
-    meshlets
 }
 
 /// Debug code to generate meshlets with no max size. Used for testing partition trees with no remeshing

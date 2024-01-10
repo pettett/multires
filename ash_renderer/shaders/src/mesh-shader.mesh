@@ -51,11 +51,19 @@ struct MeshTaskPayload {
 
 taskPayloadSharedEXT MeshTaskPayload payload;
 
-void vert(uint v, s_meshlet meshlet) {
+vec3 integer_to_rgb(float integer) {
+    float red = mod((integer * 109.0 + 47.0), 269.0) / 269.0;
+    float green = mod((integer * 83.0 + 251.0), 127.0) / 127.0;
+    float blue = mod((integer * 251.0 + 83.0), 293.0) / 293.0;
+    return vec3(red, green, blue);
+}
+
+
+void vert(uint v, uint meshlet_index) {
     // gl_MeshVerticesEXT[v].gl_Position = ubo.view_proj * ubo.model * p;
-    uint vert_idx = meshlet.vertices[v];
+    uint vert_idx = indicies.meshlets[meshlet_index].vertices[v];
     gl_MeshVerticesEXT[v].gl_Position = ubo.view_proj * ubo.model * vec4(sourceData.verts[vert_idx].pos.xyz, 1);
-    OUT[v].fragColor = abs(sourceData.verts[vert_idx].pos.xyz);
+    OUT[v].fragColor = integer_to_rgb(meshlet_index);
     OUT[v].fragTexCoord = vec2(1, 1);
 }
 
@@ -69,7 +77,7 @@ void main() {
 
     // pub const RECT_TEX_COORD_INDICES_DATA: [u32; 12] = [0, 1, 2, 2, 3, 0, 4, 5, 6, 6, 7, 4];
     for (uint i = 0; i < meshlet.vertex_count; i++) {
-        vert(i, meshlet);
+        vert(i, meshlet_index);
     }
 
     for (uint i = 0; i < meshlet.index_count / 3; i++) {

@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet};
+use std::collections::BTreeSet;
 
 use bincode::{Decode, Encode};
 use glam::Vec3;
@@ -39,15 +39,6 @@ impl BoundingSphere {
     }
 }
 
-#[repr(C)]
-#[derive(Debug, Copy, Clone, Decode, Encode)]
-pub struct Meshlet {
-    pub vertices: [u32; 64],
-    pub indices: [u32; 378], // 126 triangles => 378 indices
-    pub vertex_count: u32,
-    pub index_count: u32,
-}
-
 #[derive(Debug, Clone, Decode, Encode)]
 pub struct SubMesh {
     pub indices: Vec<u32>,
@@ -63,7 +54,13 @@ pub struct SubMesh {
 }
 
 impl SubMesh {
-    pub fn new(error: f32, center: Vec3, monotonic_radius: f32, _radius: f32, group: usize) -> Self {
+    pub fn new(
+        error: f32,
+        center: Vec3,
+        monotonic_radius: f32,
+        _radius: f32,
+        group: usize,
+    ) -> Self {
         Self {
             indices: Vec::new(),
             // tight_sphere: BoundingSphere {
@@ -76,20 +73,6 @@ impl SubMesh {
             },
             error,
             debug_group: group,
-        }
-    }
-}
-
-unsafe impl bytemuck::Zeroable for Meshlet {}
-unsafe impl bytemuck::Pod for Meshlet {}
-
-impl Default for Meshlet {
-    fn default() -> Meshlet {
-        Meshlet {
-            vertices: [0; 64],
-            indices: [0; 378],
-            vertex_count: 0,
-            index_count: 0,
         }
     }
 }
@@ -137,7 +120,6 @@ pub struct MeshLevel {
     pub groups: Vec<GroupInfo>,
     /// used by the layer below to tell what dependant tris means
     pub indices: Vec<u32>,
-    pub meshlets: Vec<Meshlet>,
     pub submeshes: Vec<SubMesh>,
 }
 

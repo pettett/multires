@@ -122,7 +122,7 @@ pub mod test {
     pub const FACE_SVG_OUT: &str = "baker\\face_graph.svg";
 
     pub const FACE_SVG_OUT_2: &str = "baker\\face_graph2.svg";
-    pub const ERROR_SVG_OUT: &str = "baker\\error.svg";
+    pub const ERROR_SVG_OUT: &str = "error.svg";
 
     const COLS: [&str; 10] = [
         "red",
@@ -251,7 +251,7 @@ pub mod test {
         println!("Faces: {}, Verts: {}", mesh.face_count(), mesh.vert_count());
 
         // Apply primary partition, that will define the lowest level clusterings
-        mesh.partition_within_groups(test_config, None)?;
+        mesh.partition_within_groups(test_config, None, Some(60))?;
 
         graph::petgraph_to_svg(
             &mesh.generate_partition_graph(),
@@ -279,13 +279,16 @@ pub mod test {
         println!("Faces: {}, Verts: {}", mesh.face_count(), mesh.vert_count());
 
         // Apply primary partition, that will define the lowest level clusterings
-        mesh.partition_within_groups(test_config, None)?;
+        mesh.partition_within_groups(test_config, None, Some(60))?;
 
         mesh.group(test_config, &verts)?;
         let mut graph: petgraph::Graph<(), ()> = petgraph::Graph::new();
 
-        let mut old_part_nodes: Vec<_> =
-            mesh.partitions.iter().map(|_o| graph.add_node(())).collect();
+        let mut old_part_nodes: Vec<_> = mesh
+            .partitions
+            .iter()
+            .map(|_o| graph.add_node(()))
+            .collect();
 
         // Record a big colour map for node indexes, to show grouping
         let mut colouring = HashMap::new();
@@ -299,10 +302,13 @@ pub mod test {
 
             seen_groups += mesh.groups.len();
 
-            mesh.partition_within_groups(test_config, Some(2))?;
+            mesh.partition_within_groups(test_config, Some(2), None)?;
 
-            let new_part_nodes: Vec<_> =
-                mesh.partitions.iter().map(|_o| graph.add_node(())).collect();
+            let new_part_nodes: Vec<_> = mesh
+                .partitions
+                .iter()
+                .map(|_o| graph.add_node(()))
+                .collect();
 
             for (new_p_i, new_p) in mesh.partitions.iter().enumerate() {
                 let g_i = new_p.child_group_index.unwrap();

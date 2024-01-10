@@ -111,6 +111,9 @@ impl WingedMesh {
         verts: &[glam::Vec4],
     ) -> Result<usize, metis::PartitioningError> {
         let group_count = self.partitions.len().div_ceil(4);
+
+        assert!(config.force_contiguous_partitions);
+
         println!(
             "Partitioning into {group_count} groups from {} partitions",
             self.partitions.len()
@@ -227,6 +230,7 @@ impl WingedMesh {
         &mut self,
         config: &metis::PartitioningConfig,
         parts_per_group: Option<u32>,
+        tris_per_cluster: Option<u32>,
     ) -> Result<usize, metis::PartitioningError> {
         let graphs = self.generate_group_graphs();
 
@@ -246,7 +250,7 @@ impl WingedMesh {
             let parts = if let Some(parts_per_group) = parts_per_group {
                 parts_per_group
             } else {
-                (graph.node_count() as u32).div_ceil(60)
+                (graph.node_count() as u32).div_ceil(tris_per_cluster.unwrap())
             };
 
             #[cfg(test)]
@@ -259,7 +263,7 @@ impl WingedMesh {
                 e => {
                     petgraph_to_svg(
                         graph,
-                        "svg/error_partition_within_group.svg",
+                        "error_partition_within_group.svg",
                         &|_, _| String::new(),
                         common::graph::GraphSVGRender::Undirected {
                             edge_label: common::graph::Label::None,
