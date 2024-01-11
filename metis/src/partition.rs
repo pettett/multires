@@ -15,8 +15,8 @@ use crate::{
     METIS_NOPTIONS,
 };
 use crate::{
-    miptype_et_METIS_IPTYPE_METISRB,
-    mptype_et_METIS_PTYPE_KWAY, mptype_et_METIS_PTYPE_RB,
+    miptype_et_METIS_IPTYPE_METISRB, mobjtype_et_METIS_OBJTYPE_CUT, mobjtype_et_METIS_OBJTYPE_VOL,
+    moptions_et_METIS_OPTION_OBJTYPE, mptype_et_METIS_PTYPE_KWAY, mptype_et_METIS_PTYPE_RB,
 };
 use petgraph::visit::EdgeRef;
 use std::ptr::null_mut;
@@ -86,6 +86,19 @@ pub enum RefinementAlgorithm {
     OneSidedFm = mrtype_et_METIS_RTYPE_SEP1SIDED,
 }
 
+/// `METIS_OPTION_OBJTYPE`
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+#[repr(i32)]
+pub enum ObjectiveType {
+    /// Edge-cut minimization
+    /// `METIS_OBJTYPE_CUT`
+    EdgeCut = mobjtype_et_METIS_OBJTYPE_CUT,
+    /// Total communication volume minimization.
+    /// Can result in more accurate partitioning, but a more complex optimisation function will make this method slower.
+    /// `METIS_OBJTYPE_VOL`
+    Volume = mobjtype_et_METIS_OBJTYPE_VOL,
+}
+
 /// Configuration for METIS graph partitioning.
 /// Used to select an algorithm and configure METIS options.
 /// [`None`] values correspond to the default METIS option.
@@ -97,19 +110,24 @@ pub struct PartitioningConfig {
     pub coarsening: Option<CoarseningScheme>,
     /// Specifies the algorithm used during initial partitioning
     /// `METIS_OPTION_IPTYPE`
-    pub initial_partitioning: InitialPartitioningAlgorithm,
+    pub initial_partitioning: Option<InitialPartitioningAlgorithm>,
     /// Specifies the algorithm used for refinement
     /// `METIS_OPTION_RTYPE`
     pub refinement: Option<RefinementAlgorithm>,
+    /// `METIS_OPTION_OBJTYPE`
+    pub objective_type: Option<ObjectiveType>,
     /// Specifies the number of different partitionings that it will compute.
     /// The final partitioning is the one that achieves the best edgecut or communication volume.
+    /// Default is 1.
     /// `METIS_OPTION_NCUTS`
     pub partitioning_attempts: Option<i32>,
     /// Specifies the number of different separators that it will compute at each level of nested dissection.
     /// The final separator that is used is the smallest one.
+    /// Default is 1.
     /// `METIS_OPTION_NSEPS`
     pub separator_attempts: Option<i32>,
     /// Specifies the number of iterations for the refinement algorithms at each stage of the uncoarsening process.
+    /// Default is 10.
     /// `METIS_OPTION_NITER`
     pub refinement_iterations: Option<i32>,
     /// Specifies the seed for the random number generator.
@@ -146,11 +164,12 @@ impl Default for PartitioningConfig {
         Self {
             method: PartitioningMethod::MultilevelKWay,
             coarsening: None,
-            initial_partitioning: InitialPartitioningAlgorithm::GreedyGrow,
+            initial_partitioning: None,
             refinement: None,
             partitioning_attempts: None,
             separator_attempts: None,
             refinement_iterations: None,
+            objective_type: None,
             rng_seed: None,
             minimize_subgraph_degree: None,
             two_hop_matching: None,
@@ -170,8 +189,9 @@ impl PartitioningConfig {
         if let Some(x) = self.coarsening {
             options[moptions_et_METIS_OPTION_CTYPE as usize] = x as _;
         }
-
-        options[moptions_et_METIS_OPTION_IPTYPE as usize] = self.initial_partitioning as _;
+        if let Some(x) = self.initial_partitioning {
+            options[moptions_et_METIS_OPTION_IPTYPE as usize] = x as _;
+        }
 
         if let Some(x) = self.refinement {
             options[moptions_et_METIS_OPTION_RTYPE as usize] = x as _;
@@ -198,11 +218,15 @@ impl PartitioningConfig {
         }
 
         if let Some(x) = self.two_hop_matching {
-            options[moptions_et_METIS_OPTION_NO2HOP as usize] = idx_t::from(x);
+            options[moptions_et_METIS_OPTION_NO2HOP as usize] = 1 - idx_t::from(x);
         }
 
         options[moptions_et_METIS_OPTION_CONTIG as usize] =
             idx_t::from(self.force_contiguous_partitions);
+
+        if let Some(x) = self.objective_type {
+            options[moptions_et_METIS_OPTION_OBJTYPE as usize] = x as _;
+        }
 
         if let Some(x) = self.compress_graph {
             options[moptions_et_METIS_OPTION_COMPRESS as usize] = idx_t::from(x);
@@ -221,6 +245,19 @@ impl PartitioningConfig {
         }
 
         //options[moptions_et_METIS_OPTION_DBGLVL as usize] = mdbglvl_et_METIS_DBG_INFO;
+    }
+
+    pub fn partition_onto_graph<V, E>(
+        &self,
+        partitions: u32,
+        graph: &petgraph::graph::UnGraph<V, E>,
+    ) -> Result<petgraph::graph::UnGraph<usize, E>, PartitioningError>
+    where
+        E: Copy,
+    {
+        let p = self.partition_from_graph(partitions, graph)?;
+
+        Ok(graph.map(|i, _| p[i.index()] as usize, |_, w| *w))
     }
 
     pub fn partition_from_graph<V, E>(
@@ -256,10 +293,53 @@ impl PartitioningConfig {
             adjacency,
             adjacency_idx,
             None,
+            None,
+            None,
         )
     }
 
-    pub fn partition_from_edge_weighted_graph<V>(
+    pub fn partition_from_weighted_node_graph<E>(
+        &self,
+        partitions: u32,
+        graph: &petgraph::graph::UnGraph<idx_t, E>,
+    ) -> Result<Vec<idx_t>, PartitioningError> {
+        let mut adjacency = Vec::with_capacity(graph.edge_count());
+        let mut adjacency_idx = Vec::with_capacity(graph.node_count());
+        let mut vertex_sizes = Vec::with_capacity(graph.node_count());
+        //TODO: It may be possible for the neighbours to be duplicated, investigate
+        for v in graph.node_indices() {
+            assert_eq!(v.index(), adjacency_idx.len());
+
+            adjacency_idx.push(adjacency.len() as idx_t);
+
+            vertex_sizes.push(*graph.node_weight(v).unwrap());
+
+            for e in graph.edges(v) {
+                let other = if v == e.target() {
+                    e.source()
+                } else {
+                    e.target()
+                };
+
+                adjacency.push(other.index() as idx_t)
+            }
+        }
+        adjacency_idx.push(adjacency.len() as idx_t);
+
+        assert_eq!(adjacency_idx.len(), graph.node_count() + 1);
+
+        self.partition_from_adj(
+            partitions,
+            graph.node_count(),
+            adjacency,
+            adjacency_idx,
+            Some(vertex_sizes),
+            None,
+            None,
+        )
+    }
+
+    pub fn partition_from_edge_weighted_edge_graph<V>(
         &self,
         partitions: u32,
         graph: &petgraph::graph::UnGraph<V, idx_t>,
@@ -295,6 +375,8 @@ impl PartitioningConfig {
             graph.node_count(),
             adjacency,
             adjacency_idx,
+            None,
+            None,
             Some(adjacency_weight),
         )
     }
@@ -305,6 +387,8 @@ impl PartitioningConfig {
         nodes: usize,
         mut adjacency: Vec<idx_t>,
         mut adjacency_idx: Vec<idx_t>,
+        vertex_weight: Option<Vec<idx_t>>,
+        vertex_size: Option<Vec<idx_t>>,
         adjacency_weight: Option<Vec<idx_t>>,
     ) -> Result<Vec<idx_t>, PartitioningError> {
         if adjacency.len() == 0 {
@@ -328,13 +412,28 @@ impl PartitioningConfig {
 
         let status = if self.method == PartitioningMethod::MultilevelKWay {
             unsafe {
+                //The following options are valid for METIS PartGraphKway:
+                // METIS_OPTION_OBJTYPE, METIS_OPTION_CTYPE, METIS_OPTION_IPTYPE,
+                // METIS_OPTION_RTYPE, METIS_OPTION_NO2HOP, METIS_OPTION_NCUTS,
+                // METIS_OPTION_NITER, METIS_OPTION_UFACTOR, METIS_OPTION_MINCONN,
+                // METIS_OPTION_CONTIG, METIS_OPTION_SEED, METIS_OPTION_NUMBERING,
+                // METIS_OPTION_DBGLVL
+
                 METIS_PartGraphKway(
                     &mut n,
                     &mut num_constraints,
                     adjacency_idx.as_mut_ptr(),
                     adjacency.as_mut_ptr(),
-                    null_mut(),
-                    null_mut(),
+                    if let Some(mut w) = vertex_weight {
+                        w.as_mut_ptr()
+                    } else {
+                        null_mut()
+                    },
+                    if let Some(mut w) = vertex_size {
+                        w.as_mut_ptr()
+                    } else {
+                        null_mut()
+                    },
                     if let Some(mut w) = adjacency_weight {
                         w.as_mut_ptr()
                     } else {
@@ -355,8 +454,16 @@ impl PartitioningConfig {
                     &mut num_constraints,
                     adjacency_idx.as_mut_ptr(),
                     adjacency.as_mut_ptr(),
-                    null_mut(),
-                    null_mut(),
+                    if let Some(mut w) = vertex_weight {
+                        w.as_mut_ptr()
+                    } else {
+                        null_mut()
+                    },
+                    if let Some(mut w) = vertex_size {
+                        w.as_mut_ptr()
+                    } else {
+                        null_mut()
+                    },
                     if let Some(mut w) = adjacency_weight {
                         w.as_mut_ptr()
                     } else {

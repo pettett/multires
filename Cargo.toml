@@ -5,6 +5,7 @@ members = [
 	"baker",
 	"common_renderer",
 	"renderer",
+	"renderer_bevy",
 	# "vk_renderer",
 	"ash_renderer",
 ]

@@ -22,8 +22,9 @@ use std::{fs, path, process};
 /// - if i even to (i+1,j+1).
 /// - else if i odd to (i-1, j-1).
 ///
-pub fn generate_triangle_plane<const N: usize, const M: usize>(
-) -> petgraph::Graph<(), (), petgraph::Undirected> {
+pub fn generate_triangle_plane_weighted<const N: usize, const M: usize, E>(
+    f: impl Fn(usize, usize) -> E,
+) -> petgraph::Graph<(), E, petgraph::Undirected> {
     let mut graph = petgraph::Graph::with_capacity(N * M, N * M * 3);
     // Add nodes
     let mut nodes = [[petgraph::graph::node_index(0); N]; M];
@@ -39,18 +40,26 @@ pub fn generate_triangle_plane<const N: usize, const M: usize>(
             let a = nodes[m][n];
 
             if n < N - 1 {
-                graph.update_edge(a, nodes[m][n + 1], ());
+                graph.update_edge(a, nodes[m][n + 1], f(a.index(), nodes[m][n + 1].index()));
 
                 if m < M - 1 && n % 2 == 0 {
-                    graph.update_edge(a, nodes[m + 1][n + 1], ());
+                    graph.update_edge(
+                        a,
+                        nodes[m + 1][n + 1],
+                        f(a.index(), nodes[m + 1][n + 1].index()),
+                    );
                 }
             }
 
             if n > 0 {
-                graph.update_edge(a, nodes[m][n - 1], ());
+                graph.update_edge(a, nodes[m][n - 1], f(a.index(), nodes[m][n - 1].index()));
 
                 if m > 0 && n % 2 == 1 {
-                    graph.update_edge(a, nodes[m - 1][n - 1], ());
+                    graph.update_edge(
+                        a,
+                        nodes[m - 1][n - 1],
+                        f(a.index(), nodes[m - 1][n - 1].index()),
+                    );
                 }
             }
         }
@@ -58,6 +67,12 @@ pub fn generate_triangle_plane<const N: usize, const M: usize>(
 
     graph
 }
+
+pub fn generate_triangle_plane<const N: usize, const M: usize>(
+) -> petgraph::Graph<(), (), petgraph::Undirected> {
+    generate_triangle_plane_weighted::<N, M, _>(|_, _| ())
+}
+
 #[derive(Default)]
 pub enum Label {
     Index,
@@ -96,16 +111,17 @@ where
     <G as petgraph::visit::Data>::EdgeWeight: fmt::Debug,
     <G as petgraph::visit::Data>::NodeWeight: fmt::Debug,
 {
-    let root = std::env::current_dir()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .to_owned();
+    let mut root = std::env::current_dir().unwrap();
+
+    #[cfg(test)]
+    {
+        root = root.parent().unwrap().to_owned();
+    }
 
     let dot_out_path = root.join("dot.gv");
     let out_path = root.join(out);
 
-    println!("Writing svg output to {out_path:?}");
+    fs::File::create(&out_path).context("Invalid out path")?;
 
     match &render {
         GraphSVGRender::Directed { node_label } => fs::write(
@@ -153,6 +169,7 @@ where
         .context("Failed to write undirected DOT output")?,
     };
 
+    println!("Rendering SVG...");
     let dot_out = match render {
         GraphSVGRender::Directed { .. } => {
             let mut c = process::Command::new("dot");
@@ -181,6 +198,8 @@ where
     );
 
     assert!(dot_out.status.success());
+
+    println!("Writing svg output to {out_path:?}");
 
     fs::write(&out_path, dot_out.stdout).context("Failed to write output SVG")?;
 

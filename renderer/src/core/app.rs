@@ -20,7 +20,7 @@ use common_renderer::components::{
     },
     transform::Transform,
 };
-use glam::{Quat, Vec3A};
+use glam::{Quat, Vec3, Vec3A};
 use winit::event::{KeyboardInput, WindowEvent};
 
 use super::{
@@ -71,7 +71,10 @@ impl App {
         );
 
         world.insert_resource(MultiResMeshRenderer {
-            error_calc: crate::components::gpu_multi_res_mesh::ErrorMode::ExactLayer,
+            error_calc: crate::components::gpu_multi_res_mesh::ErrorMode::PointDistance {
+                camera_point: Vec3::ZERO,
+                cam: Camera::new(1.0),
+            },
             error_target: 0.5,
             focus_part: 0,
             freeze: false,

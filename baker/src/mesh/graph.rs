@@ -1,5 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
+use petgraph::visit::EdgeRef;
+
 use super::winged_mesh::{FaceID, WingedMesh};
 
 impl WingedMesh {
@@ -76,7 +78,7 @@ impl WingedMesh {
     /// Generates a graph of all partitions and their neighbours.
     /// A partition neighbours another one iff there is some triangle in each that share an edge.
     /// We add an edge for each linking triangle, to record 'weights' for partitioning.
-    pub fn generate_cluster_graph(&self) -> petgraph::graph::UnGraph<(), ()> {
+    pub fn generate_cluster_graph(&self) -> petgraph::graph::UnGraph<i32, ()> {
         //TODO: Give lower weight to grouping partitions that have not been recently grouped, to ensure we are
         // constantly overwriting old borders with remeshes
 
@@ -88,12 +90,16 @@ impl WingedMesh {
 
         for p in 0..self.cluster_count() {
             // Each node should directly correspond to a partition
-            assert_eq!(p, graph.add_node(()).index());
+            assert_eq!(p, graph.add_node(0).index());
         }
 
-        //    let mut map: HashMap<usize, HashMap<usize, usize>> = HashMap::new();
+        //let mut map: HashMap<usize, HashMap<usize, usize>> = HashMap::new();
 
         for (_fid, face) in self.iter_faces() {
+            let n0 = petgraph::graph::NodeIndex::new(face.cluster_idx);
+
+            *graph.node_weight_mut(n0).unwrap() += 1;
+
             for e in self.iter_edge_loop(face.edge) {
                 if let Some(twin) = self.get_edge(e).twin {
                     let other_face = &self.get_face(self.get_edge(twin).face);
@@ -103,51 +109,81 @@ impl WingedMesh {
 
                     if face.cluster_idx != other_face.cluster_idx {
                         //*map.entry(c0).or_default().entry(c1).or_default() += 1;
-                        graph.add_edge(
-                            petgraph::graph::NodeIndex::new(face.cluster_idx),
-                            petgraph::graph::NodeIndex::new(other_face.cluster_idx),
-                            (),
-                        );
+
+                        let n1 = petgraph::graph::NodeIndex::new(other_face.cluster_idx);
+
+                        // let w = graph
+                        //     .find_edge(n0, n1)
+                        //     .map(|e| graph.edge_weight(e))
+                        //     .flatten();
+
+                        graph.add_edge(n0, n1, ());
                     }
                 }
             }
         }
 
-        //let mut min_count = 100000;
-        //let mut max_count = 0;
-        //for (c0, connectings) in &map {
-        //    for (c1, &count) in connectings {
-        //        min_count = min_count.min(count);
-        //        max_count = max_count.max(count);
-        //    }
-        //}
-        //
-        //println!("{min_count} - {max_count}");
-        //
-        //let mid1 = (min_count + max_count * 3) / 4;
-        //let mid2 = (min_count * 3 + max_count) / 4;
-        //
-        //for (c0, connectings) in map {
-        //    for (c1, count) in connectings {
-        //        // Add an edge for *each* shared edge, recording how
-        //        // linked the two partitions are (how much 'cruft' is shared)
-        //
-        //        let num = if count > mid1 {
-        //            5
-        //        } else if count > mid2 {
-        //            1
-        //        } else {
-        //            1
-        //        };
-        //        for _ in 0..num {
-        //            graph.add_edge(
-        //                petgraph::graph::NodeIndex::new(c0),
-        //                petgraph::graph::NodeIndex::new(c1),
-        //                (),
-        //            );
-        //        }
-        //    }
-        //}
+        // // Add extra connections on the highest weighted neighbour for each node
+        // for n in graph.node_indices() {
+        //     let total: i32 = graph.edges(n).map(|x| x.weight()).sum();
+
+        //     let edges = graph
+        //         .edges(n)
+        //         .map(|e| (e.source(), e.target(), *e.weight()))
+        //         .collect::<Vec<_>>();
+
+        //     let len = edges.len() as i32;
+
+        //     let avg = total / len;
+
+        //     for (src, tgt, w) in edges {
+        //         if w > avg {
+        //             graph.add_edge(src, tgt, 0);
+        //         }
+        //         if w * 2 > avg * 3 {
+        //             graph.add_edge(src, tgt, 0);
+        //         }
+        //         if w > total * 2 {
+        //             graph.add_edge(src, tgt, 0);
+        //         }
+        //     }
+        // }
+
+        // let mut min_count = 100000;
+        // let mut max_count = 0;
+        // for (c0, connectings) in &map {
+        //     for (c1, &count) in connectings {
+        //         min_count = min_count.min(count);
+        //         max_count = max_count.max(count);
+        //     }
+        // }
+
+        // println!("{min_count} - {max_count}");
+
+        // let mid1 = (min_count + max_count * 3) / 4;
+        // let mid2 = (min_count * 3 + max_count) / 4;
+
+        // for (c0, connectings) in map {
+        //     for (c1, count) in connectings {
+        //         // Add an edge for *each* shared edge, recording how
+        //         // linked the two partitions are (how much 'cruft' is shared)
+
+        //         let num = if count > mid1 {
+        //             2
+        //         } else if count > mid2 {
+        //             1
+        //         } else {
+        //             1
+        //         };
+        //         for _ in 0..num {
+        //             graph.add_edge(
+        //                 petgraph::graph::NodeIndex::new(c0),
+        //                 petgraph::graph::NodeIndex::new(c1),
+        //                 (),
+        //             );
+        //         }
+        //     }
+        // }
 
         graph
     }

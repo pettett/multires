@@ -382,3 +382,111 @@ pub mod tests {
         Ok(())
     }
 }
+
+// //std::mem::swap(&mut self.groups, &mut new_groups);
+
+// let mut cluster_partitioning =
+//     config.partition_onto_graph(group_count as u32, &cluster_graph)?;
+
+// // Tell each partition what group they now belong to.
+// if group_count != 1 {
+//     let mut occupancies = vec![Vec::new(); group_count];
+
+//     for (cluster, &group) in cluster_partitioning.node_weights().enumerate() {
+//         occupancies[group].push(cluster);
+//     }
+//     let mut fail = 0;
+//     let mut min_group = 10;
+//     let mut max_group = 0;
+//     for (group, clusters) in occupancies.into_iter().enumerate() {
+//         let o = clusters.len();
+
+//         if o >= 5 || (o <= 3 && o != 0) {
+//             fail += 1;
+//             min_group = min_group.min(o);
+//             max_group = max_group.max(o);
+
+//             if o >= 15 {
+//                 // Split group into smaller sections
+//                 let groups = o.div_ceil(4);
+
+//                 // Take a snapshot of the graph for this
+
+//                 let snapshot = cluster_partitioning.filter_map(
+//                     |i, &n| if n == group { Some(i) } else { None },
+//                     // Want a random clean grouping at this point, so ignore added edges
+//                     |i, &e| Some(()),
+//                 );
+
+//                 let part = config.partition_from_graph(groups as _, &snapshot)?;
+
+//                 let mut part_map = vec![group];
+//                 for _ in 1..groups {
+//                     part_map.push(group_count);
+//                     group_count += 1;
+//                 }
+
+//                 println!("Split 1 large group into {groups}: {part:?}");
+
+//                 // Re-apply grouping from subdivided group
+//                 for (i, p) in part.into_iter().enumerate() {
+//                     *cluster_partitioning
+//                         .node_weight_mut(
+//                             *snapshot
+//                                 .node_weight(petgraph::graph::node_index(i))
+//                                 .unwrap(),
+//                         )
+//                         .unwrap() = part_map[p as usize];
+//                 }
+//             }
+//         } else {
+//             let tri_count: i32 = clusters
+//                 .iter()
+//                 .map(|&i| {
+//                     cluster_graph
+//                         .node_weight(petgraph::graph::node_index(i))
+//                         .unwrap()
+//                 })
+//                 .sum();
+
+//             assert!(
+//                 tri_count < MAX_TRIS_PER_CLUSTER as i32 * 4,
+//                 "Too many triangles in group of {clusters:?}: {tri_count}"
+//             );
+//         }
+//     }
+
+//     if fail > 0 {
+//         println!(
+//             "Failed to group graph with {fail} invalid groups. {min_group}/{max_group}"
+//         );
+
+//         // petgraph_to_svg(
+//         //     &cluster_partitioning,
+//         //     "svg\\group_clustering_failure.svg",
+//         //     &|_, (i, _)| {
+//         //         format!(
+//         //             "color={}",
+//         //             common::graph::COLS[*cluster_partitioning.node_weight(i).unwrap()
+//         //                 as usize
+//         //                 % common::graph::COLS.len()]
+//         //         )
+//         //     },
+//         //     common::graph::GraphSVGRender::Undirected {
+//         //         positions: false,
+//         //         edge_label: common::graph::Label::None,
+//         //     },
+//         // )
+//         // .unwrap();
+
+//         //panic!("Failed to group graph with {fail} invalid groups");
+//     }
+
+//     for (cluster, &group) in cluster_partitioning.node_weights().enumerate() {
+//         self.clusters[cluster].group_index = group;
+//     }
+// } else {
+//     for p in &mut self.clusters {
+//         p.group_index = 0;
+//     }
+// };

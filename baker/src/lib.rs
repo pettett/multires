@@ -10,6 +10,11 @@ use mesh::winged_mesh::WingedMesh;
 
 // use meshopt::VertexDataAdapter;
 
+const CLUSTERS_PER_SIMPLIFIED_GROUP: usize = 2;
+const STARTING_CLUSTER_SIZE: usize = 120;
+//TODO: Curb random sized groups and the like to bring this number to more reasonable amounts
+const MAX_TRIS_PER_CLUSTER: usize = STARTING_CLUSTER_SIZE * 3;
+
 pub fn to_mesh_layer(mesh: &WingedMesh, verts: &[Vec4]) -> MeshLevel {
     MeshLevel {
         partition_indices: mesh.get_partition(),
@@ -31,7 +36,7 @@ pub fn group_and_partition_full_res(mut working_mesh: WingedMesh, verts: &[Vec4]
 
     // Apply primary partition, that will define the lowest level clusterings
     working_mesh
-        .partition_full_mesh(&config, working_mesh.vert_count().div_ceil(60) as _)
+        .partition_full_mesh(&config, working_mesh.vert_count().div_ceil(40) as _)
         .unwrap();
 
     working_mesh.group(&config, &verts).unwrap();
@@ -96,9 +101,35 @@ pub fn group_and_partition_full_res(mut working_mesh: WingedMesh, verts: &[Vec4]
 }
 
 pub fn group_and_partition_and_simplify(mut mesh: WingedMesh, verts: &[Vec4], name: String) {
-    let config = &metis::PartitioningConfig {
+    let triangle_clustering_config = &metis::PartitioningConfig {
         method: metis::PartitioningMethod::MultilevelKWay,
         force_contiguous_partitions: true,
+        //u_factor: Some(10),
+        //minimize_subgraph_degree: Some(true), // this will sometimes break contiguous partitions
+        ..Default::default()
+    };
+
+    let group_clustering_config = &metis::PartitioningConfig {
+        method: metis::PartitioningMethod::MultilevelRecursiveBisection,
+        force_contiguous_partitions: true,
+        //u_factor: Some(1),
+        //objective_type: Some(metis::ObjectiveType::Volume),
+        minimize_subgraph_degree: Some(true), // this will sometimes break contiguous partitions
+        ..Default::default()
+    };
+
+    let grouping_config = &metis::PartitioningConfig {
+        method: metis::PartitioningMethod::MultilevelKWay,
+        force_contiguous_partitions: true,
+        //objective_type: Some(metis::ObjectiveType::Volume),
+        //u_factor: Some(10), // Strictly require very similar partition sizes
+        //partitioning_attempts: Some(3),
+        //separator_attempts: Some(3),
+        //two_hop_matching: Some(true),
+        //initial_partitioning: Some(metis::InitialPartitioningAlgorithm::RandomRefined),
+        //refinement: Some(metis::RefinementAlgorithm::TwoSidedFm),
+        //refinement_iterations: Some(30),
+        //coarsening: Some(metis::CoarseningScheme::SortedHeavyEdgeMatching),
         //minimize_subgraph_degree: Some(true), // this will sometimes break contiguous partitions
         ..Default::default()
     };
@@ -106,10 +137,13 @@ pub fn group_and_partition_and_simplify(mut mesh: WingedMesh, verts: &[Vec4], na
     let mut quadrics = mesh.create_quadrics(verts);
 
     // Apply primary partition, that will define the lowest level clusterings
-    mesh.partition_full_mesh(config, mesh.face_count().div_ceil(60) as _)
-        .unwrap();
+    mesh.partition_full_mesh(
+        triangle_clustering_config,
+        mesh.face_count().div_ceil(STARTING_CLUSTER_SIZE) as _,
+    )
+    .unwrap();
 
-    mesh.group(config, &verts).unwrap();
+    mesh.group(grouping_config, &verts).unwrap();
 
     let mut layers = Vec::new();
 
@@ -125,7 +159,21 @@ pub fn group_and_partition_and_simplify(mut mesh: WingedMesh, verts: &[Vec4], na
         // We must regenerate the queue each time, as boundaries change.
 
         // Each group requires half it's triangles removed
-        let collapse_requirements: Vec<usize> = mesh.groups.iter().map(|g| g.tris / 4).collect();
+
+        let collapse_requirements: Vec<usize> = mesh
+            .groups
+            .iter()
+            .map(|g| {
+                let halved_tris = g.tris / 2;
+                let tris_to_remove_for_cluster_max = g
+                    .tris
+                    .saturating_sub(MAX_TRIS_PER_CLUSTER * CLUSTERS_PER_SIMPLIFIED_GROUP);
+
+                // Each operation removes 2 triangles.
+                // Do whichever we need to bring ourselves down to the limit. Error function will make up for variations in density
+                halved_tris.max(tris_to_remove_for_cluster_max).div_ceil(2)
+            })
+            .collect();
 
         mesh.age();
 
@@ -159,7 +207,11 @@ pub fn group_and_partition_and_simplify(mut mesh: WingedMesh, verts: &[Vec4], na
 
         //layers.push(to_mesh_layer(&working_mesh, &verts));
 
-        let partition_count = match mesh.partition_within_groups(&config, Some(2), None) {
+        let partition_count = match mesh.partition_within_groups(
+            &group_clustering_config,
+            Some(CLUSTERS_PER_SIMPLIFIED_GROUP as _),
+            None,
+        ) {
             Ok(partition_count) => partition_count,
             Err(e) => {
                 println!("{}", e);
@@ -171,7 +223,7 @@ pub fn group_and_partition_and_simplify(mut mesh: WingedMesh, verts: &[Vec4], na
 
         println!("{partition_count} Partitions from groups");
 
-        let group_count = mesh.group(&config, &verts).unwrap();
+        let group_count = mesh.group(&grouping_config, &verts).unwrap();
 
         // view a snapshot of the mesh ready to create the next layer
         // let error = (1.0 + i as f32) / 10.0 + rng.gen_range(-0.05..0.05);
@@ -186,7 +238,16 @@ pub fn group_and_partition_and_simplify(mut mesh: WingedMesh, verts: &[Vec4], na
         }
     }
 
-    println!("Done with partitioning");
+    let mut min_tris = 10000;
+    let mut max_tris = 0;
+    for l in &layers {
+        for m in &l.submeshes {
+            min_tris = min_tris.min(m.indices.len() / 3);
+            max_tris = max_tris.max(m.indices.len() / 3);
+        }
+    }
+
+    println!("Done with partitioning. Min tris: {min_tris}, Max tris: {max_tris}");
 
     //assert_eq!(partitions1.len() * 3, layer_1_indices.len());
 
