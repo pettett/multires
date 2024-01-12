@@ -361,7 +361,7 @@ pub mod tests {
             minimize_subgraph_degree: Some(true),
             ..Default::default()
         };
-        let (mut mesh, verts) = WingedMesh::from_gltf(TEST_MESH_LOW);
+        let (mut mesh, verts, norms) = WingedMesh::from_gltf(TEST_MESH_LOW);
 
         mesh.partition_full_mesh(test_config, 200)?;
         mesh.group(test_config, &verts)?;

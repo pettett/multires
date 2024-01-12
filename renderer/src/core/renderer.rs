@@ -11,6 +11,7 @@ use bevy_ecs::entity::Entity;
 use bevy_ecs::event::EventReader;
 use bevy_ecs::system::{Commands, NonSend, NonSendMut, Query, Res, ResMut, Resource};
 use common::tri_mesh::TriMesh;
+use common::MeshVert;
 use common_renderer::components::camera::Camera;
 use common_renderer::components::camera_controller::CameraController;
 use common_renderer::components::transform::Transform;
@@ -28,8 +29,9 @@ pub struct Renderer {
     size: winit::dpi::PhysicalSize<u32>,
     window: Window,
     camera_buffer: BufferGroup<1>,
-    render_pipeline: wgpu::RenderPipeline,
-    render_pipeline_wire: wgpu::RenderPipeline,
+    pub render_pipeline: wgpu::RenderPipeline,
+    pub render_pipeline_pbr: wgpu::RenderPipeline,
+    pub render_pipeline_wire: wgpu::RenderPipeline,
     pub culling_compute_pipeline: wgpu::ComputePipeline,
     pub compacting_compute_pipeline: wgpu::ComputePipeline,
     depth_texture: Texture,
@@ -102,6 +104,8 @@ impl Renderer {
         surface.configure(&device, &config);
 
         let shader = device.create_shader_module(wgpu::include_wgsl!("../shaders/shader.wgsl"));
+        let pbr_shader =
+            device.create_shader_module(wgpu::include_wgsl!("../shaders/pbr_shader.wgsl"));
 
         let cull_meshlets_shader =
             device.create_shader_module(wgpu::include_wgsl!("../shaders/should_draw.wgsl"));
@@ -303,6 +307,15 @@ impl Renderer {
             wgpu::PolygonMode::Fill,
             Some(wgpu::Face::Back),
         );
+
+        let render_pipeline_pbr = make_render_pipeline(
+            &device,
+            &render_pipeline_layout,
+            &pbr_shader,
+            config.format,
+            wgpu::PolygonMode::Fill,
+            Some(wgpu::Face::Back),
+        );
         let render_pipeline_wire = make_render_pipeline(
             &device,
             &render_pipeline_layout,
@@ -356,6 +369,7 @@ impl Renderer {
             surface_format,
             depth_texture,
             render_pipeline,
+            render_pipeline_pbr,
             render_pipeline_wire,
             camera_buffer,
             mesh_index: 0,
@@ -392,12 +406,7 @@ impl Renderer {
     pub fn config(&self) -> &wgpu::SurfaceConfiguration {
         &self.config
     }
-    pub fn render_pipeline(&self) -> &wgpu::RenderPipeline {
-        &self.render_pipeline
-    }
-    pub fn render_pipeline_wire(&self) -> &wgpu::RenderPipeline {
-        &self.render_pipeline_wire
-    }
+
     pub fn camera_buffer(&self) -> &BufferGroup<1> {
         &self.camera_buffer
     }
@@ -426,7 +435,7 @@ fn make_render_pipeline(
         vertex: wgpu::VertexState {
             module,
             entry_point: "vs_main", // 1.
-            buffers: &[<[f32; 4]>::desc()],
+            buffers: &[<MeshVert>::desc()],
         },
         fragment: Some(wgpu::FragmentState {
             // 3.

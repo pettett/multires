@@ -250,7 +250,7 @@ pub mod test {
             ..Default::default()
         };
         let mesh = TEST_MESH_PLANE_LOW;
-        let (mut mesh, verts) = WingedMesh::from_gltf(mesh);
+        let (mut mesh, verts, norms) = WingedMesh::from_gltf(mesh);
 
         // Apply primary partition, that will define the lowest level clusterings
         mesh.partition_full_mesh(test_config, 9)?;
@@ -323,7 +323,7 @@ pub mod test {
             ..Default::default()
         };
         let mesh = TEST_MESH_PLANE_LOW;
-        let (mut mesh, _verts) = WingedMesh::from_gltf(mesh);
+        let (mut mesh, _verts, norms) = WingedMesh::from_gltf(mesh);
 
         println!("Faces: {}, Verts: {}", mesh.face_count(), mesh.vert_count());
 
@@ -351,7 +351,7 @@ pub mod test {
             ..Default::default()
         };
         let mesh = TEST_MESH_LOW;
-        let (mut mesh, verts) = WingedMesh::from_gltf(mesh);
+        let (mut mesh, verts, norms) = WingedMesh::from_gltf(mesh);
 
         println!("Faces: {}, Verts: {}", mesh.face_count(), mesh.vert_count());
 

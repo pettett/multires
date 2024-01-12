@@ -87,7 +87,7 @@ fn test_determinacy() {
     let mesh_name = "../../assets/rock.glb";
 
     println!("Loading from gltf!");
-    let (mut mesh1, verts) = WingedMesh::from_gltf(mesh_name);
+    let (mut mesh1, verts, norms) = WingedMesh::from_gltf(mesh_name);
 
     let mut mesh0 = mesh1.clone();
 

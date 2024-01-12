@@ -469,7 +469,7 @@ mod tests {
     // Test that each face generates a valid plane
     #[test]
     pub fn test_planes() -> Result<(), Box<dyn Error>> {
-        let (mesh, verts) = WingedMesh::from_gltf(TEST_MESH_HIGH);
+        let (mesh, verts, norms) = WingedMesh::from_gltf(TEST_MESH_HIGH);
 
         // These operations are not especially accurate, large epsilon value
         let e = 0.000001;
@@ -497,7 +497,7 @@ mod tests {
     // Test that each face/plane generates an equivalent quadric matrix
     #[test]
     pub fn test_plane_quadrics() -> Result<(), Box<dyn Error>> {
-        let (mesh, verts) = WingedMesh::from_gltf(TEST_MESH_HIGH);
+        let (mesh, verts, norms) = WingedMesh::from_gltf(TEST_MESH_HIGH);
 
         // These operations are not especially accurate, large epsilon value, only valid for errors within around 50 units.
         let e = 0.001;
@@ -546,7 +546,7 @@ mod tests {
     // Test that each vertex generates a valid quadric matrix that returns 0 at itself.
     #[test]
     pub fn test_vert_quadrics() -> Result<(), Box<dyn Error>> {
-        let (mesh, verts) = WingedMesh::from_gltf(TEST_MESH_MONK);
+        let (mesh, verts, norms) = WingedMesh::from_gltf(TEST_MESH_MONK);
 
         let e = 0.0000000001;
 
@@ -575,7 +575,7 @@ mod tests {
 
     #[test]
     pub fn test_reduction() -> Result<(), Box<dyn Error>> {
-        let (mut mesh, verts) = WingedMesh::from_gltf(TEST_MESH_MONK);
+        let (mut mesh, verts, norms) = WingedMesh::from_gltf(TEST_MESH_MONK);
         let mut quadrics = mesh.create_quadrics(&verts);
 
         for _i in 0..4 {

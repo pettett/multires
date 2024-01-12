@@ -2,7 +2,7 @@ use std::{thread, time::Instant};
 
 use crate::{
     components::gpu_multi_res_mesh::{
-        ClusterComponent, ErrorMode, MultiResMeshComponent, MultiResMeshRenderer,
+        ClusterComponent, DrawMode, ErrorMode, MultiResMeshComponent, MultiResMeshRenderer,
     },
     core::Renderer,
 };
@@ -137,6 +137,17 @@ impl Gui {
                                 ErrorMode::ExactLayer,
                                 "Exact Layer",
                             );
+                        });
+
+                    egui::ComboBox::from_label("Draw Mode ")
+                        .selected_text(format!("{:?}", &mut mesh_renderer.draw_mode))
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(
+                                &mut mesh_renderer.draw_mode,
+                                DrawMode::Clusters,
+                                "Clusters",
+                            );
+                            ui.selectable_value(&mut mesh_renderer.draw_mode, DrawMode::Pbr, "Pbr");
                         });
 
                     ui.add(

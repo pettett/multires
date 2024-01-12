@@ -3,7 +3,9 @@ use std::sync::Arc;
 use crate::{
     components::{
         camera_uniform::{update_view_proj, CameraUniform},
-        gpu_multi_res_mesh::{MultiResMeshAsset, MultiResMeshComponent, MultiResMeshRenderer},
+        gpu_multi_res_mesh::{
+            DrawMode, MultiResMeshAsset, MultiResMeshComponent, MultiResMeshRenderer,
+        },
     },
     gui::gui::Gui,
 };
@@ -75,6 +77,7 @@ impl App {
                 camera_point: Vec3::ZERO,
                 cam: Camera::new(1.0),
             },
+            draw_mode: DrawMode::Clusters,
             error_target: 0.5,
             focus_part: 0,
             freeze: false,

@@ -77,10 +77,17 @@ impl SubMesh {
     }
 }
 
+#[repr(C)]
+#[derive(Clone, Decode, Encode, bytemuck::Pod, bytemuck::Zeroable, Copy)]
+pub struct MeshVert {
+    pub pos: [f32; 4],
+    pub normal: [f32; 4],
+}
+
 #[derive(Clone, Decode, Encode)]
 pub struct MultiResMesh {
     pub name: String,
-    pub verts: Vec<[f32; 4]>,
+    pub verts: Vec<MeshVert>,
     pub lods: Vec<MeshLevel>,
 }
 

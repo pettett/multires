@@ -44,6 +44,12 @@ pub enum ErrorMode {
     MaxError,
     ExactLayer,
 }
+#[derive(PartialEq, Clone, Debug)]
+pub enum DrawMode {
+    Clusters,
+    //Triangles,
+    Pbr,
+}
 
 impl Debug for ErrorMode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -89,6 +95,7 @@ pub struct MultiResMeshRenderer {
     pub error_target: f32,
     pub focus_part: usize,
     pub freeze: bool,
+    pub draw_mode: DrawMode,
     pub show_wire: bool,
     pub show_solid: bool,
     pub show_bounds: bool,
@@ -308,12 +315,17 @@ impl MultiResMeshComponent {
         render_pass.set_bind_group(2, self.model.bind_group(), &[]);
 
         if mesh_renderer.show_solid {
-            render_pass.set_pipeline(renderer.render_pipeline());
+            let pipeline = match mesh_renderer.draw_mode {
+                DrawMode::Clusters => &renderer.render_pipeline,
+                DrawMode::Pbr => &renderer.render_pipeline_pbr,
+            };
+
+            render_pass.set_pipeline(pipeline);
 
             render_pass.draw_indexed_indirect(self.result_indices_buffer.get_buffer(1), 0);
         }
         if mesh_renderer.show_wire {
-            render_pass.set_pipeline(renderer.render_pipeline_wire());
+            render_pass.set_pipeline(&renderer.render_pipeline_wire);
 
             render_pass.draw_indexed_indirect(self.result_indices_buffer.get_buffer(1), 0);
         }
@@ -322,7 +334,7 @@ impl MultiResMeshComponent {
         if mesh_renderer.show_bounds {
             render_pass.set_vertex_buffer(0, renderer.sphere_gizmo.verts.slice(..));
 
-            render_pass.set_pipeline(renderer.render_pipeline_wire());
+            render_pass.set_pipeline(&renderer.render_pipeline_wire);
 
             for (_, submesh) in submeshes.iter() {
                 if submesh.cluster_layer_idx == mesh_renderer.focus_part {

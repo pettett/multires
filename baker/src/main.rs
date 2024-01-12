@@ -6,7 +6,7 @@ fn main() {
     //let mesh_name = "../assets/sphere.glb";
 
     println!("Loading from gltf!");
-    let (mut mesh, verts) = WingedMesh::from_gltf(mesh_name);
+    let (mut mesh, verts, normals) = WingedMesh::from_gltf(mesh_name);
 
     let num_contiguous = mesh.partition_contiguous();
 
@@ -15,5 +15,5 @@ fn main() {
     assert_eq!(num_contiguous, 1);
     //group_and_partition_full_res(working_mesh, &verts, mesh_name.to_owned());
     //apply_simplification(working_mesh, &verts, mesh_name.to_owned());
-    group_and_partition_and_simplify(mesh, &verts, mesh_name.to_owned());
+    group_and_partition_and_simplify(mesh, &verts, &normals, mesh_name.to_owned());
 }

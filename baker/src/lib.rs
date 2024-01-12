@@ -3,7 +3,7 @@ pub mod pidge;
 
 use std::collections::BTreeSet;
 
-use common::{asset::Asset, MeshLevel, MultiResMesh, SubMesh};
+use common::{asset::Asset, MeshLevel, MeshVert, MultiResMesh, SubMesh};
 
 use glam::Vec4;
 use mesh::winged_mesh::WingedMesh;
@@ -92,7 +92,13 @@ pub fn group_and_partition_full_res(mut working_mesh: WingedMesh, verts: &[Vec4]
 
     MultiResMesh {
         name,
-        verts: verts.iter().map(|v| [v.x, v.y, v.z, 1.0]).collect(),
+        verts: verts
+            .iter()
+            .map(|v| MeshVert {
+                pos: [v.x, v.y, v.z, 1.0],
+                normal: [0.0; 4],
+            })
+            .collect(),
         // layer_1_indices: indices.clone(),
         lods: layers,
     }
@@ -100,7 +106,12 @@ pub fn group_and_partition_full_res(mut working_mesh: WingedMesh, verts: &[Vec4]
     .unwrap();
 }
 
-pub fn group_and_partition_and_simplify(mut mesh: WingedMesh, verts: &[Vec4], name: String) {
+pub fn group_and_partition_and_simplify(
+    mut mesh: WingedMesh,
+    verts: &[Vec4],
+    normals: &[Vec4],
+    name: String,
+) {
     let triangle_clustering_config = &metis::PartitioningConfig {
         method: metis::PartitioningMethod::MultilevelKWay,
         force_contiguous_partitions: true,
@@ -255,7 +266,14 @@ pub fn group_and_partition_and_simplify(mut mesh: WingedMesh, verts: &[Vec4], na
 
     MultiResMesh {
         name,
-        verts: verts.iter().map(|v| [v.x, v.y, v.z, 1.0]).collect(),
+        verts: verts
+            .iter()
+            .zip(normals)
+            .map(|(v, n)| MeshVert {
+                pos: [v.x, v.y, v.z, 1.0],
+                normal: [n.x, n.y, n.z, 1.0],
+            })
+            .collect(),
         // layer_1_indices: indices.clone(),
         lods: layers,
     }
@@ -318,7 +336,13 @@ pub fn apply_simplification(mut mesh: WingedMesh, verts: &[Vec4], name: String) 
 
     MultiResMesh {
         name,
-        verts: verts.iter().map(|v| [v.x, v.y, v.z, 1.0]).collect(),
+        verts: verts
+            .iter()
+            .map(|v| MeshVert {
+                pos: [v.x, v.y, v.z, 1.0],
+                normal: [0.0; 4],
+            })
+            .collect(),
         // layer_1_indices: indices.clone(),
         lods: layers,
     }
@@ -445,7 +469,7 @@ mod test {
     #[test]
     fn test_contiguous_meshes() {
         println!("Loading from gltf!");
-        let (mesh, _verts) = WingedMesh::from_gltf("../../assets/dragon_1m.glb");
+        let (mesh, _verts, norms) = WingedMesh::from_gltf("../../assets/dragon_1m.glb");
 
         let mesh_dual = mesh.generate_face_graph();
 
@@ -458,16 +482,16 @@ mod test {
         let mesh_name = "../../assets/torrin_main.glb";
 
         println!("Loading from gltf!");
-        let (mesh, verts) = WingedMesh::from_gltf(mesh_name);
+        let (mesh, verts, norms) = WingedMesh::from_gltf(mesh_name);
 
         //group_and_partition_full_res(working_mesh, &verts, mesh_name.to_owned());
         //apply_simplification(working_mesh, &verts, mesh_name.to_owned());
-        group_and_partition_and_simplify(mesh, &verts, mesh_name.to_owned());
+        group_and_partition_and_simplify(mesh, &verts, &norms, mesh_name.to_owned());
     }
 
     #[test]
     fn test_apply_simplification() {
-        let (mesh, verts) = WingedMesh::from_gltf(TEST_MESH_CONE);
+        let (mesh, verts, norms) = WingedMesh::from_gltf(TEST_MESH_CONE);
 
         // WE know the circle is contiguous
         //assert_contiguous_graph(&working_mesh.generate_face_graph());
