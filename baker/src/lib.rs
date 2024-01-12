@@ -11,9 +11,9 @@ use mesh::winged_mesh::WingedMesh;
 // use meshopt::VertexDataAdapter;
 
 const CLUSTERS_PER_SIMPLIFIED_GROUP: usize = 2;
-const STARTING_CLUSTER_SIZE: usize = 120;
+const STARTING_CLUSTER_SIZE: usize = 280;
 //TODO: Curb random sized groups and the like to bring this number to more reasonable amounts
-const MAX_TRIS_PER_CLUSTER: usize = STARTING_CLUSTER_SIZE * 3;
+const MAX_TRIS_PER_CLUSTER: usize = 370;
 
 pub fn to_mesh_layer(mesh: &WingedMesh, verts: &[Vec4]) -> MeshLevel {
     MeshLevel {
@@ -119,10 +119,10 @@ pub fn group_and_partition_and_simplify(mut mesh: WingedMesh, verts: &[Vec4], na
     };
 
     let grouping_config = &metis::PartitioningConfig {
-        method: metis::PartitioningMethod::MultilevelKWay,
+        method: metis::PartitioningMethod::MultilevelRecursiveBisection,
         force_contiguous_partitions: true,
         //objective_type: Some(metis::ObjectiveType::Volume),
-        //u_factor: Some(10), // Strictly require very similar partition sizes
+        u_factor: Some(100), // Strictly require very similar partition sizes
         //partitioning_attempts: Some(3),
         //separator_attempts: Some(3),
         //two_hop_matching: Some(true),
@@ -130,7 +130,7 @@ pub fn group_and_partition_and_simplify(mut mesh: WingedMesh, verts: &[Vec4], na
         //refinement: Some(metis::RefinementAlgorithm::TwoSidedFm),
         //refinement_iterations: Some(30),
         //coarsening: Some(metis::CoarseningScheme::SortedHeavyEdgeMatching),
-        //minimize_subgraph_degree: Some(true), // this will sometimes break contiguous partitions
+        minimize_subgraph_degree: Some(true), // this will sometimes break contiguous partitions
         ..Default::default()
     };
 
@@ -167,11 +167,13 @@ pub fn group_and_partition_and_simplify(mut mesh: WingedMesh, verts: &[Vec4], na
                 let halved_tris = g.tris / 2;
                 let tris_to_remove_for_cluster_max = g
                     .tris
-                    .saturating_sub(MAX_TRIS_PER_CLUSTER * CLUSTERS_PER_SIMPLIFIED_GROUP);
+                    .saturating_sub(MAX_TRIS_PER_CLUSTER * CLUSTERS_PER_SIMPLIFIED_GROUP - 25);
 
                 // Each operation removes 2 triangles.
                 // Do whichever we need to bring ourselves down to the limit. Error function will make up for variations in density
-                halved_tris.max(tris_to_remove_for_cluster_max).div_ceil(2)
+                tris_to_remove_for_cluster_max
+                    .max(tris_to_remove_for_cluster_max)
+                    .div_ceil(2)
             })
             .collect();
 

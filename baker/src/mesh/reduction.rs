@@ -370,14 +370,17 @@ impl WingedMesh {
             //#[cfg(feature = "progress")]
             //bar.set_message(format!("{err:.3e}"));
 
-            'outer: for _i in 0..requirement {
+            'outer: for i in 0..requirement {
                 let (orig, dest, eid, err) = loop {
                     let (_, Error(cmp::Reverse(err), eid)) = match collapse_queues[qi].queue.pop() {
                         Some(err) => err,
                         None => {
                             // FIXME: how to handle early exits
                             #[cfg(feature = "progress")]
-                            bar.println("Out of valid edges - Exiting early from de-meshing");
+                            bar.println(format!(
+                                "Out of valid edges - Exiting early from de-meshing with {} to go",
+                                requirement - i - 1
+                            ));
                             break 'outer;
                         }
                     };

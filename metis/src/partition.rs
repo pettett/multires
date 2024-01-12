@@ -150,7 +150,7 @@ pub struct PartitioningConfig {
     pub compress_graph: Option<bool>,
     /// Specifies if the connected components of the graph should first be identified and ordered separately.
     /// `METIS_OPTION_CCORDER`
-    pub order_contiguous_components: Option<bool>,
+    // pub order_contiguous_components: Option<bool>,
     /// Specifies the minimum degree of the vertices that will be ordered last. (See manual.pdf for details)
     /// `METIS_OPTION_PFACTOR`
     pub p_factor: Option<i32>,
@@ -175,7 +175,7 @@ impl Default for PartitioningConfig {
             two_hop_matching: None,
             force_contiguous_partitions: true,
             compress_graph: Some(false),
-            order_contiguous_components: None,
+            //order_contiguous_components: None,
             p_factor: None,
             u_factor: None,
         }
@@ -232,9 +232,9 @@ impl PartitioningConfig {
             options[moptions_et_METIS_OPTION_COMPRESS as usize] = idx_t::from(x);
         }
 
-        if let Some(x) = self.order_contiguous_components {
-            options[moptions_et_METIS_OPTION_CCORDER as usize] = idx_t::from(x);
-        }
+        //if let Some(x) = self.order_contiguous_components {
+        //    options[moptions_et_METIS_OPTION_CCORDER as usize] = idx_t::from(x);
+        //}
 
         if let Some(x) = self.p_factor {
             options[moptions_et_METIS_OPTION_PFACTOR as usize] = x as _;
@@ -265,6 +265,10 @@ impl PartitioningConfig {
         partitions: u32,
         graph: &petgraph::graph::UnGraph<V, E>,
     ) -> Result<Vec<idx_t>, PartitioningError> {
+        if partitions == 1 {
+            return Ok(vec![0; graph.node_count()]);
+        }
+
         let mut adjacency = Vec::with_capacity(graph.edge_count());
         let mut adjacency_idx = Vec::with_capacity(graph.node_count());
         //TODO: It may be possible for the neighbours to be duplicated, investigate
@@ -304,7 +308,7 @@ impl PartitioningConfig {
         graph: &petgraph::graph::UnGraph<idx_t, E>,
     ) -> Result<Vec<idx_t>, PartitioningError> {
         let mut adjacency = Vec::with_capacity(graph.edge_count());
-        let mut adjacency_idx = Vec::with_capacity(graph.node_count());
+        let mut adjacency_idx = Vec::with_capacity(graph.node_count() + 1);
         let mut vertex_sizes = Vec::with_capacity(graph.node_count());
         //TODO: It may be possible for the neighbours to be duplicated, investigate
         for v in graph.node_indices() {
@@ -344,9 +348,10 @@ impl PartitioningConfig {
         partitions: u32,
         graph: &petgraph::graph::UnGraph<V, idx_t>,
     ) -> Result<Vec<idx_t>, PartitioningError> {
-        let mut adjacency = Vec::with_capacity(graph.edge_count());
-        let mut adjacency_weight = Vec::with_capacity(graph.edge_count());
-        let mut adjacency_idx = Vec::with_capacity(graph.node_count());
+        let mut adjacency = Vec::with_capacity(2 * graph.edge_count());
+        let mut adjacency_weight = Vec::with_capacity(2 * graph.edge_count());
+
+        let mut adjacency_idx = Vec::with_capacity(graph.node_count() + 1);
         //TODO: It may be possible for the neighbours to be duplicated, investigate
         for v in graph.node_indices() {
             assert_eq!(v.index(), adjacency_idx.len());
@@ -405,7 +410,6 @@ impl PartitioningConfig {
         unsafe {
             METIS_SetDefaultOptions(&mut options as *mut idx_t);
         }
-        let _o = options.clone();
         self.apply(&mut options);
 
         //println!("{:?} \n {:?}", o, options);

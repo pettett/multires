@@ -1,5 +1,7 @@
 use std::collections::BTreeSet;
 
+use crate::MAX_TRIS_PER_CLUSTER;
+
 use super::winged_mesh::WingedMesh;
 use common::graph::petgraph_to_svg;
 use glam::Vec4Swizzles;
@@ -95,7 +97,13 @@ impl WingedMesh {
             occupancies[face.cluster_idx] += 1;
         }
 
-        //assert!(*occupancies.iter().max().unwrap() <= 126);
+        assert!(*occupancies.iter().max().unwrap() <= MAX_TRIS_PER_CLUSTER);
+
+        println!(
+            "Clustered full mesh, Min tris: {}, Max tris: {}",
+            occupancies.iter().min().unwrap(),
+            occupancies.iter().max().unwrap()
+        );
 
         self.clusters = vec![
             common::PartitionInfo {
@@ -138,14 +146,21 @@ impl WingedMesh {
         ];
 
         //std::mem::swap(&mut self.groups, &mut new_groups);
+        let cluster_partitioning =
+            config.partition_from_graph(group_count as u32, &cluster_graph)?;
+        let mut occupancies = vec![0; group_count];
+        for &group in &cluster_partitioning {
+            occupancies[group as usize] += 1;
+        }
+        println!(
+            "Generated groups with sizes {}<->{}",
+            occupancies.iter().min().unwrap(),
+            occupancies.iter().max().unwrap()
+        );
 
         // Tell each partition what group they now belong to.
         if group_count != 1 {
-            for (part, &group) in config
-                .partition_from_graph(group_count as u32, &cluster_graph)?
-                .iter()
-                .enumerate()
-            {
+            for (part, &group) in cluster_partitioning.iter().enumerate() {
                 self.clusters[part].group_index = group as usize;
             }
         } else {
@@ -187,10 +202,10 @@ impl WingedMesh {
                 .monotonic_bound
                 .include_point(verts[self.get_edge(f.edge).vert_origin.0].xyz());
         }
-        println!(
-            "Including child bounds with {} old groups",
-            new_groups.len()
-        );
+        // println!(
+        //     "Including child bounds with {} old groups",
+        //     new_groups.len()
+        // );
 
         for g in &mut new_groups {
             // SQRT each group
@@ -299,6 +314,12 @@ impl WingedMesh {
                 Some(i_group)
             };
 
+            let mut occupancies = vec![0; parts as usize];
+
+            for p in part {
+                occupancies[p as usize] += 1;
+            }
+
             for _ in 0..parts {
                 //    self.groups[group].partitions.push(new_partitions.len());
 
@@ -308,6 +329,12 @@ impl WingedMesh {
                     tight_bound: Default::default(), //TODO:
                 })
             }
+
+            let max = *occupancies.iter().max().unwrap();
+            assert!(
+                max <= MAX_TRIS_PER_CLUSTER,
+                "Too many triangles in cluster: {max}"
+            );
         }
         self.clusters = new_partitions;
 

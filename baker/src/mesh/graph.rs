@@ -78,7 +78,7 @@ impl WingedMesh {
     /// Generates a graph of all partitions and their neighbours.
     /// A partition neighbours another one iff there is some triangle in each that share an edge.
     /// We add an edge for each linking triangle, to record 'weights' for partitioning.
-    pub fn generate_cluster_graph(&self) -> petgraph::graph::UnGraph<i32, ()> {
+    pub fn generate_cluster_graph(&self) -> petgraph::graph::UnGraph<i32, i32> {
         //TODO: Give lower weight to grouping partitions that have not been recently grouped, to ensure we are
         // constantly overwriting old borders with remeshes
 
@@ -112,12 +112,13 @@ impl WingedMesh {
 
                         let n1 = petgraph::graph::NodeIndex::new(other_face.cluster_idx);
 
-                        // let w = graph
-                        //     .find_edge(n0, n1)
-                        //     .map(|e| graph.edge_weight(e))
-                        //     .flatten();
+                        let w = graph
+                            .find_edge(n0, n1)
+                            .map(|e| graph.edge_weight(e))
+                            .flatten();
 
-                        graph.add_edge(n0, n1, ());
+                        //graph.update_edge(n0, n1, *w.unwrap_or(&0) + 1);
+                        graph.add_edge(n0, n1, 0);
                     }
                 }
             }
@@ -143,7 +144,7 @@ impl WingedMesh {
         //         if w * 2 > avg * 3 {
         //             graph.add_edge(src, tgt, 0);
         //         }
-        //         if w > total * 2 {
+        //         if w > avg * 2 {
         //             graph.add_edge(src, tgt, 0);
         //         }
         //     }

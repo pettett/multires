@@ -59,26 +59,30 @@ pub mod test {
 
     #[test]
     fn test_weighted_edges() {
-        let graph = generate_triangle_plane_weighted::<6, 4, _>(|x, y| match (x, y) {
-            _ => 1,
-        });
+        let graph =
+            generate_triangle_plane_weighted::<6, 4, _>(|x, y| match (x.min(y), x.max(y)) {
+                (0, 1) => 10,
+                (0, 7) => 10,
+                (10, 17) => 100,
+                (10, 11) => 100,
+                _ => 1,
+            });
 
         let test_config = &PartitioningConfig {
             method: PartitioningMethod::MultilevelKWay,
             objective_type: Some(ObjectiveType::Volume),
             force_contiguous_partitions: true,
-
             //minimize_subgraph_degree: Some(false),
             ..Default::default()
         };
 
         let p = test_config
-            .partition_from_edge_weighted_edge_graph(3, &graph)
+            .partition_from_edge_weighted_edge_graph(6, &graph)
             .unwrap();
 
         petgraph_to_svg(
             &graph,
-            "svg\\triangle_plane_unweighted_group.svg",
+            "..\\svg\\triangle_plane_unweighted_group.svg",
             &|_, (i, _)| format!("color={}", COLS[p[i.index()] as usize % COLS.len()]),
             GraphSVGRender::Undirected {
                 positions: false,
@@ -95,103 +99,72 @@ pub mod test {
         // Demonstrates that we can use weighting (that works, weights array breaks the contiguous graphs) by adding extra edges connecting nodes
         // We use this principle in generating the group graph
 
-        for i in 0..10 {
+        for (s, e) in [
+            (4, 11),
+            (21, 22),
+            (6, 13),
+            (20, 19),
+            (16, 23),
+            (15, 14),
+            (3, 4),
+            (13, 12),
+            (3, 2),
+            (7, 8),
+            (7, 6),
+            (7, 6),
+            (7, 6),
+            (7, 6),
+            (7, 6),
+            (7, 6),
+            (7, 6),
+            (7, 6),
+            (7, 6),
+            (7, 6),
+            (7, 6),
+            (7, 6),
+            (7, 6),
+            (7, 6),
+            (2, 1),
+            (7, 0),
+            (7, 0),
+            (7, 0),
+            (7, 0),
+            (7, 0),
+            (7, 0),
+            (7, 0),
+            (7, 0),
+            (7, 0),
+            (7, 0),
+            (7, 0),
+            (7, 0),
+            (7, 0),
+            (7, 0),
+            (8, 15),
+            (7, 0),
+            (7, 0),
+        ] {
             graph.add_edge(
-                petgraph::graph::node_index(4),
-                petgraph::graph::node_index(11),
-                (),
-            );
-        }
-
-        for i in 0..1 {
-            graph.add_edge(
-                petgraph::graph::node_index(21),
-                petgraph::graph::node_index(22),
-                (),
-            );
-        }
-        for i in 0..1 {
-            graph.add_edge(
-                petgraph::graph::node_index(20),
-                petgraph::graph::node_index(19),
-                (),
-            );
-        }
-        for i in 0..1 {
-            graph.add_edge(
-                petgraph::graph::node_index(16),
-                petgraph::graph::node_index(23),
-                (),
-            );
-        }
-        for i in 0..1 {
-            graph.add_edge(
-                petgraph::graph::node_index(15),
-                petgraph::graph::node_index(14),
-                (),
-            );
-        }
-        for i in 0..1 {
-            graph.add_edge(
-                petgraph::graph::node_index(3),
-                petgraph::graph::node_index(4),
-                (),
-            );
-        }
-
-        for i in 0..1 {
-            graph.add_edge(
-                petgraph::graph::node_index(3),
-                petgraph::graph::node_index(2),
-                (),
-            );
-        }
-
-        for i in 0..1 {
-            graph.add_edge(
-                petgraph::graph::node_index(7),
-                petgraph::graph::node_index(8),
-                (),
-            );
-        }
-
-        for i in 0..1 {
-            graph.add_edge(
-                petgraph::graph::node_index(7),
-                petgraph::graph::node_index(6),
-                (),
-            );
-        }
-
-        for i in 0..1 {
-            graph.add_edge(
-                petgraph::graph::node_index(2),
-                petgraph::graph::node_index(1),
-                (),
-            );
-        }
-
-        for i in 0..1 {
-            graph.add_edge(
-                petgraph::graph::node_index(7),
-                petgraph::graph::node_index(0),
+                petgraph::graph::node_index(s),
+                petgraph::graph::node_index(e),
                 (),
             );
         }
 
         let test_config = &PartitioningConfig {
-            method: PartitioningMethod::MultilevelKWay,
+            method: PartitioningMethod::MultilevelRecursiveBisection,
             force_contiguous_partitions: true,
-            //minimize_subgraph_degree: Some(false),
-            objective_type: Some(ObjectiveType::Volume),
+            u_factor: Some(100),
+            minimize_subgraph_degree: Some(true),
             ..Default::default()
         };
 
         let p = test_config.partition_from_graph(6, &graph).unwrap();
 
+        println!("{p:?}");
+
         petgraph_to_svg(
             &graph,
-            "svg\\triangle_plane_weighted_group.svg",
+            "..\\svg\\triangle_plane_weighted_group.svg",
             &|_, (i, _)| format!("color={}", COLS[p[i.index()] as usize % COLS.len()]),
             GraphSVGRender::Undirected {
                 positions: false,

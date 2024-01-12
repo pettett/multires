@@ -121,7 +121,9 @@ where
     let dot_out_path = root.join("dot.gv");
     let out_path = root.join(out);
 
-    fs::File::create(&out_path).context("Invalid out path")?;
+    fs::File::create(&out_path)
+        .context(out_path.to_str().unwrap().to_string())
+        .context("Invalid out path")?;
 
     match &render {
         GraphSVGRender::Directed { node_label } => fs::write(
