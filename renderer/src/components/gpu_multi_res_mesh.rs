@@ -14,7 +14,7 @@ use common_renderer::components::{
 };
 use glam::{Mat4, Vec3};
 use petgraph::visit::EdgeRef;
-use wgpu::util::DeviceExt;
+use wgpu::util::{DeviceExt, DispatchIndirect};
 
 use crate::core::{pipeline::make_render_pipeline, BufferGroup, Instance, Renderer};
 
@@ -44,6 +44,17 @@ pub enum ErrorMode {
     MaxError,
     ExactLayer,
 }
+
+impl ErrorMode {
+    pub fn mode(&self) -> u32 {
+        match self {
+            ErrorMode::PointDistance { .. } => 0,
+            ErrorMode::MaxError => 1,
+            ErrorMode::ExactLayer => 2,
+        }
+    }
+}
+
 #[derive(PartialEq, Clone, Debug)]
 pub enum DrawMode {
     Clusters,
@@ -70,7 +81,7 @@ struct DrawData {
 
     mode: u32,
     // Having a vec3 always brings fun antics like this
-    max_index: u32,
+    current_count: u32,
     _1: i32,
     _2: i32,
 }
@@ -121,7 +132,6 @@ pub struct MultiResMeshAsset {
     cluster_count: u32,
     index_count: u32,
     cluster_data_real_error_group: BufferGroup<2>,
-    cluster_data_layer_error_group: BufferGroup<2>,
     index_format: wgpu::IndexFormat,
     root_asset: MultiResMesh,
 }
@@ -540,6 +550,15 @@ impl MultiResMeshComponent {
         }
 
         for (mesh, transform) in meshes.iter() {
+            let cam_dist = (*transform.get_pos() - *camera_trans.get_pos()).length_squared();
+
+            // Quick conservative estimation of total clusters that could be drawn to test performance impact.
+            let current_count = (((mesh.cluster_count as f32 / cam_dist) * 300.0
+                / (mesh_renderer.error_target)) as u32)
+                .min(mesh.cluster_count);
+
+            //let current_count = mesh.cluster_count;
+
             renderer.queue().write_buffer(
                 mesh.draw_data_buffer.buffer(),
                 0,
@@ -547,18 +566,14 @@ impl MultiResMeshComponent {
                     model: transform.get_local_to_world(),
                     camera_pos: (*camera_trans.get_pos()).into(),
                     error: mesh_renderer.error_target,
-                    mode: 0,
-                    max_index: 100,
+                    mode: mesh_renderer.error_calc.mode(),
+                    current_count,
                     _1: 0,
                     _2: 0,
                 }]),
             );
 
-            let cluster_data = if mesh_renderer.error_calc == ErrorMode::ExactLayer {
-                mesh.asset.cluster_data_layer_error_group.bind_group()
-            } else {
-                mesh.asset.cluster_data_real_error_group.bind_group()
-            };
+            let cluster_data = mesh.asset.cluster_data_real_error_group.bind_group();
 
             render_pass.set_pipeline(&mesh_renderer.culling_compute_pipeline);
 
@@ -570,7 +585,7 @@ impl MultiResMeshComponent {
 
             //render_pass.set_bind_group(3, renderer.camera_buffer().bind_group(), &[]);
 
-            render_pass.dispatch_workgroups(mesh.cluster_count.div_ceil(64), 1, 1);
+            render_pass.dispatch_workgroups(current_count.div_ceil(64), 1, 1);
 
             render_pass.set_pipeline(&mesh_renderer.compacting_compute_pipeline);
 
@@ -578,7 +593,7 @@ impl MultiResMeshComponent {
             render_pass.set_bind_group(1, cluster_data, &[]);
             render_pass.set_bind_group(2, mesh.read_can_draw_buffer.bind_group(), &[]);
 
-            render_pass.dispatch_workgroups(mesh.cluster_count.div_ceil(64), 1, 1);
+            render_pass.dispatch_workgroups(current_count.div_ceil(64), 1, 1);
         }
     }
 
@@ -806,7 +821,7 @@ impl MultiResMeshComponent {
                 camera_pos: Vec3::ZERO,
                 error: 1.5,
                 mode: 0,
-                max_index: 2,
+                current_count: 2,
                 _1: 0,
                 _2: 0,
             }],
@@ -840,8 +855,8 @@ impl MultiResMeshComponent {
         //    writer.write(data).unwrap();
         //}
 
-        let cluster_can_draw = vec![1i32; asset.cluster_count as _];
-        let cluster_result_indices = vec![1i32; asset.index_count as _];
+        let cluster_can_draw = vec![0i32; (asset.cluster_count + 1) as _];
+        let cluster_result_indices = vec![0i32; asset.index_count as _];
 
         let can_draw_buffer = BufferGroup::create_single(
             &cluster_can_draw,
@@ -920,13 +935,8 @@ impl MultiResMeshAsset {
     pub fn load_mesh(instance: Arc<Instance>, mesh_renderer: &MultiResMeshRenderer) -> Self {
         let asset = common::MultiResMesh::load().unwrap();
 
-        let (
-            all_clusters_data_real_error,
-            all_clusters_data_layer_error,
-            indices,
-            partitions,
-            groups,
-        ) = cluster_data_from_asset(&asset);
+        let (all_clusters_data_real_error, indices, partitions, groups) =
+            cluster_data_from_asset(&asset);
 
         let index_buffer = Arc::new(instance.device().create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
@@ -954,25 +964,9 @@ impl MultiResMeshAsset {
                 usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
             },
         ));
-        let cluster_data_layer_error_buffer = Arc::new(instance.device().create_buffer_init(
-            &wgpu::util::BufferInitDescriptor {
-                label: Some("all_clusters_data_layer_error"),
-                contents: bytemuck::cast_slice(&all_clusters_data_layer_error),
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-            },
-        ));
 
         let cluster_data_real_error_group = BufferGroup::from_existing(
             [index_buffer.clone(), cluster_data_real_error_buffer.clone()],
-            instance.device(),
-            &mesh_renderer.cluster_info_buffer_bind_group_layout,
-            Some("all_clusters_data_real_error"),
-        );
-        let cluster_data_layer_error_group = BufferGroup::from_existing(
-            [
-                index_buffer.clone(),
-                cluster_data_layer_error_buffer.clone(),
-            ],
             instance.device(),
             &mesh_renderer.cluster_info_buffer_bind_group_layout,
             Some("all_clusters_data_real_error"),
@@ -993,7 +987,6 @@ impl MultiResMeshAsset {
             index_format,
             index_count: indices.len() as _,
             cluster_data_real_error_group,
-            cluster_data_layer_error_group,
             cluster_count: all_clusters_data_real_error.len() as _,
             root_asset: asset,
         }

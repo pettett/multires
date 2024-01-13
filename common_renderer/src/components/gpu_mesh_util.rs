@@ -27,7 +27,7 @@ pub struct ClusterData {
 
     // Pad alignment to 4 bytes
     pub radius: f32,
-    _1: i32,
+    pub layer: i32,
     _2: i32,
 
     _3: i32,
@@ -36,53 +36,10 @@ pub struct ClusterData {
     _6: i32,
 }
 
-impl ClusterData {
-    pub fn new(
-        center_x: f32,
-        center_y: f32,
-        center_z: f32,
-        index_offset: u32,
-        index_count: u32,
-        error: f32,
-        parent0: i32,
-        parent1: i32,
-        co_parent: i32,
-        radius: f32,
-    ) -> Self {
-        Self {
-            center_x,
-            center_y,
-            center_z,
-            index_offset,
-            index_count,
-            error,
-            parent0,
-            parent1,
-            co_parent,
-            radius,
-            _1: -1,
-            _2: -1,
-            _3: -1,
-            _4: -1,
-            _5: -1,
-            _6: -1,
-        }
-    }
-}
-
 pub fn cluster_data_from_asset(
     asset: &MultiResMesh,
-) -> (
-    Vec<ClusterData>,
-    Vec<ClusterData>,
-    Vec<u32>,
-    Vec<i32>,
-    Vec<i32>,
-) {
-    let mut clusters_per_lod = Vec::new();
-
+) -> (Vec<ClusterData>, Vec<u32>, Vec<i32>, Vec<i32>) {
     let mut all_clusters_data_real_error = Vec::new();
-    let mut all_clusters_data_layer_error = Vec::new();
     let mut indices = Vec::new();
     // Face indexed array
     let mut partitions = Vec::new();
@@ -92,10 +49,11 @@ pub fn cluster_data_from_asset(
     let mut cluster_idx = 0;
 
     let mut dag = petgraph::Graph::new();
+    let mut clusters_per_lod = vec![Vec::new(); asset.lods.len()];
 
-    for (level, r) in asset.lods.iter().enumerate() {
+    for (level, r) in asset.lods.iter().enumerate().rev() {
         println!("Loading layer {level}:");
-        let mut cluster_nodes = Vec::new();
+        let cluster_nodes = &mut clusters_per_lod[level];
 
         for (_cluster_layer_idx, submesh) in r.submeshes.iter().enumerate() {
             // Map index buffer to global vertex range
@@ -129,6 +87,7 @@ pub fn cluster_data_from_asset(
                 parent1: -1,
                 co_parent: -1,
                 radius: submesh.saturated_sphere.radius(),
+                layer: level as _,
                 ..ClusterData::default()
             });
 
@@ -137,7 +96,6 @@ pub fn cluster_data_from_asset(
             // Push to indices *after* recording the offset above
             indices.extend_from_slice(&submesh.indices);
         }
-        clusters_per_lod.push(cluster_nodes);
     }
 
     assert_eq!(partitions.len(), indices.len() / 3);
@@ -219,19 +177,5 @@ pub fn cluster_data_from_asset(
         };
     }
 
-    // all_clusters_data_real_error is now completely valid
-    for i in 0..all_clusters_data_real_error.len() {
-        all_clusters_data_layer_error.push(ClusterData {
-            error: *dag.node_weight(petgraph::graph::node_index(i)).unwrap() as _,
-            ..all_clusters_data_real_error[i].clone()
-        });
-    }
-
-    (
-        all_clusters_data_real_error,
-        all_clusters_data_layer_error,
-        indices,
-        partitions,
-        groups,
-    )
+    (all_clusters_data_real_error, indices, partitions, groups)
 }

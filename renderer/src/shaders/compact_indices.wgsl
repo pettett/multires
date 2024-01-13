@@ -54,11 +54,11 @@ fn main(
 ) {
     let idx = id.x;
 	// For the end workgroup
-    if idx >= arrayLength(&clusters) {
+    if idx >= should_draw[0u] {
         return;
     }
 
-    let cull = should_draw[idx];
+    let cull = should_draw[idx + 1u];
 
 	// Initialise scan to list of sizes [2,0,0,3,1,0,0]
     var idx_val = u32(cull) * clusters[idx].index_count;
@@ -73,7 +73,7 @@ fn main(
 
 		// Sum everything before us in parallel
         for (var meshlet: u32 = u32(lid.x); meshlet < workgroup_start; meshlet += pre_workgroup_summing_threads) {
-            workgroup_data[lid.x] += should_draw[meshlet] * clusters[meshlet].index_count;
+            workgroup_data[lid.x] += should_draw[meshlet + 1u] * clusters[meshlet].index_count;
         }
     }
 
@@ -89,7 +89,7 @@ fn main(
 
 	// Add things within this workgroup
     for (var meshlet: u32 = workgroup_start; meshlet < idx; meshlet ++) {
-        idx_val += should_draw[meshlet] * clusters[meshlet].index_count;
+        idx_val += should_draw[meshlet + 1u] * clusters[meshlet].index_count;
     }
 
 
@@ -182,7 +182,7 @@ fn main(
 
 	// Fill the max index count from the final work item
 
-    if idx == arrayLength(&clusters) - 1u {
+    if idx == should_draw[0u] - 1u {
         draw_indirect_params.index_count = idx_val;
     }
 }
