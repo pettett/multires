@@ -10,6 +10,7 @@ fn main() {
 #[cfg(feature = "shaderc")]
 fn main() {
     // Tell Cargo that if any shaders change, to rerun this build script.
+
     println!("cargo:rerun-if-changed=shaders/src");
 
     let entries = fs::read_dir("shaders/src").unwrap();
@@ -20,6 +21,7 @@ fn main() {
     let mut options = shaderc::CompileOptions::new().unwrap();
     options.set_target_spirv(shaderc::SpirvVersion::V1_6);
     options.add_macro_definition("EP", Some("main"));
+
     let mut success = true;
     for entry in entries {
         let entry = entry.unwrap();

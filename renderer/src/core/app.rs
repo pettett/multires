@@ -56,21 +56,17 @@ impl App {
 
         let asset = Arc::new(MultiResMeshAsset::load_mesh(renderer.instance()));
 
-        MultiResMeshComponent::from_asset(
-            "Mesh 0".to_owned(),
-            renderer.instance(),
-            &mut world,
-            asset.clone(),
-            Transform::new_pos(Vec3A::ZERO),
-        );
-
-        MultiResMeshComponent::from_asset(
-            "Mesh 1".to_owned(),
-            renderer.instance(),
-            &mut world,
-            asset,
-            Transform::new_pos(Vec3A::X * 40.0),
-        );
+        for i in 0..10 {
+            for j in 0..10 {
+                MultiResMeshComponent::from_asset(
+                    "Mesh 0".to_owned(),
+                    renderer.instance(),
+                    &mut world,
+                    asset.clone(),
+                    Transform::new_pos(Vec3A::X * 30.0 * i as f32 + Vec3A::Y * 30.0 * j as f32),
+                );
+            }
+        }
 
         world.insert_resource(MultiResMeshRenderer {
             error_calc: crate::components::gpu_multi_res_mesh::ErrorMode::PointDistance {

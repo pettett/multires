@@ -31,12 +31,12 @@ struct DrawData {
 	mode: i32,
 }
 
-struct DrawIndirect {
-    vertex_count: u32,
-    instance_count: u32,
-    base_vertex: u32,
-    base_instance: u32,
-}
+
+struct CameraUniform {
+    view_proj: mat4x4<f32>,
+	camera_pos: vec3<f32>,
+    part_highlight: i32,
+};
 
 //@group(0) @binding(0) var<storage, write> result_indicies: array<i32>;
 
@@ -48,15 +48,20 @@ struct DrawIndirect {
 
 @group(2) @binding(0) var<storage, read> draw_data: DrawData;
 
+//@group(3) @binding(0) var<storage, read> camera: CameraUniform;
+
 fn cluster_error(idx: u32) -> f32 {
     return clusters[idx].error * (clusters[idx].radius / distance((draw_data.model * vec4<f32>(clusters[idx].center, 1.0)).xyz, draw_data.camera_pos));
 }
 
-@compute @workgroup_size(1)
+@compute @workgroup_size(64)
 fn main(
     @builtin(global_invocation_id) id: vec3<u32>
 ) {
     let i = id.x;
+    if i >= arrayLength(&clusters) {
+        return;
+    }
     // should_draw[i] = i32(clusters[i].index_offset);
 
     let start = clusters[i].index_offset;

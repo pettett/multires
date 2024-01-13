@@ -1,4 +1,7 @@
 // Vertex shader
+
+// https://nccastaff.bournemouth.ac.uk/jmacey/Lectures/OpenGL/shaders/?print-pdf#/
+
 struct CameraUniform {
     view_proj: mat4x4<f32>,
     part_highlight: i32,

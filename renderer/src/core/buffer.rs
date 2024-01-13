@@ -38,7 +38,7 @@ impl BufferGroup<1> {
         layout: &BindGroupLayout<1>,
         label: Option<&str>,
     ) -> Self {
-        Self::create_plural_storage(&[data], device, layout, label)
+        Self::create_plural_storage(&[data], device, layout, &[label])
     }
 
     pub fn create_single<T: bytemuck::Pod>(
@@ -48,7 +48,7 @@ impl BufferGroup<1> {
         layout: &BindGroupLayout<1>,
         label: Option<&str>,
     ) -> Self {
-        Self::create_plural(&[data], &[usage], device, layout, label)
+        Self::create_plural(&[data], &[usage], device, layout, &[label])
     }
 
     pub fn init_single<T: bytemuck::Pod>(
@@ -101,7 +101,7 @@ impl<const N: usize> BufferGroup<N> {
         data: &[&[T]; N],
         device: &wgpu::Device,
         layout: &BindGroupLayout<N>,
-        label: Option<&str>,
+        label: &[Option<&str>; N],
     ) -> Self {
         Self::create_plural(
             data,
@@ -117,7 +117,7 @@ impl<const N: usize> BufferGroup<N> {
         usages: &[wgpu::BufferUsages; N],
         device: &wgpu::Device,
         layout: &BindGroupLayout<N>,
-        label: Option<&str>,
+        label: &[Option<&str>; N],
     ) -> Self {
         let buffers: [_; N] = data
             .iter()
@@ -125,7 +125,7 @@ impl<const N: usize> BufferGroup<N> {
             .map(|(i, datum)| {
                 Arc::new(
                     device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label,
+                        label: label[i],
                         contents: bytemuck::cast_slice(datum),
                         usage: usages[i],
                     }),
@@ -147,7 +147,7 @@ impl<const N: usize> BufferGroup<N> {
             .unwrap();
 
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label,
+            label: label[0],
             layout: layout.into(),
             entries: &entries[..],
         });

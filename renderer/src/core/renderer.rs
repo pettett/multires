@@ -34,6 +34,7 @@ pub struct Renderer {
     pub render_pipeline_wire: wgpu::RenderPipeline,
     pub culling_compute_pipeline: wgpu::ComputePipeline,
     pub compacting_compute_pipeline: wgpu::ComputePipeline,
+    pub debug_staging_buffer: wgpu::Buffer,
     depth_texture: Texture,
     surface_format: wgpu::TextureFormat,
     pub sphere_gizmo: DebugMesh,
@@ -133,7 +134,9 @@ impl Renderer {
 
         let camera_buffer = BufferGroup::create_single(
             &[CameraUniform::new()],
-            wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            wgpu::BufferUsages::UNIFORM
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::STORAGE,
             &device,
             &camera_bind_group_layout,
             Some("Camera Buffer"),
@@ -218,6 +221,16 @@ impl Renderer {
                     },
                     count: None,
                 },
+                // wgpu::BindGroupLayoutEntry {
+                // binding: 2,
+                // visibility: wgpu::ShaderStages::COMPUTE,
+                // ty: wgpu::BindingType::Buffer {
+                // ty: wgpu::BufferBindingType::Storage { read_only: false },
+                // has_dynamic_offset: false,
+                // min_binding_size: None,
+                // },
+                // count: None,
+                // },
             ],
             Some("indirect_draw_info_buffer_bind_group_layout"),
         );
@@ -283,6 +296,7 @@ impl Renderer {
                     (&write_compute_bind_group_layout).into(),
                     (&cluster_info_buffer_bind_group_layout).into(),
                     (&read_compute_buffer_bind_group).into(),
+                    //(&read_compute_buffer_bind_group).into(),
                 ],
                 push_constant_ranges: &[],
             });
@@ -358,6 +372,13 @@ impl Renderer {
             read_compute_buffer_bind_group,
         ));
 
+        let debug_staging_buffer = instance.device().create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Debug Staging Buffer"),
+            size: 12248 as u64,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
         Self {
             window,
             sphere_gizmo: DebugMesh::from_tris(instance.clone(), &sphere_gizmo),
@@ -366,6 +387,7 @@ impl Renderer {
             size,
             culling_compute_pipeline,
             compacting_compute_pipeline,
+            debug_staging_buffer,
             surface_format,
             depth_texture,
             render_pipeline,
@@ -481,6 +503,7 @@ pub fn render(
     ctx: NonSend<egui::Context>,
     mut state: NonSendMut<egui_winit::State>,
     mut meshes: Query<(&mut MultiResMeshComponent, &Transform)>,
+    //meshes: Query<(&MultiResMeshComponent, &Transform)>,
     mesh_renderer: ResMut<MultiResMeshRenderer>,
     submeshes: Query<(Entity, &ClusterComponent)>,
     camera: Query<(&CameraUniform, &Transform)>,
@@ -520,29 +543,28 @@ pub fn render(
             label: Some("Compute Pass"),
         });
 
-        for (mesh, trans) in meshes.iter() {
-            mesh.compute_pass(
-                trans,
-                &renderer,
-                &mesh_renderer,
-                camera_trans,
-                &submeshes,
-                &mut compute_pass,
-            );
-        }
+        MultiResMeshComponent::compute_pass(
+            &meshes,
+            &renderer,
+            &mesh_renderer,
+            camera_trans,
+            &submeshes,
+            &mut compute_pass,
+        );
     }
 
     // {
-    //     for mesh in meshes.iter() {
+    //     for (mesh, _) in meshes.iter() {
     //         // Sets adds copy operation to command encoder.
     //         // Will copy data from storage buffer on GPU to staging buffer on CPU.
-    //         encoder.copy_buffer_to_buffer(
-    //             &mesh.asset().cluster_data_real_error_buffer.buffer(),
+    //         compute_encoder.copy_buffer_to_buffer(
+    //             &mesh.result_indices_buffer.get_buffer(2),
     //             0,
-    //             &mesh.debug_staging_buffer,
+    //             &renderer.debug_staging_buffer,
     //             0,
-    //             mesh.staging_buffer_size as _,
+    //             mesh.result_indices_buffer.get_buffer(2).size() as _,
     //         );
+    //         break;
     //     }
     // }
 
@@ -552,18 +574,27 @@ pub fn render(
         .submit(std::iter::once(compute_encoder.finish()));
 
     // {
-    //     for mesh in meshes.iter() {
-    //         // Note that we're not calling `.await` here.
-    //         let buffer_slice = mesh.debug_staging_buffer.slice(..);
-    //         // Gets the future representing when `staging_buffer` can be read from
-    //         buffer_slice.map_async(wgpu::MapMode::Read, |_| {});
-    //     }
-    // }
+    //     // Note that we're not calling `.await` here.
+    //     let buffer_slice = renderer.debug_staging_buffer.slice(..);
+    //     // Gets the future representing when `staging_buffer` can be read from
+    //     buffer_slice.map_async(wgpu::MapMode::Read, |_| {});
 
-    // Poll the device in a blocking manner so that our future resolves.
-    // In an actual application, `device.poll(...)` should
-    // be called in an event loop or on another thread.
-    //renderer.device().poll(wgpu::Maintain::Wait);
+    //     // Poll the device in a blocking manner so that our future resolves.
+    //     // In an actual application, `device.poll(...)` should
+    //     // be called in an event loop or on another thread.
+    //     renderer.device().poll(wgpu::Maintain::Wait);
+
+    //     for x in buffer_slice
+    //         .get_mapped_range()
+    //         .chunks(4)
+    //         .map(|x| i32::from_le_bytes([x[0], x[1], x[2], x[3]]))
+    //     {
+    //         print!("{x} - ");
+    //     }
+    //     println!("");
+
+    //     renderer.debug_staging_buffer.unmap();
+    // }
 
     let mut render_encoder =
         renderer
@@ -603,7 +634,7 @@ pub fn render(
         });
 
         for (mesh, _trans) in meshes.iter() {
-            mesh.render_pass(&renderer, &submeshes, &mut render_pass, &mesh_renderer);
+            mesh.render_pass(&renderer, &mut render_pass, &mesh_renderer);
         }
     }
 
