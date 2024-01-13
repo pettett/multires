@@ -54,13 +54,19 @@ impl App {
         world.insert_resource(Events::<KeyIn>::default());
         world.insert_resource(Events::<ScreenEvent>::default());
 
-        let asset = Arc::new(MultiResMeshAsset::load_mesh(renderer.instance()));
+        let mesh_renderer = MultiResMeshRenderer::new(&renderer);
+
+        let asset = Arc::new(MultiResMeshAsset::load_mesh(
+            renderer.instance(),
+            &mesh_renderer,
+        ));
 
         for i in 0..10 {
             for j in 0..10 {
                 MultiResMeshComponent::from_asset(
                     "Mesh 0".to_owned(),
                     renderer.instance(),
+                    &mesh_renderer,
                     &mut world,
                     asset.clone(),
                     Transform::new_pos(Vec3A::X * 30.0 * i as f32 + Vec3A::Y * 30.0 * j as f32),
@@ -68,19 +74,7 @@ impl App {
             }
         }
 
-        world.insert_resource(MultiResMeshRenderer {
-            error_calc: crate::components::gpu_multi_res_mesh::ErrorMode::PointDistance {
-                camera_point: Vec3::ZERO,
-                cam: Camera::new(1.0),
-            },
-            draw_mode: DrawMode::Clusters,
-            error_target: 0.5,
-            focus_part: 0,
-            freeze: false,
-            show_wire: true,
-            show_solid: true,
-            show_bounds: false,
-        });
+        world.insert_resource(mesh_renderer);
 
         //GUI state
         let q0 = world.query();

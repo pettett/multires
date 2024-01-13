@@ -16,7 +16,7 @@ use glam::{Mat4, Vec3};
 use petgraph::visit::EdgeRef;
 use wgpu::util::DeviceExt;
 
-use crate::core::{BufferGroup, Instance, Renderer};
+use crate::core::{pipeline::make_render_pipeline, BufferGroup, Instance, Renderer};
 
 #[derive(Component)]
 pub struct ClusterComponent {
@@ -70,7 +70,7 @@ struct DrawData {
 
     mode: u32,
     // Having a vec3 always brings fun antics like this
-    _0: i32,
+    max_index: u32,
     _1: i32,
     _2: i32,
 }
@@ -99,8 +99,21 @@ pub struct MultiResMeshRenderer {
     pub show_wire: bool,
     pub show_solid: bool,
     pub show_bounds: bool,
-}
 
+    pub render_pipeline: wgpu::RenderPipeline,
+    pub render_pipeline_pbr: wgpu::RenderPipeline,
+    pub render_pipeline_wire: wgpu::RenderPipeline,
+    pub culling_compute_pipeline: wgpu::ComputePipeline,
+    pub compacting_compute_pipeline: wgpu::ComputePipeline,
+    pub debug_staging_buffer: wgpu::Buffer,
+
+    pub model_bind_group_layout: crate::core::BindGroupLayout<1>,
+    pub partition_bind_group_layout: crate::core::BindGroupLayout<2>,
+    pub write_compute_bind_group_layout: crate::core::BindGroupLayout<1>,
+    pub cluster_info_buffer_bind_group_layout: crate::core::BindGroupLayout<2>,
+    pub result_indices_buffer_bind_group_layout: crate::core::BindGroupLayout<2>,
+    pub read_compute_bind_group_layout: crate::core::BindGroupLayout<1>,
+}
 /// Stores all immutable DAG data for a mesh, to be referenced by any number of instances.
 pub struct MultiResMeshAsset {
     partition_buffer: BufferGroup<2>,
@@ -115,6 +128,285 @@ pub struct MultiResMeshAsset {
 
 pub struct MultiResMeshDatabase {
     assets: HashMap<String, Arc<MultiResMeshAsset>>,
+}
+
+impl MultiResMeshRenderer {
+    pub fn new(renderer: &Renderer) -> Self {
+        let shader = renderer
+            .device()
+            .create_shader_module(wgpu::include_wgsl!("../shaders/shader.wgsl"));
+
+        let pbr_shader = renderer
+            .device()
+            .create_shader_module(wgpu::include_wgsl!("../shaders/pbr_shader.wgsl"));
+
+        let cull_meshlets_shader = renderer
+            .device()
+            .create_shader_module(wgpu::include_wgsl!("../shaders/should_draw.wgsl"));
+
+        let compact_indices_shader = renderer
+            .device()
+            .create_shader_module(wgpu::include_wgsl!("../shaders/compact_indices.wgsl"));
+
+        let shader_wire = renderer
+            .device()
+            .create_shader_module(wgpu::include_wgsl!("../shaders/shader_wire.wgsl"));
+
+        let model_bind_group_layout = crate::core::BindGroupLayout::create(
+            renderer.device(),
+            &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+            Some("model_bind_group_layout"),
+        );
+
+        let write_compute_bind_group_layout = crate::core::BindGroupLayout::create(
+            renderer.device(),
+            &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: false },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+            Some("writeable_compute_buffer_bind_group"),
+        );
+        let cluster_info_buffer_bind_group_layout = crate::core::BindGroupLayout::create(
+            renderer.device(),
+            &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+            Some("cluster_info_buffer_bind_group_layout"),
+        );
+
+        let result_indices_buffer_bind_group_layout = crate::core::BindGroupLayout::create(
+            renderer.device(),
+            &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                // wgpu::BindGroupLayoutEntry {
+                // binding: 2,
+                // visibility: wgpu::ShaderStages::COMPUTE,
+                // ty: wgpu::BindingType::Buffer {
+                // ty: wgpu::BufferBindingType::Storage { read_only: false },
+                // has_dynamic_offset: false,
+                // min_binding_size: None,
+                // },
+                // count: None,
+                // },
+            ],
+            Some("indirect_draw_info_buffer_bind_group_layout"),
+        );
+
+        let read_compute_bind_group_layout = crate::core::BindGroupLayout::create(
+            renderer.device(),
+            &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+            Some("readable_compute_buffer_bind_group"),
+        );
+
+        let partition_bind_group_layout = crate::core::BindGroupLayout::create(
+            renderer.device(),
+            &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+            Some("partition_bind_group_layout"),
+        );
+
+        let render_pipeline_layout =
+            renderer
+                .device()
+                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some("Render Pipeline Layout"),
+                    bind_group_layouts: &[
+                        (&renderer.instance.camera_bind_group_layout).into(),
+                        (&partition_bind_group_layout).into(),
+                        (&model_bind_group_layout).into(),
+                    ],
+                    push_constant_ranges: &[],
+                });
+
+        let culling_compute_pipeline_layout =
+            renderer
+                .device()
+                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some("Compute Pipeline Layout"),
+                    bind_group_layouts: &[
+                        // Reminder: Max of 4 for these, don't add any more
+                        (&write_compute_bind_group_layout).into(),
+                        (&cluster_info_buffer_bind_group_layout).into(),
+                        (&read_compute_bind_group_layout).into(),
+                        //(&read_compute_buffer_bind_group).into(),
+                    ],
+                    push_constant_ranges: &[],
+                });
+
+        let compacting_compute_pipeline_layout =
+            renderer
+                .device()
+                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some("Compacting Compute Pipeline Layout"),
+                    bind_group_layouts: &[
+                        // Reminder: Max of 4 for these, don't add any more
+                        (&result_indices_buffer_bind_group_layout).into(),
+                        (&cluster_info_buffer_bind_group_layout).into(),
+                        (&read_compute_bind_group_layout).into(),
+                    ],
+                    push_constant_ranges: &[],
+                });
+
+        let render_pipeline = make_render_pipeline(
+            renderer.device(),
+            &render_pipeline_layout,
+            &shader,
+            renderer.config().format,
+            wgpu::PolygonMode::Fill,
+            Some(wgpu::Face::Back),
+        );
+
+        let render_pipeline_pbr = make_render_pipeline(
+            renderer.device(),
+            &render_pipeline_layout,
+            &pbr_shader,
+            renderer.config().format,
+            wgpu::PolygonMode::Fill,
+            Some(wgpu::Face::Back),
+        );
+        let render_pipeline_wire = make_render_pipeline(
+            renderer.device(),
+            &render_pipeline_layout,
+            &shader_wire,
+            renderer.config().format,
+            wgpu::PolygonMode::Line,
+            None,
+        );
+
+        let culling_compute_pipeline =
+            renderer
+                .device()
+                .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: Some("Culling compute pipeline"),
+                    layout: Some(&culling_compute_pipeline_layout),
+                    module: &cull_meshlets_shader,
+                    entry_point: "main",
+                });
+
+        let compacting_compute_pipeline =
+            renderer
+                .device()
+                .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: Some("Compacting compute pipeline"),
+                    layout: Some(&compacting_compute_pipeline_layout),
+                    module: &compact_indices_shader,
+                    entry_point: "main",
+                });
+        let debug_staging_buffer = renderer.device().create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Debug Staging Buffer"),
+            size: 12248 as u64,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        MultiResMeshRenderer {
+            error_calc: crate::components::gpu_multi_res_mesh::ErrorMode::PointDistance {
+                camera_point: Vec3::ZERO,
+                cam: Camera::new(1.0),
+            },
+            draw_mode: DrawMode::Clusters,
+            error_target: 0.5,
+            focus_part: 0,
+            freeze: false,
+            show_wire: true,
+            show_solid: true,
+            show_bounds: false,
+            render_pipeline,
+            render_pipeline_pbr,
+            render_pipeline_wire,
+            culling_compute_pipeline,
+            compacting_compute_pipeline,
+            debug_staging_buffer,
+            model_bind_group_layout,
+            partition_bind_group_layout,
+            write_compute_bind_group_layout,
+            cluster_info_buffer_bind_group_layout,
+            result_indices_buffer_bind_group_layout,
+            read_compute_bind_group_layout,
+        }
+    }
 }
 
 // impl ClusterComponent {
@@ -238,7 +530,7 @@ impl MultiResMeshComponent {
     pub fn compute_pass<'a>(
         meshes: &'a Query<(&mut MultiResMeshComponent, &Transform)>,
         renderer: &'a Renderer,
-        mesh_renderer: &MultiResMeshRenderer,
+        mesh_renderer: &'a MultiResMeshRenderer,
         camera_trans: &Transform,
         _submeshes: &'a Query<(Entity, &ClusterComponent)>,
         render_pass: &mut wgpu::ComputePass<'a>,
@@ -256,7 +548,7 @@ impl MultiResMeshComponent {
                     camera_pos: (*camera_trans.get_pos()).into(),
                     error: mesh_renderer.error_target,
                     mode: 0,
-                    _0: 0,
+                    max_index: 100,
                     _1: 0,
                     _2: 0,
                 }]),
@@ -268,11 +560,10 @@ impl MultiResMeshComponent {
                 mesh.asset.cluster_data_real_error_group.bind_group()
             };
 
-            render_pass.set_pipeline(&renderer.culling_compute_pipeline);
+            render_pass.set_pipeline(&mesh_renderer.culling_compute_pipeline);
+
             render_pass.set_bind_group(0, mesh.write_can_draw_buffer.bind_group(), &[]);
-
             render_pass.set_bind_group(1, cluster_data, &[]);
-
             render_pass.set_bind_group(2, mesh.draw_data_buffer.bind_group(), &[]);
 
             //render_pass.set_bind_group(3, mesh.draw_data_buffer.bind_group(), &[]);
@@ -281,12 +572,10 @@ impl MultiResMeshComponent {
 
             render_pass.dispatch_workgroups(mesh.cluster_count.div_ceil(64), 1, 1);
 
-            render_pass.set_pipeline(&renderer.compacting_compute_pipeline);
+            render_pass.set_pipeline(&mesh_renderer.compacting_compute_pipeline);
 
             render_pass.set_bind_group(0, mesh.result_indices_buffer.bind_group(), &[]);
-
             render_pass.set_bind_group(1, cluster_data, &[]);
-
             render_pass.set_bind_group(2, mesh.read_can_draw_buffer.bind_group(), &[]);
 
             render_pass.dispatch_workgroups(mesh.cluster_count.div_ceil(64), 1, 1);
@@ -298,7 +587,7 @@ impl MultiResMeshComponent {
         renderer: &'a Renderer,
         //    submeshes: &'a Query<(Entity, &ClusterComponent)>,
         render_pass: &mut wgpu::RenderPass<'a>,
-        mesh_renderer: &MultiResMeshRenderer,
+        mesh_renderer: &'a MultiResMeshRenderer,
     ) {
         //{
         //    for i in 0..self.staging_buffer_size {
@@ -320,8 +609,8 @@ impl MultiResMeshComponent {
 
         if mesh_renderer.show_solid {
             let pipeline = match mesh_renderer.draw_mode {
-                DrawMode::Clusters => &renderer.render_pipeline,
-                DrawMode::Pbr => &renderer.render_pipeline_pbr,
+                DrawMode::Clusters => &mesh_renderer.render_pipeline,
+                DrawMode::Pbr => &mesh_renderer.render_pipeline_pbr,
             };
 
             render_pass.set_pipeline(pipeline);
@@ -329,7 +618,7 @@ impl MultiResMeshComponent {
             render_pass.draw_indexed_indirect(self.result_indices_buffer.get_buffer(1), 0);
         }
         if mesh_renderer.show_wire {
-            render_pass.set_pipeline(&renderer.render_pipeline_wire);
+            render_pass.set_pipeline(&mesh_renderer.render_pipeline_wire);
 
             render_pass.draw_indexed_indirect(self.result_indices_buffer.get_buffer(1), 0);
         }
@@ -388,6 +677,7 @@ impl MultiResMeshComponent {
     pub fn from_asset(
         name: String,
         instance: Arc<Instance>,
+        mesh_renderer: &MultiResMeshRenderer,
         world: &mut World,
         asset: Arc<MultiResMeshAsset>,
         trans: Transform,
@@ -516,13 +806,13 @@ impl MultiResMeshComponent {
                 camera_pos: Vec3::ZERO,
                 error: 1.5,
                 mode: 0,
-                _0: 0,
+                max_index: 2,
                 _1: 0,
                 _2: 0,
             }],
             wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             instance.device(),
-            &instance.read_compute_bind_group_layout,
+            &mesh_renderer.read_compute_bind_group_layout,
             Some("Draw Data Buffer"),
         );
 
@@ -532,7 +822,7 @@ impl MultiResMeshComponent {
             &[trans.get_local_to_world()],
             wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::STORAGE,
             instance.device(),
-            &instance.model_bind_group_layout,
+            &mesh_renderer.model_bind_group_layout,
             Some("Mesh Uniform Model Buffer"),
         );
 
@@ -557,7 +847,7 @@ impl MultiResMeshComponent {
             &cluster_can_draw,
             wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
             instance.device(),
-            &instance.write_compute_bind_group_layout,
+            &mesh_renderer.write_compute_bind_group_layout,
             Some("cluster_can_draw_cull_buffer"),
         );
 
@@ -577,7 +867,7 @@ impl MultiResMeshComponent {
                 //    wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
             ],
             instance.device(),
-            &instance.result_indices_buffer_bind_group_layout,
+            &mesh_renderer.result_indices_buffer_bind_group_layout,
             &[
                 Some("cluster_result_indices"),
                 Some("Indirect draw indexed buffer"),
@@ -601,7 +891,7 @@ impl MultiResMeshComponent {
                 draw_data_buffer,
                 read_can_draw_buffer: can_draw_buffer.alternate_bind_group(
                     instance.device(),
-                    &instance.read_compute_bind_group_layout,
+                    &mesh_renderer.read_compute_bind_group_layout,
                     Some("read_cluster_can_draw"),
                 ),
                 write_can_draw_buffer: can_draw_buffer,
@@ -627,7 +917,7 @@ impl MultiResMeshComponent {
 }
 
 impl MultiResMeshAsset {
-    pub fn load_mesh(instance: Arc<Instance>) -> Self {
+    pub fn load_mesh(instance: Arc<Instance>, mesh_renderer: &MultiResMeshRenderer) -> Self {
         let asset = common::MultiResMesh::load().unwrap();
 
         let (
@@ -675,7 +965,7 @@ impl MultiResMeshAsset {
         let cluster_data_real_error_group = BufferGroup::from_existing(
             [index_buffer.clone(), cluster_data_real_error_buffer.clone()],
             instance.device(),
-            &instance.cluster_info_buffer_bind_group_layout,
+            &mesh_renderer.cluster_info_buffer_bind_group_layout,
             Some("all_clusters_data_real_error"),
         );
         let cluster_data_layer_error_group = BufferGroup::from_existing(
@@ -684,14 +974,14 @@ impl MultiResMeshAsset {
                 cluster_data_layer_error_buffer.clone(),
             ],
             instance.device(),
-            &instance.cluster_info_buffer_bind_group_layout,
+            &mesh_renderer.cluster_info_buffer_bind_group_layout,
             Some("all_clusters_data_real_error"),
         );
 
         let partition_buffer = BufferGroup::create_plural_storage(
             &[&partitions, &groups],
             instance.device(),
-            &instance.partition_bind_group_layout,
+            &mesh_renderer.partition_bind_group_layout,
             &[Some("Partition Buffer"), Some("Group")],
         );
 

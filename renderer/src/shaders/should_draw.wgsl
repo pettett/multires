@@ -29,6 +29,7 @@ struct DrawData {
 	camera_pos: vec3<f32>,
     error: f32,
 	mode: i32,
+	max_index: i32,
 }
 
 
@@ -42,7 +43,7 @@ struct CameraUniform {
 
 @group(0) @binding(0) var<storage, write> should_draw: array<i32>;
 
-@group(1) @binding(0) var<storage, read> indices: array<i32>;
+// @group(1) @binding(0) var<storage, read> indices: array<i32>;
 
 @group(1) @binding(1) var<storage, read> clusters: array<ClusterData>;
 
