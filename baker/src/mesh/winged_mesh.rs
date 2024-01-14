@@ -1,5 +1,5 @@
 use anyhow::Context;
-use common::{tri_mesh::TriMesh, BoundingSphere, GroupInfo, PartitionInfo};
+use common::{tri_mesh::TriMesh, BoundingSphere, ClusterInfo, GroupInfo};
 use glam::{Vec3, Vec4};
 use idmap::IntegerId;
 use std::{collections::HashSet, fs};
@@ -129,6 +129,7 @@ pub struct HalfEdge {
 pub struct Face {
     pub edge: EdgeID,
     pub cluster_idx: usize,
+    pub colour: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -136,7 +137,7 @@ pub struct WingedMesh {
     faces: Pidge<FaceID, Face>,
     edges: Pidge<EdgeID, HalfEdge>,
     verts: Pidge<VertID, Vertex>,
-    pub clusters: Vec<PartitionInfo>,
+    pub clusters: Vec<ClusterInfo>,
     pub groups: Vec<GroupInfo>,
 }
 
@@ -147,11 +148,7 @@ impl WingedMesh {
             edges: Pidge::with_capacity(faces * 3),
             verts: Pidge::with_capacity(verts),
             groups: vec![],
-            clusters: vec![PartitionInfo {
-                child_group_index: None,
-                group_index: 0,
-                tight_bound: BoundingSphere::default(),
-            }],
+            clusters: vec![ClusterInfo::default()],
         }
     }
     pub fn get_face(&self, face: FaceID) -> &Face {
@@ -399,6 +396,7 @@ impl WingedMesh {
             Face {
                 edge: iea,
                 cluster_idx: 0,
+                colour: 0,
             },
         );
     }

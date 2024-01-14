@@ -74,7 +74,6 @@ fn main(
     }
 
     if i >= draw_data.current_count {
-        should_draw[i + 1u] = 0u;
         return;
     }
     // should_draw[i] = i32(clusters[i].index_offset);

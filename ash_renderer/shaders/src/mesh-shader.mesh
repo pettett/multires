@@ -20,13 +20,13 @@ struct Index {
 // https://github.com/KhronosGroup/Vulkan-Samples/blob/26eb94f79f9c2377cbaa28db2fbd7dd6efb55ffe/framework/api_vulkan_sample.h#L89
 struct s_meshlet
 {
-    uint vertices[64];
+    uint vertices[64]; // 64
     uint indices[378]; // 126 triangles => 378 indices
     uint vertex_count;
     uint index_count;
 };
-// std430 is **really** important
 
+// std430 is **really** important
 layout (std430, binding = 4) readonly buffer InputBufferV {
     Vertex verts[];
 } sourceData;
@@ -37,7 +37,7 @@ layout (std430, binding = 3) readonly buffer InputBufferI {
 } indicies;
 
 
-layout (local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+layout (local_size_x = 2, local_size_y = 1, local_size_z = 1) in;
 layout (triangles, max_vertices = 64, max_primitives = 126) out;
 
 layout (location = 0) out Interpolants {
@@ -46,7 +46,7 @@ layout (location = 0) out Interpolants {
 } OUT[];
 
 struct MeshTaskPayload {
-    uint meshlet_index[1];
+    uint meshlet_index[2];
 };
 
 taskPayloadSharedEXT MeshTaskPayload payload;
@@ -68,7 +68,7 @@ void vert(uint v, uint meshlet_index) {
 }
 
 void main() {
-    uint thread_id = gl_WorkGroupID.x;
+    uint thread_id = gl_LocalInvocationID.x;
     uint meshlet_index = payload.meshlet_index[thread_id];
 
     s_meshlet meshlet = indicies.meshlets[meshlet_index];

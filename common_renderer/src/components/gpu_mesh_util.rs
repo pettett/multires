@@ -58,7 +58,7 @@ pub fn cluster_data_from_asset(
         for (_cluster_layer_idx, submesh) in r.submeshes.iter().enumerate() {
             // Map index buffer to global vertex range
 
-            let index_count = submesh.indices.len() as u32;
+            let index_count = submesh.index_count() as u32;
 
             for _ in 0..(index_count / 3) {
                 partitions.push(cluster_idx as i32);
@@ -94,7 +94,9 @@ pub fn cluster_data_from_asset(
             cluster_nodes.push(dag.add_node(level));
 
             // Push to indices *after* recording the offset above
-            indices.extend_from_slice(&submesh.indices);
+            for i in 0..submesh.colour_count() {
+                indices.extend_from_slice(&submesh.indices_for_colour(i));
+            }
         }
     }
 
@@ -105,13 +107,13 @@ pub fn cluster_data_from_asset(
     // Search for [dependencies], group members, and dependants
     for (level, cluster_nodes) in clusters_per_lod.iter().enumerate() {
         for (cluster_idx, &cluster_node_idx) in cluster_nodes.iter().enumerate() {
-            let cluster_group_idx = asset.lods[level].partitions[cluster_idx].group_index;
+            let cluster_group_idx = asset.lods[level].clusters[cluster_idx].group_index;
 
             assert!(asset.lods[level].groups[cluster_group_idx]
                 .partitions
                 .contains(&cluster_idx));
 
-            let Some(child_group_idx) = asset.lods[level].partitions[cluster_idx].child_group_index
+            let Some(child_group_idx) = asset.lods[level].clusters[cluster_idx].child_group_index
             else {
                 continue;
             };

@@ -108,32 +108,34 @@ pub fn generate_meshlets(mesh: &MultiResMesh) -> Vec<Meshlet> {
     let mut meshlets = Vec::new();
 
     for layer in &mesh.lods {
-        for c in &layer.submeshes {
-            assert!(c.indices.len() <= 378);
+        for submesh in &layer.submeshes {
+            //assert!(c.indices.len() <= 378);
 
-            let mut m = Meshlet::zeroed();
+            for c in 0..submesh.colour_count() {
+                let mut m = Meshlet::zeroed();
 
-            for &vert in &c.indices {
-                // If unique, add to list
-                let idx = (0..m.vertex_count as usize).find(|j| m.vertices[*j] == vert);
+                for &vert in submesh.indices_for_colour(c) {
+                    // If unique, add to list
+                    let idx = (0..m.vertex_count as usize).find(|j| m.vertices[*j] == vert);
 
-                let idx = if let Some(idx) = idx {
-                    idx as u32
-                } else {
-                    assert!((m.vertex_count as usize) < m.vertices.len());
+                    let idx = if let Some(idx) = idx {
+                        idx as u32
+                    } else {
+                        //assert!((m.vertex_count as usize) < m.vertices.len());
 
-                    m.vertex_count += 1;
+                        m.vertex_count += 1;
 
-                    m.vertices[m.vertex_count as usize - 1] = vert;
-                    m.vertex_count - 1
-                };
+                        m.vertices[m.vertex_count as usize - 1] = vert;
+                        m.vertex_count - 1
+                    };
 
-                m.indices[m.index_count as usize] = idx;
+                    m.indices[m.index_count as usize] = idx;
 
-                m.index_count += 1;
+                    m.index_count += 1;
+                }
+
+                meshlets.push(m);
             }
-
-            meshlets.push(m);
         }
     }
 

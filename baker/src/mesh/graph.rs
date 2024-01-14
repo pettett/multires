@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use petgraph::visit::EdgeRef;
 
-use super::winged_mesh::{FaceID, WingedMesh};
+use super::winged_mesh::{Face, FaceID, WingedMesh};
 
 impl WingedMesh {
     /// Generates a graph that is the dual of this mesh - connections from each face to their neighbours
@@ -35,44 +35,64 @@ impl WingedMesh {
     }
 
     /// `generate_face_graph`, but with one graph per group
-    pub fn generate_group_graphs(&self) -> Vec<petgraph::Graph<FaceID, (), petgraph::Undirected>> {
-        let group_count = self.groups.len().max(1);
+    fn generate_keyed_graphs(
+        &self,
+        key_lookup: impl Fn(&Face) -> usize,
+        key_count: usize,
+    ) -> Vec<petgraph::Graph<FaceID, (), petgraph::Undirected>> {
+        let key_count = key_count.max(1);
 
-        let mut graphs =
-            vec![petgraph::graph::UnGraph::<FaceID, ()>::new_undirected(); group_count];
+        let mut graphs = vec![petgraph::graph::UnGraph::<FaceID, ()>::new_undirected(); key_count];
 
         // Stores vecs of face IDs, which should be associated with data in graphs
-        let mut ids = vec![Vec::new(); group_count];
+        let mut ids = vec![Vec::new(); key_count];
         // only needs a single face map, as each face can only be part of one group
         let mut faces = HashMap::new();
 
         // Give every triangle a node
         for (fid, face) in self.iter_faces() {
-            let g = self.clusters[face.cluster_idx].group_index;
-            let n = graphs[g].add_node(fid);
+            let key = key_lookup(face); // self.clusters[face.cluster_idx].group_index;
+            let n = graphs[key].add_node(fid);
 
             // indexes should correspond
-            assert_eq!(n.index(), ids[g].len());
-            ids[g].push(fid);
+            assert_eq!(n.index(), ids[key].len());
+            ids[key].push(fid);
 
             faces.insert(fid, n);
         }
         // Apply links between nodes
         for (fid, face) in self.iter_faces() {
-            let g = self.clusters[face.cluster_idx].group_index;
+            let key = key_lookup(face); // self.clusters[face.cluster_idx].group_index;
 
             for e in self.iter_edge_loop(face.edge) {
                 if let Some(twin) = self.get_edge(e).twin {
                     let other_face = self.get_edge(twin).face;
-                    let o_g = self.clusters[self.get_face(other_face).cluster_idx].group_index;
+                    let o_key = key_lookup(self.get_face(other_face)); // self.clusters[self.get_face(other_face).cluster_idx].group_index;
 
-                    if g == o_g {
-                        graphs[g].update_edge(faces[&fid], faces[&other_face], ());
+                    if key == o_key {
+                        graphs[key].update_edge(faces[&fid], faces[&other_face], ());
                     }
                 }
             }
         }
         graphs
+    }
+
+    /// `generate_face_graph`, but with one graph per group
+    pub fn generate_group_keyed_graphs(
+        &self,
+    ) -> Vec<petgraph::Graph<FaceID, (), petgraph::Undirected>> {
+        self.generate_keyed_graphs(
+            |face| self.clusters[face.cluster_idx].group_index,
+            self.groups.len(),
+        )
+    }
+
+    /// `generate_face_graph`, but with one graph per cluster
+    pub fn generate_cluster_keyed_graphs(
+        &self,
+    ) -> Vec<petgraph::Graph<FaceID, (), petgraph::Undirected>> {
+        self.generate_keyed_graphs(|face| face.cluster_idx, self.cluster_count())
     }
 
     /// Generates a graph of all partitions and their neighbours.

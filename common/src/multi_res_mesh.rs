@@ -41,7 +41,7 @@ impl BoundingSphere {
 
 #[derive(Debug, Clone, Decode, Encode)]
 pub struct SubMesh {
-    pub indices: Vec<u32>,
+    indices: Vec<Vec<u32>>,
     // Bounding sphere for the submesh
     // TODO: bounding sphere radii
     // Will only be used for culling, so uncomment later
@@ -55,6 +55,7 @@ pub struct SubMesh {
 
 impl SubMesh {
     pub fn new(
+        colours: usize,
         error: f32,
         center: Vec3,
         monotonic_radius: f32,
@@ -62,7 +63,7 @@ impl SubMesh {
         group: usize,
     ) -> Self {
         Self {
-            indices: Vec::new(),
+            indices: vec![Vec::new(); colours],
             // tight_sphere: BoundingSphere {
             //     center: center.to_array(),
             //     radius: radius,
@@ -74,6 +75,20 @@ impl SubMesh {
             error,
             debug_group: group,
         }
+    }
+    pub fn push_tri(&mut self, colour: usize, tri: [usize; 3]) {
+        for v in tri {
+            self.indices[colour].push(v as _)
+        }
+    }
+    pub fn indices_for_colour(&self, colour: usize) -> &Vec<u32> {
+        &self.indices[colour]
+    }
+    pub fn colour_count(&self) -> usize {
+        self.indices.len()
+    }
+    pub fn index_count(&self) -> usize {
+        self.indices.iter().map(|x| x.len()).sum()
     }
 }
 
@@ -109,21 +124,23 @@ pub struct GroupInfo {
 }
 
 /// Information for a partition on layer n
-#[derive(Debug, Clone, Decode, Encode, PartialEq)]
-pub struct PartitionInfo {
+#[derive(Debug, Clone, Decode, Encode, PartialEq, Default)]
+pub struct ClusterInfo {
     /// Group in the previous LOD layer (LOD`n-1`) we have been attached to. LOD0 will have none
     pub child_group_index: Option<usize>,
     /// Group in this layer. will be usize::MAX if not yet grouped, but always valid in a loaded asset
     pub group_index: usize,
     /// For culling purposes - smallest bounding sphere for the partition
     pub tight_bound: BoundingSphere,
+    /// Number of colours within its triangles
+    pub num_colours: usize,
 }
 
 #[derive(Clone, Decode, Encode)]
 pub struct MeshLevel {
     pub partition_indices: Vec<usize>,
     pub group_indices: Vec<usize>,
-    pub partitions: Vec<PartitionInfo>,
+    pub clusters: Vec<ClusterInfo>,
     pub groups: Vec<GroupInfo>,
     /// used by the layer below to tell what dependant tris means
     pub indices: Vec<u32>,

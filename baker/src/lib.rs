@@ -13,7 +13,7 @@ use mesh::winged_mesh::WingedMesh;
 const CLUSTERS_PER_SIMPLIFIED_GROUP: usize = 2;
 const STARTING_CLUSTER_SIZE: usize = 280;
 //TODO: Curb random sized groups and the like to bring this number to more reasonable amounts
-const MAX_TRIS_PER_CLUSTER: usize = 370;
+//const MAX_TRIS_PER_CLUSTER: usize = 126 * 3;
 
 pub fn to_mesh_layer(mesh: &WingedMesh, verts: &[Vec4]) -> MeshLevel {
     MeshLevel {
@@ -21,7 +21,7 @@ pub fn to_mesh_layer(mesh: &WingedMesh, verts: &[Vec4]) -> MeshLevel {
         group_indices: mesh.get_group(),
         indices: grab_indicies(&mesh),
         submeshes: generate_submeshes(mesh, verts),
-        partitions: mesh.clusters.clone(),
+        clusters: mesh.clusters.clone(),
         groups: mesh.groups.clone(),
     }
 }
@@ -121,7 +121,7 @@ pub fn group_and_partition_and_simplify(
     };
 
     let group_clustering_config = &metis::PartitioningConfig {
-        method: metis::PartitioningMethod::MultilevelRecursiveBisection,
+        method: metis::PartitioningMethod::MultilevelKWay,
         force_contiguous_partitions: true,
         //u_factor: Some(1),
         //objective_type: Some(metis::ObjectiveType::Volume),
@@ -129,8 +129,17 @@ pub fn group_and_partition_and_simplify(
         ..Default::default()
     };
 
-    let grouping_config = &metis::PartitioningConfig {
+    let non_contig_even_clustering_config = &metis::PartitioningConfig {
         method: metis::PartitioningMethod::MultilevelRecursiveBisection,
+        //force_contiguous_partitions: true,
+        //u_factor: Some(1),
+        //objective_type: Some(metis::ObjectiveType::Volume),
+        minimize_subgraph_degree: Some(true), // this will sometimes break contiguous partitions
+        ..Default::default()
+    };
+
+    let grouping_config = &metis::PartitioningConfig {
+        method: metis::PartitioningMethod::MultilevelKWay,
         force_contiguous_partitions: true,
         //objective_type: Some(metis::ObjectiveType::Volume),
         u_factor: Some(100), // Strictly require very similar partition sizes
@@ -158,6 +167,9 @@ pub fn group_and_partition_and_simplify(
 
     let mut layers = Vec::new();
 
+    mesh.colour_within_clusters(&non_contig_even_clustering_config, 120)
+        .unwrap();
+
     layers.push(to_mesh_layer(&mesh, &verts));
 
     // Generate 2 more meshes
@@ -175,16 +187,15 @@ pub fn group_and_partition_and_simplify(
             .groups
             .iter()
             .map(|g| {
-                let halved_tris = g.tris / 2;
-                let tris_to_remove_for_cluster_max = g
-                    .tris
-                    .saturating_sub(MAX_TRIS_PER_CLUSTER * CLUSTERS_PER_SIMPLIFIED_GROUP - 25);
-
+                g.tris / 4
+                //let halved_tris = g.tris / 4;
+                //let tris_to_remove_for_cluster_max = g
+                //    .tris
+                //    .saturating_sub(MAX_TRIS_PER_CLUSTER * CLUSTERS_PER_SIMPLIFIED_GROUP - 25);
+                //
                 // Each operation removes 2 triangles.
                 // Do whichever we need to bring ourselves down to the limit. Error function will make up for variations in density
-                tris_to_remove_for_cluster_max
-                    .max(tris_to_remove_for_cluster_max)
-                    .div_ceil(2)
+                //halved_tris.max(halved_tris).div_ceil(2)
             })
             .collect();
 
@@ -194,7 +205,7 @@ pub fn group_and_partition_and_simplify(
         #[cfg(test)]
         {
             println!("Ensuring groups are contiguous... ");
-            let graphs = mesh.generate_group_graphs();
+            let graphs = mesh.generate_group_keyed_graphs();
             for graph in graphs {
                 mesh::graph::test::assert_contiguous_graph(&graph);
             }
@@ -238,6 +249,9 @@ pub fn group_and_partition_and_simplify(
 
         let group_count = mesh.group(&grouping_config, &verts).unwrap();
 
+        mesh.colour_within_clusters(&non_contig_even_clustering_config, 120)
+            .unwrap();
+
         // view a snapshot of the mesh ready to create the next layer
         // let error = (1.0 + i as f32) / 10.0 + rng.gen_range(-0.05..0.05);
 
@@ -255,8 +269,8 @@ pub fn group_and_partition_and_simplify(
     let mut max_tris = 0;
     for l in &layers {
         for m in &l.submeshes {
-            min_tris = min_tris.min(m.indices.len() / 3);
-            max_tris = max_tris.max(m.indices.len() / 3);
+            min_tris = min_tris.min(m.index_count() / 3);
+            max_tris = max_tris.max(m.index_count() / 3);
         }
     }
 
@@ -377,17 +391,20 @@ pub fn generate_submeshes(mesh: &WingedMesh, _verts: &[Vec4]) -> Vec<SubMesh> {
     let inds = 5.0 / mesh.face_count() as f32;
 
     // Precondition: partition indexes completely span in some range 0..N
-    let mut submeshes: Vec<_> = (0..mesh.cluster_count())
-        .map(|part| {
-            let gi = mesh.clusters[part].group_index;
+    let mut submeshes: Vec<_> = mesh
+        .clusters
+        .iter()
+        .map(|cluster| {
+            let gi = cluster.group_index;
             let g = &mesh.groups[gi];
 
             SubMesh::new(
+                cluster.num_colours,
                 //TODO: Connect to quadric error or something
                 1.0,
                 g.monotonic_bound.center(),
                 g.monotonic_bound.radius(),
-                mesh.clusters[part].tight_bound.radius(),
+                cluster.tight_bound.radius(),
                 gi,
             )
         })
@@ -398,10 +415,7 @@ pub fn generate_submeshes(mesh: &WingedMesh, _verts: &[Vec4]) -> Vec<SubMesh> {
 
         let m = submeshes.get_mut(face.cluster_idx as usize).unwrap();
 
-        for v in 0..3 {
-            let vert = verts[v] as u32;
-            m.indices.push(vert);
-        }
+        m.push_tri(face.colour, verts);
 
         m.error += inds;
     }
