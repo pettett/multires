@@ -1,7 +1,7 @@
 use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
 
-use crate::VulkanApp26;
+use crate::App;
 
 const IS_PAINT_FPS_COUNTER: bool = true;
 
@@ -18,15 +18,6 @@ pub fn init_window(
         .expect("Failed to create window.")
 }
 
-pub trait VulkanApp {
-    fn draw_frame(&mut self, delta_time: f32);
-    fn recreate_swapchain(&mut self);
-    fn cleanup_swapchain(&self);
-    fn wait_device_idle(&self);
-    fn resize_framebuffer(&mut self);
-    fn window_ref(&self) -> &winit::window::Window;
-}
-
 pub struct ProgramProc {
     pub event_loop: EventLoop<()>,
 }
@@ -39,7 +30,7 @@ impl ProgramProc {
         ProgramProc { event_loop }
     }
 
-    pub fn main_loop(self, mut vulkan_app: VulkanApp26) {
+    pub fn main_loop(self, mut vulkan_app: App) {
         let mut tick_counter = super::fps_limiter::FPSLimiter::new();
 
         self.event_loop

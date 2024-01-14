@@ -27,157 +27,173 @@ pub struct ClusterData {
 
     // Pad alignment to 4 bytes
     pub radius: f32,
-    pub layer: i32,
+    pub layer: u32,
     _2: i32,
 
     _3: i32,
     _4: i32,
-    _5: i32,
-    _6: i32,
+    pub meshlet_start: u32,
+    pub meshlet_count: u32,
 }
 
-pub fn cluster_data_from_asset(
-    asset: &MultiResMesh,
-) -> (Vec<ClusterData>, Vec<u32>, Vec<i32>, Vec<i32>) {
-    let mut all_clusters_data_real_error = Vec::new();
-    let mut indices = Vec::new();
-    // Face indexed array
-    let mut partitions = Vec::new();
-    // Partition indexed array
-    let mut groups = Vec::new();
+pub trait MultiResData {
+    fn cluster_data(&self) -> Vec<ClusterData>;
+    fn indices_partitions_groups(&self) -> (Vec<u32>, Vec<i32>, Vec<i32>);
+}
 
-    let mut cluster_idx = 0;
+impl MultiResData for MultiResMesh {
+    fn cluster_data(&self) -> Vec<ClusterData> {
+        let mut all_clusters_data_real_error = Vec::new();
 
-    let mut dag = petgraph::Graph::new();
-    let mut clusters_per_lod = vec![Vec::new(); asset.lods.len()];
+        let mut dag = petgraph::Graph::new();
+        let mut clusters_per_lod = vec![Vec::new(); self.lods.len()];
 
-    for (level, r) in asset.lods.iter().enumerate().rev() {
-        println!("Loading layer {level}:");
-        let cluster_nodes = &mut clusters_per_lod[level];
+        let mut index_sum = 0;
 
-        for (_cluster_layer_idx, submesh) in r.submeshes.iter().enumerate() {
-            // Map index buffer to global vertex range
+        for (level, r) in self.lods.iter().enumerate().rev() {
+            println!("Loading layer {level}:");
+            let cluster_nodes = &mut clusters_per_lod[level];
 
-            let index_count = submesh.index_count() as u32;
+            for (_cluster_layer_idx, submesh) in r.submeshes.iter().enumerate() {
+                // Map index buffer to global vertex range
 
-            for _ in 0..(index_count / 3) {
-                partitions.push(cluster_idx as i32);
-            }
-            groups.push(submesh.debug_group as i32);
+                let index_count = submesh.index_count() as u32;
 
-            cluster_idx += 1;
+                all_clusters_data_real_error.push(ClusterData {
+                    index_offset: index_sum,
+                    index_count,
+                    error: submesh.error,
+                    center_x: submesh.saturated_sphere.center().x,
+                    center_y: submesh.saturated_sphere.center().y,
+                    center_z: submesh.saturated_sphere.center().z,
+                    parent0: -1,
+                    parent1: -1,
+                    co_parent: -1,
+                    radius: submesh.saturated_sphere.radius(),
+                    layer: level as _,
+                    ..ClusterData::default()
+                });
 
-            // let model = BufferGroup::create_single(
-            //     &[Mat4::from_translation(submesh.saturated_sphere.center())
-            //         * Mat4::from_scale(Vec3::ONE * submesh.saturated_sphere.radius())],
-            //     wgpu::BufferUsages::UNIFORM,
-            //     instance.device(),
-            //     instance.model_bind_group_layout(),
-            //     Some("Uniform Debug Model Buffer"),
-            // );
+                index_sum += index_count;
 
-            all_clusters_data_real_error.push(ClusterData {
-                index_offset: indices.len() as u32,
-                index_count,
-                error: submesh.error,
-                center_x: submesh.saturated_sphere.center().x,
-                center_y: submesh.saturated_sphere.center().y,
-                center_z: submesh.saturated_sphere.center().z,
-                parent0: -1,
-                parent1: -1,
-                co_parent: -1,
-                radius: submesh.saturated_sphere.radius(),
-                layer: level as _,
-                ..ClusterData::default()
-            });
-
-            cluster_nodes.push(dag.add_node(level));
-
-            // Push to indices *after* recording the offset above
-            for i in 0..submesh.colour_count() {
-                indices.extend_from_slice(&submesh.indices_for_colour(i));
+                cluster_nodes.push(dag.add_node(level));
             }
         }
-    }
 
-    assert_eq!(partitions.len(), indices.len() / 3);
-    // The last partition should be the largest
-    assert_eq!(groups.len(), *partitions.last().unwrap() as usize + 1);
+        // Search for [dependencies], group members, and dependants
+        for (level, cluster_nodes) in clusters_per_lod.iter().enumerate() {
+            for (cluster_idx, &cluster_node_idx) in cluster_nodes.iter().enumerate() {
+                let cluster_group_idx = self.lods[level].clusters[cluster_idx].group_index;
 
-    // Search for [dependencies], group members, and dependants
-    for (level, cluster_nodes) in clusters_per_lod.iter().enumerate() {
-        for (cluster_idx, &cluster_node_idx) in cluster_nodes.iter().enumerate() {
-            let cluster_group_idx = asset.lods[level].clusters[cluster_idx].group_index;
+                assert!(self.lods[level].groups[cluster_group_idx]
+                    .partitions
+                    .contains(&cluster_idx));
 
-            assert!(asset.lods[level].groups[cluster_group_idx]
-                .partitions
-                .contains(&cluster_idx));
+                let Some(child_group_idx) =
+                    self.lods[level].clusters[cluster_idx].child_group_index
+                else {
+                    continue;
+                };
 
-            let Some(child_group_idx) = asset.lods[level].clusters[cluster_idx].child_group_index
-            else {
-                continue;
-            };
+                // To have a child group, level > 0
 
-            // To have a child group, level > 0
+                let child_clusters: Vec<_> = self.lods[level - 1].groups[child_group_idx]
+                    .partitions
+                    .iter()
+                    .map(|&child_partition| clusters_per_lod[level - 1][child_partition])
+                    .collect();
 
-            let child_clusters: Vec<_> = asset.lods[level - 1].groups[child_group_idx]
-                .partitions
-                .iter()
-                .map(|&child_partition| clusters_per_lod[level - 1][child_partition])
-                .collect();
+                // println!("{}", child_partitions.len());
 
-            // println!("{}", child_partitions.len());
+                for &child in &child_clusters {
+                    // only the partitions with a shared boundary should be listed as dependants
 
-            for &child in &child_clusters {
-                // only the partitions with a shared boundary should be listed as dependants
-
-                dag.add_edge(cluster_node_idx, child, ());
-            }
-        }
-    }
-
-    // petgraph_to_svg(
-    //     &dag,
-    //     "svg\\asset_dag.svg",
-    //     &|_, _| String::new(),
-    //     common::graph::GraphSVGRender::Directed {
-    //         node_label: common::graph::Label::Weight,
-    //     },
-    // )
-    // .unwrap();
-
-    // Search for Co-parents
-    for i in 0..all_clusters_data_real_error.len() {
-        let parents = dag
-            .neighbors_directed(
-                petgraph::graph::node_index(i),
-                petgraph::Direction::Incoming,
-            )
-            .collect::<Vec<_>>();
-
-        match parents[..] {
-            [p0, p1] => {
-                // Set co-parent pointers to each other. This work will be duplicated a lot of times, but it's convenient
-                let id0 = p0.index();
-                let id1 = p1.index();
-
-                all_clusters_data_real_error[id0].co_parent = id1 as _;
-                all_clusters_data_real_error[id1].co_parent = id0 as _;
-
-                // Set parent pointers for ourself
-                all_clusters_data_real_error[i].parent0 = (id0 as i32).min(id1 as i32);
-                all_clusters_data_real_error[i].parent1 = (id0 as i32).max(id1 as i32);
-            }
-            [] => (), // No parents is allowed. Indexes are already -1 by default.
-            _ => {
-                for p in parents {
-                    println!("{:?}", dag[p])
+                    dag.add_edge(cluster_node_idx, child, ());
                 }
-
-                panic!("Non-binary parented DAG, not currently (or ever) supported");
             }
-        };
+        }
+
+        // petgraph_to_svg(
+        //     &dag,
+        //     "svg\\asset_dag.svg",
+        //     &|_, _| String::new(),
+        //     common::graph::GraphSVGRender::Directed {
+        //         node_label: common::graph::Label::Weight,
+        //     },
+        // )
+        // .unwrap();
+
+        // Search for Co-parents
+        for i in 0..all_clusters_data_real_error.len() {
+            let parents = dag
+                .neighbors_directed(
+                    petgraph::graph::node_index(i),
+                    petgraph::Direction::Incoming,
+                )
+                .collect::<Vec<_>>();
+
+            match parents[..] {
+                [p0, p1] => {
+                    // Set co-parent pointers to each other. This work will be duplicated a lot of times, but it's convenient
+                    let id0 = p0.index();
+                    let id1 = p1.index();
+
+                    all_clusters_data_real_error[id0].co_parent = id1 as _;
+                    all_clusters_data_real_error[id1].co_parent = id0 as _;
+
+                    // Set parent pointers for ourself
+                    all_clusters_data_real_error[i].parent0 = (id0 as i32).min(id1 as i32);
+                    all_clusters_data_real_error[i].parent1 = (id0 as i32).max(id1 as i32);
+                }
+                [] => (), // No parents is allowed. Indexes are already -1 by default.
+                _ => {
+                    for p in parents {
+                        println!("{:?}", dag[p])
+                    }
+
+                    panic!("Non-binary parented DAG, not currently (or ever) supported");
+                }
+            };
+        }
+
+        all_clusters_data_real_error
     }
 
-    (all_clusters_data_real_error, indices, partitions, groups)
+    fn indices_partitions_groups(&self) -> (Vec<u32>, Vec<i32>, Vec<i32>) {
+        let mut indices = Vec::new();
+        // Face indexed array
+        let mut partitions = Vec::new();
+        // Partition indexed array
+        let mut groups = Vec::new();
+
+        let mut cluster_idx = 0;
+
+        for (level, r) in self.lods.iter().enumerate().rev() {
+            println!("Loading layer {level}:");
+
+            for (_cluster_layer_idx, submesh) in r.submeshes.iter().enumerate() {
+                // Map index buffer to global vertex range
+
+                let index_count = submesh.index_count() as u32;
+
+                for _ in 0..(index_count / 3) {
+                    partitions.push(cluster_idx as i32);
+                }
+                groups.push(submesh.debug_group as i32);
+
+                cluster_idx += 1;
+
+                // Push to indices *after* recording the offset above
+                for i in 0..submesh.colour_count() {
+                    indices.extend_from_slice(&submesh.indices_for_colour(i));
+                }
+            }
+        }
+
+        assert_eq!(partitions.len(), indices.len() / 3);
+        // The last partition should be the largest
+        assert_eq!(groups.len(), *partitions.last().unwrap() as usize + 1);
+
+        (indices, partitions, groups)
+    }
 }

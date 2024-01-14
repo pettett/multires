@@ -12,6 +12,8 @@ use mesh::winged_mesh::WingedMesh;
 
 const CLUSTERS_PER_SIMPLIFIED_GROUP: usize = 2;
 const STARTING_CLUSTER_SIZE: usize = 280;
+
+const COLOUR_CLUSTER_SIZE: usize = 60;
 //TODO: Curb random sized groups and the like to bring this number to more reasonable amounts
 //const MAX_TRIS_PER_CLUSTER: usize = 126 * 3;
 
@@ -167,7 +169,7 @@ pub fn group_and_partition_and_simplify(
 
     let mut layers = Vec::new();
 
-    mesh.colour_within_clusters(&non_contig_even_clustering_config, 120)
+    mesh.colour_within_clusters(&non_contig_even_clustering_config, COLOUR_CLUSTER_SIZE)
         .unwrap();
 
     layers.push(to_mesh_layer(&mesh, &verts));
@@ -249,7 +251,7 @@ pub fn group_and_partition_and_simplify(
 
         let group_count = mesh.group(&grouping_config, &verts).unwrap();
 
-        mesh.colour_within_clusters(&non_contig_even_clustering_config, 120)
+        mesh.colour_within_clusters(&non_contig_even_clustering_config, COLOUR_CLUSTER_SIZE)
             .unwrap();
 
         // view a snapshot of the mesh ready to create the next layer
@@ -418,6 +420,12 @@ pub fn generate_submeshes(mesh: &WingedMesh, _verts: &[Vec4]) -> Vec<SubMesh> {
         m.push_tri(face.colour, verts);
 
         m.error += inds;
+    }
+
+    for s in &submeshes {
+        for i in 0..s.colour_count() {
+            assert!(s.colour_vert_count(i) <= 64)
+        }
     }
 
     // let data = VertexDataAdapter::new(bytemuck::cast_slice(&verts), std::mem::size_of::<Vec4>(), 0)

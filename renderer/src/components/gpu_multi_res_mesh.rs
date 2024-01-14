@@ -9,7 +9,7 @@ use bevy_ecs::{
 use common::{asset::Asset, MultiResMesh};
 use common_renderer::components::{
     camera::Camera,
-    gpu_mesh_util::{cluster_data_from_asset, ClusterData},
+    gpu_mesh_util::{ClusterData, MultiResData},
     transform::Transform,
 };
 use glam::{Mat4, Vec3};
@@ -935,8 +935,9 @@ impl MultiResMeshAsset {
     pub fn load_mesh(instance: Arc<Instance>, mesh_renderer: &MultiResMeshRenderer) -> Self {
         let asset = common::MultiResMesh::load().unwrap();
 
-        let (all_clusters_data_real_error, indices, partitions, groups) =
-            cluster_data_from_asset(&asset);
+        let all_clusters_data_real_error = asset.cluster_data();
+
+        let (indices, partitions, groups) = asset.indices_partitions_groups();
 
         let index_buffer = Arc::new(instance.device().create_buffer_init(
             &wgpu::util::BufferInitDescriptor {

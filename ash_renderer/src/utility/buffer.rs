@@ -124,7 +124,7 @@ pub fn create_storage_buffer<T: bytemuck::Pod>(
     command_pool: Arc<CommandPool>,
     submit_queue: vk::Queue,
     data: &[T],
-) -> Buffer {
+) -> Arc<Buffer> {
     let buffer_size = ::std::mem::size_of_val(data) as vk::DeviceSize;
 
     let staging_buffer = create_buffer(
@@ -168,9 +168,9 @@ pub fn create_storage_buffer<T: bytemuck::Pod>(
         buffer_size,
     );
 
-    println!("{}", buffer_size);
+    println!("Created buffer, size: {}", buffer_size);
 
-    storage_buffer
+    Arc::new(storage_buffer)
 }
 
 pub fn create_uniform_buffers(

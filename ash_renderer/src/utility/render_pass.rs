@@ -2,7 +2,7 @@ use std::ptr;
 
 use ash::vk;
 
-use crate::VulkanApp26;
+use crate::App;
 
 pub fn create_render_pass(
     instance: &ash::Instance,
@@ -24,7 +24,7 @@ pub fn create_render_pass(
 
     let depth_attachment = vk::AttachmentDescription {
         flags: vk::AttachmentDescriptionFlags::empty(),
-        format: VulkanApp26::find_depth_format(instance, physcial_device),
+        format: App::find_depth_format(instance, physcial_device),
         samples: vk::SampleCountFlags::TYPE_1,
         load_op: vk::AttachmentLoadOp::CLEAR,
         store_op: vk::AttachmentStoreOp::DONT_CARE,

@@ -1,9 +1,11 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 
 use bincode::{Decode, Encode};
 use glam::Vec3;
 
 use crate::asset;
+
+pub const MAX_INDICES_PER_COLOUR: usize = 126 * 3;
 
 #[derive(Debug, Default, Clone, Decode, Encode, PartialEq)]
 pub struct BoundingSphere {
@@ -80,6 +82,8 @@ impl SubMesh {
         for v in tri {
             self.indices[colour].push(v as _)
         }
+
+        assert!(self.indices.len() <= MAX_INDICES_PER_COLOUR);
     }
     pub fn indices_for_colour(&self, colour: usize) -> &Vec<u32> {
         &self.indices[colour]
@@ -89,6 +93,9 @@ impl SubMesh {
     }
     pub fn index_count(&self) -> usize {
         self.indices.iter().map(|x| x.len()).sum()
+    }
+    pub fn colour_vert_count(&self, colour: usize) -> usize {
+        self.indices[colour].iter().collect::<HashSet<_>>().len()
     }
 }
 

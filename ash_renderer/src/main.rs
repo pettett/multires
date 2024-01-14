@@ -12,7 +12,7 @@ use crate::utility::{
     render_pass::create_render_pass,
     structures::*,
     sync::SyncObjects,
-    window::{ProgramProc, VulkanApp},
+    window::ProgramProc,
 };
 
 use ash::{extensions::ext::MeshShader, vk};
@@ -24,10 +24,14 @@ use common_renderer::components::{
     camera_controller::{
         camera_handle_input, update_camera, CameraController, KeyIn, MouseIn, MouseMv,
     },
+    gpu_mesh_util::MultiResData,
     transform::Transform,
 };
 use glam::{Mat4, Quat, Vec3A};
-use utility::{device::Device, pipeline::Pipeline, surface::Surface, swapchain::Swapchain};
+use utility::{
+    device::Device, pipeline::Pipeline, pools::DescriptorSet, surface::Surface,
+    swapchain::Swapchain,
+};
 use winit::event::WindowEvent;
 
 use std::ptr;
@@ -37,7 +41,14 @@ use std::{path::Path, sync::Arc};
 const WINDOW_TITLE: &'static str = "26.Depth Buffering";
 const TEXTURE_PATH: &'static str = "../../../assets/vulkan.jpg";
 
-pub struct VulkanApp26 {
+pub trait VkWrapper {
+    type Item;
+
+    fn vk_root(&self) -> Self::Item;
+}
+pub trait VkDevice: VkWrapper<Item = vk::Device> {}
+
+pub struct App {
     window: winit::window::Window,
     world: bevy_ecs::world::World,
     schedule: bevy_ecs::schedule::Schedule,
@@ -67,16 +78,13 @@ pub struct VulkanApp26 {
     depth_image: Image,
     texture_image: Image,
 
-    vertex_buffer: utility::buffer::Buffer,
-    index_buffer: utility::buffer::Buffer,
-
     uniform_transform: UniformBufferObject,
     uniform_buffers: Vec<utility::buffer::Buffer>,
 
     descriptor_pool: Arc<DescriptorPool>,
     command_pool: Arc<utility::pools::CommandPool>,
 
-    descriptor_sets: Vec<vk::DescriptorSet>,
+    descriptor_sets: Vec<DescriptorSet>,
 
     command_buffers: Vec<vk::CommandBuffer>,
 
@@ -86,42 +94,57 @@ pub struct VulkanApp26 {
 
     is_framebuffer_resized: bool,
 
-    meshlet_count: u32,
+    submesh_count: u32,
 }
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
-pub struct Meshlet {
+pub struct GpuMeshlet {
     pub vertices: [u32; 64],
     pub indices: [u32; 378], // 126 triangles => 378 indices
     pub vertex_count: u32,
     pub index_count: u32,
 }
 
-unsafe impl bytemuck::Zeroable for Meshlet {}
-unsafe impl bytemuck::Pod for Meshlet {}
+unsafe impl bytemuck::Zeroable for GpuMeshlet {}
+unsafe impl bytemuck::Pod for GpuMeshlet {}
 
-pub fn generate_meshlets(mesh: &MultiResMesh) -> Vec<Meshlet> {
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct GpuSubmesh {
+    pub meshlet_start: u32,
+    pub meshlet_count: u32,
+}
+
+unsafe impl bytemuck::Zeroable for GpuSubmesh {}
+unsafe impl bytemuck::Pod for GpuSubmesh {}
+
+pub fn generate_meshlets(mesh: &MultiResMesh) -> (Vec<GpuSubmesh>, Vec<GpuMeshlet>) {
     println!("Generating meshlets!");
 
     // Precondition: partition indexes completely span in some range 0..N
     let mut meshlets = Vec::new();
+    let mut submeshes = Vec::new();
 
-    for layer in &mesh.lods {
-        for submesh in &layer.submeshes {
-            //assert!(c.indices.len() <= 378);
+    for lod in mesh.lods.iter().rev() {
+        for submesh in &lod.submeshes {
+            let mut s = GpuSubmesh::zeroed();
+
+            s.meshlet_start = meshlets.len() as _;
 
             for c in 0..submesh.colour_count() {
-                let mut m = Meshlet::zeroed();
+                let mut m = GpuMeshlet::zeroed();
+
+                assert!(submesh.indices_for_colour(c).len() <= 126 * 3);
 
                 for &vert in submesh.indices_for_colour(c) {
                     // If unique, add to list
-                    let idx = (0..m.vertex_count as usize).find(|j| m.vertices[*j] == vert);
+                    let idx = (0..m.vertex_count as usize).find(|&j| m.vertices[j] == vert);
 
                     let idx = if let Some(idx) = idx {
                         idx as u32
                     } else {
-                        //assert!((m.vertex_count as usize) < m.vertices.len());
+                        assert!((m.vertex_count as usize) < 64);
 
                         m.vertex_count += 1;
 
@@ -136,13 +159,16 @@ pub fn generate_meshlets(mesh: &MultiResMesh) -> Vec<Meshlet> {
 
                 meshlets.push(m);
             }
+
+            s.meshlet_count = meshlets.len() as u32 - s.meshlet_start;
+            submeshes.push(s);
         }
     }
 
-    meshlets
+    (submeshes, meshlets)
 }
 
-impl VulkanApp26 {
+impl App {
     pub fn input(&mut self, event: &WindowEvent) -> bool {
         match event {
             WindowEvent::MouseInput { state, button, .. } => self
@@ -158,7 +184,7 @@ impl VulkanApp26 {
         false
     }
 
-    pub fn new(event_loop: &winit::event_loop::EventLoop<()>) -> VulkanApp26 {
+    pub fn new(event_loop: &winit::event_loop::EventLoop<()>) -> App {
         println!("initing window");
         let window =
             utility::window::init_window(&event_loop, WINDOW_TITLE, WINDOW_WIDTH, WINDOW_HEIGHT);
@@ -198,8 +224,6 @@ impl VulkanApp26 {
             &surface,
         );
 
-        let ms = MeshShader::new(&instance.handle, &device.handle);
-
         println!("Loading queues");
         let graphics_queue = unsafe {
             device
@@ -238,7 +262,7 @@ impl VulkanApp26 {
             queue_family.graphics_family.unwrap(),
         );
 
-        let depth_image = VulkanApp26::create_depth_resources(
+        let depth_image = App::create_depth_resources(
             &instance.handle,
             device.clone(),
             physical_device,
@@ -247,7 +271,7 @@ impl VulkanApp26 {
             swapchain.extent,
             &physical_device_memory_properties,
         );
-        let swapchain_framebuffers = VulkanApp26::create_framebuffers(
+        let swapchain_framebuffers = App::create_framebuffers(
             &device.handle,
             render_pass,
             &swapchain_imageviews,
@@ -270,8 +294,16 @@ impl VulkanApp26 {
 
         let data = MultiResMesh::load().unwrap();
 
-        let meshlets = generate_meshlets(&data);
-        println!("V: {:?} I: {:?}", data.verts.len(), meshlets.len());
+        let (submeshs, meshlets) = generate_meshlets(&data);
+
+        let mut all_clusters_data_real_error = data.cluster_data();
+
+        for (i, submesh) in submeshs.into_iter().enumerate() {
+            all_clusters_data_real_error[i].meshlet_start = submesh.meshlet_start;
+            all_clusters_data_real_error[i].meshlet_count = submesh.meshlet_count;
+        }
+
+        println!("V: {:?} M: {:?}", data.verts.len(), meshlets.len());
 
         let vertex_buffer = create_storage_buffer(
             device.clone(),
@@ -281,13 +313,22 @@ impl VulkanApp26 {
             &data.verts,
         );
 
-        let index_buffer = create_storage_buffer(
+        let meshlet_buffer = create_storage_buffer(
             device.clone(),
             &physical_device_memory_properties,
             command_pool.clone(),
             graphics_queue,
             &meshlets,
         );
+
+        let submesh_buffer = create_storage_buffer(
+            device.clone(),
+            &physical_device_memory_properties,
+            command_pool.clone(),
+            graphics_queue,
+            &all_clusters_data_real_error,
+        );
+
         let uniform_buffers = create_uniform_buffers(
             device.clone(),
             &physical_device_memory_properties,
@@ -302,24 +343,23 @@ impl VulkanApp26 {
             &descriptor_pool,
             ubo_layout,
             &uniform_buffers,
-            &vertex_buffer,
-            &index_buffer,
+            vertex_buffer.clone(),
+            meshlet_buffer.clone(),
+            submesh_buffer.clone(),
             &texture_image,
             swapchain.images.len(),
         );
 
         println!("Loading command buffers");
 
-        let command_buffers = VulkanApp26::create_command_buffers(
-            meshlets.len() as u32,
+        let command_buffers = App::create_command_buffers(
+            all_clusters_data_real_error.len() as u32,
             &device,
             command_pool.pool,
             graphics_pipeline.pipeline(),
             &swapchain_framebuffers,
             render_pass,
             swapchain.extent,
-            &vertex_buffer,
-            &index_buffer,
             graphics_pipeline.layout(),
             &descriptor_sets,
         );
@@ -348,7 +388,7 @@ impl VulkanApp26 {
         schedule.add_systems((camera_handle_input, update_camera));
 
         // cleanup(); the 'drop' function will take care of it.
-        VulkanApp26 {
+        App {
             // winit stuff
             window,
             world,
@@ -381,9 +421,6 @@ impl VulkanApp26 {
 
             texture_image,
 
-            vertex_buffer,
-            index_buffer,
-
             uniform_transform: UniformBufferObject {
                 model: Mat4::from_rotation_z(1.5),
                 view_proj: cam.build_view_projection_matrix(&transform),
@@ -401,7 +438,7 @@ impl VulkanApp26 {
 
             is_framebuffer_resized: false,
 
-            meshlet_count: meshlets.len() as u32,
+            submesh_count: all_clusters_data_real_error.len() as u32,
         }
     }
 
@@ -414,7 +451,7 @@ impl VulkanApp26 {
         swapchain_extent: vk::Extent2D,
         device_memory_properties: &vk::PhysicalDeviceMemoryProperties,
     ) -> Image {
-        let depth_format = VulkanApp26::find_depth_format(instance, physical_device);
+        let depth_format = App::find_depth_format(instance, physical_device);
         Image::create_image(
             device,
             swapchain_extent.width,
@@ -434,7 +471,7 @@ impl VulkanApp26 {
         instance: &ash::Instance,
         physical_device: vk::PhysicalDevice,
     ) -> vk::Format {
-        VulkanApp26::find_supported_format(
+        App::find_supported_format(
             instance,
             physical_device,
             &[
@@ -514,19 +551,17 @@ impl VulkanApp26 {
 }
 
 // Fix content -------------------------------------------------------------------------------
-impl VulkanApp26 {
+impl App {
     fn create_command_buffers(
-        meshlet_count: u32,
+        submesh_count: u32,
         device: &Device,
         command_pool: vk::CommandPool,
         graphics_pipeline: vk::Pipeline,
         framebuffers: &Vec<vk::Framebuffer>,
         render_pass: vk::RenderPass,
         surface_extent: vk::Extent2D,
-        vertex_buffer: &utility::buffer::Buffer,
-        index_buffer: &utility::buffer::Buffer,
         pipeline_layout: vk::PipelineLayout,
-        descriptor_sets: &Vec<vk::DescriptorSet>,
+        descriptor_sets: &Vec<DescriptorSet>,
     ) -> Vec<vk::CommandBuffer> {
         let command_buffer_allocate_info = vk::CommandBufferAllocateInfo {
             s_type: vk::StructureType::COMMAND_BUFFER_ALLOCATE_INFO,
@@ -599,9 +634,9 @@ impl VulkanApp26 {
                     graphics_pipeline,
                 );
 
-                let vertex_buffers = [vertex_buffer];
-                let offsets = [0_u64];
-                let descriptor_sets_to_bind = [descriptor_sets[i]];
+                //let vertex_buffers = [vertex_buffer];
+                //let offsets = [0_u64];
+                let descriptor_sets_to_bind = [descriptor_sets[i].vk_root()];
 
                 //device.cmd_bind_vertex_buffers(command_buffer, 0, &vertex_buffers, &offsets);
                 //device.cmd_bind_index_buffer(
@@ -621,7 +656,7 @@ impl VulkanApp26 {
 
                 device
                     .fn_mesh_shader
-                    .cmd_draw_mesh_tasks(command_buffer, meshlet_count, 1, 1);
+                    .cmd_draw_mesh_tasks(command_buffer, submesh_count, 1, 1);
                 // device.cmd_draw_indexed(
                 //     command_buffer,
                 //     RECT_TEX_COORD_INDICES_DATA.len() as u32,
@@ -803,7 +838,7 @@ impl VulkanApp26 {
         );
         self.graphics_pipeline = graphics_pipeline;
 
-        self.depth_image = VulkanApp26::create_depth_resources(
+        self.depth_image = App::create_depth_resources(
             &self.instance.handle,
             self.device.clone(),
             self.physical_device,
@@ -813,23 +848,21 @@ impl VulkanApp26 {
             &self.memory_properties,
         );
 
-        self.swapchain_framebuffers = VulkanApp26::create_framebuffers(
+        self.swapchain_framebuffers = App::create_framebuffers(
             &self.device.handle,
             self.render_pass,
             &self.swapchain_imageviews,
             self.depth_image.image_view(),
             self.swapchain.extent,
         );
-        self.command_buffers = VulkanApp26::create_command_buffers(
-            self.meshlet_count,
+        self.command_buffers = App::create_command_buffers(
+            self.submesh_count,
             &self.device,
             self.command_pool.pool,
             self.graphics_pipeline.pipeline(),
             &self.swapchain_framebuffers,
             self.render_pass,
             self.swapchain.extent,
-            &self.vertex_buffer,
-            &self.index_buffer,
             self.graphics_pipeline.layout(),
             &self.descriptor_sets,
         );
@@ -864,7 +897,7 @@ impl VulkanApp26 {
     }
 }
 
-impl Drop for VulkanApp26 {
+impl Drop for App {
     fn drop(&mut self) {
         unsafe {
             self.cleanup_swapchain();
@@ -883,7 +916,7 @@ impl Drop for VulkanApp26 {
 
 fn main() {
     let program_proc = ProgramProc::new();
-    let vulkan_app = VulkanApp26::new(&program_proc.event_loop);
+    let vulkan_app = App::new(&program_proc.event_loop);
 
     program_proc.main_loop(vulkan_app);
 }

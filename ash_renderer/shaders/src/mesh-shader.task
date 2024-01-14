@@ -3,49 +3,99 @@
 
 #extension GL_ARB_separate_shader_objects: enable
 
-layout (local_size_x = 2, local_size_y = 1, local_size_z = 1) in;
+layout (local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
 
 
-// struct ClusterData {
-//     // Range into the index array that this submesh resides
-//     vec3 center;
+struct ClusterData {
+    // Range into the index array that this submesh resides
+    vec3 center;
 
-//     uint _index_offset ;
-//     uint _index_count ;
+    uint _index_offset;
+    uint _index_count;
 
-// 	float error;
-//     //radius: f32,
-//     // All of these could be none (-1), if we are a leaf or a root node
-//     int parent0  ;
-//     int parent1  ;
+	float error;
+    //radius: f32,
+    // All of these could be none (-1), if we are a leaf or a root node
+    int parent0;
+    int parent1;
 
-//     int co_parent  ;
-// 	// Filler draw_data for alignment
-//     float radius  ;
-//     int _1  ;
-//     int _2  ;
+    int co_parent;
+	// Filler draw_data for alignment
+    float radius;
+    uint layer;
+    int _2;
 
-// 	int _3  ;
-//     int _4  ;
-//     int _5  ;
-// 	int _6  ;
-// }
+	int _3;
+    int _4;
+    uint meshlet_start;
+	uint meshlet_count;
+};
 
-// layout (std430, binding = 5) readonly buffer InputBufferI {
-//     ClusterData clusters[];
-// } cluster_data;
+layout (std430, binding = 2) readonly buffer InputBufferC {
+    ClusterData clusters[];
+} cluster_data;
 
 
 struct MeshTaskPayload {
-    uint meshlet_index[2];
+    uint meshlet_start;
 };
 
 taskPayloadSharedEXT MeshTaskPayload payload;
 
+const float LARGE_ERROR = 100000000000000000.0;
+
+float cluster_error(uint idx) {
+    //bool out_of_range = idx >= draw_data.current_count;
+    //if out_of_range {
+    //    return LARGE_ERROR;
+    //} else {
+        //return cluster_data.clusters[idx].error * (cluster_data.clusters[idx].radius / distance((draw_data.model * vec4(cluster_data.clusters[idx].center, 1.0)).xyz, draw_data.camera_pos));
+		return cluster_data.clusters[idx].error;
+	//}
+}
+
+
 void main() {
-    uint meshlet_index = gl_WorkGroupID.x;
+    uint cluster_index = gl_GlobalInvocationID.x;
     uint thread_id = gl_LocalInvocationID.x;
 
-    payload.meshlet_index[thread_id] = meshlet_index + thread_id;
-    EmitMeshTasksEXT(1, 1, 1);
+
+    // if i >= draw_data.current_count {
+    //     return;
+    // }
+
+
+	// Calculate if this cluster should be drawn:
+	// draw_error >= min(self.error, self.co-parent.error) 
+	// draw_error < min(parent0.error, parent1.error)
+
+	// lots of negative zeros
+    float this_error = -LARGE_ERROR;
+
+    if (cluster_data.clusters[cluster_index].co_parent >= 0) {
+        this_error = min(cluster_error(cluster_index), cluster_error(uint(cluster_data.clusters[cluster_index].co_parent)));
+    }
+
+	// lots of zeros
+    float parent_error = LARGE_ERROR;
+
+    if (cluster_data.clusters[cluster_index].parent0 >= 0) { // If we have one parent, we are guarenteed to have another.
+        parent_error = min(cluster_error(uint(cluster_data.clusters[cluster_index].parent0)), cluster_error(uint(cluster_data.clusters[cluster_index].parent1)));
+    }
+
+	float error = 1.1;
+
+    bool cull = error >= this_error && error < parent_error;
+
+
+
+	if (cull)
+	{
+    	payload.meshlet_start = cluster_data.clusters[cluster_index].meshlet_start;
+    	//payload.meshlet_start = cluster_index;
+
+    	//EmitMeshTasksEXT(cluster_data.clusters[cluster_index].meshlet_count, 1, 1);
+    	EmitMeshTasksEXT(cluster_data.clusters[cluster_index].meshlet_count, 1, 1);
+	}
+
 } 
