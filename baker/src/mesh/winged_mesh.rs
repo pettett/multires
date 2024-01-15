@@ -704,12 +704,10 @@ pub mod test {
         error::Error,
     };
 
+    use common::graph;
     use metis::PartitioningConfig;
 
-    use crate::{
-        apply_simplification, group_and_partition_and_simplify, group_and_partition_full_res,
-        mesh::{graph::test::assert_contiguous_graph, winged_mesh::WingedMesh},
-    };
+    use crate::mesh::winged_mesh::WingedMesh;
     pub const TEST_MESH_HIGH: &str =
         "C:\\Users\\maxwe\\OneDriveC\\sync\\projects\\assets\\sphere.glb";
 
@@ -877,7 +875,7 @@ pub mod test {
     pub fn test_continued_validity() -> Result<(), Box<dyn Error>> {
         let test_config = &PartitioningConfig {
             method: metis::PartitioningMethod::MultilevelKWay,
-            force_contiguous_partitions: true,
+            force_contiguous_partitions: Some(true),
             minimize_subgraph_degree: Some(true),
             ..Default::default()
         };
@@ -909,7 +907,7 @@ pub mod test {
     pub fn test_faces_boundary() -> Result<(), Box<dyn Error>> {
         let test_config = &PartitioningConfig {
             method: metis::PartitioningMethod::MultilevelKWay,
-            force_contiguous_partitions: true,
+            force_contiguous_partitions: Some(true),
             minimize_subgraph_degree: Some(true),
             ..Default::default()
         };
@@ -1068,7 +1066,7 @@ pub mod test {
         println!("Average Outgoing: {avg_outgoing}, Average Incoming: {avg_incoming}");
         let test_config = &PartitioningConfig {
             method: metis::PartitioningMethod::MultilevelKWay,
-            force_contiguous_partitions: true,
+            force_contiguous_partitions: Some(true),
             minimize_subgraph_degree: Some(true),
             ..Default::default()
         };
@@ -1103,13 +1101,6 @@ pub mod test {
     }
 
     #[test]
-    fn test_group_and_partition() {
-        let (mesh, verts, norms) = WingedMesh::from_gltf(TEST_MESH_CONE);
-
-        // group_and_partition_full_res(working_mesh, &verts, mesh_name.to_owned());
-        group_and_partition_full_res(mesh, &verts, TEST_MESH_CONE.to_owned());
-    }
-    #[test]
     fn test_reduce_contiguous() {
         let (mut mesh, verts, norms) = WingedMesh::from_gltf(TEST_MESH_CONE);
 
@@ -1130,14 +1121,14 @@ pub mod test {
         };
         println!("Asserting contiguous");
         // It should still be contiguous
-        assert_contiguous_graph(&mesh.generate_face_graph());
+        graph::assert_graph_contiguous(&mesh.generate_face_graph());
     }
 
     #[test]
     pub fn test_partition_contiguity() -> Result<(), Box<dyn Error>> {
         let test_config = &PartitioningConfig {
             method: metis::PartitioningMethod::MultilevelKWay,
-            force_contiguous_partitions: true,
+            force_contiguous_partitions: Some(true),
             minimize_subgraph_degree: Some(true),
             ..Default::default()
         };

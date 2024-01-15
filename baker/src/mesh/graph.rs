@@ -137,7 +137,7 @@ impl WingedMesh {
                             .map(|e| graph.edge_weight(e))
                             .flatten();
 
-                        //graph.update_edge(n0, n1, *w.unwrap_or(&0) + 1);
+                        //                        graph.update_edge(n0, n1, *w.unwrap_or(&0) + 1);
                         graph.add_edge(n0, n1, 0);
                     }
                 }
@@ -146,25 +146,21 @@ impl WingedMesh {
 
         // // Add extra connections on the highest weighted neighbour for each node
         // for n in graph.node_indices() {
-        //     let total: i32 = graph.edges(n).map(|x| x.weight()).sum();
+        //     //let total: i32 = graph.edges(n).map(|x| x.weight()).sum();
 
-        //     let edges = graph
+        //     let mut edges = graph
         //         .edges(n)
-        //         .map(|e| (e.source(), e.target(), *e.weight()))
+        //         .filter_map(|e| (*e.weight() > 0).then_some((e.source(), e.target(), *e.weight())))
         //         .collect::<Vec<_>>();
 
-        //     let len = edges.len() as i32;
+        //     edges.sort_by_key(|(_, _, w)| *w);
 
-        //     let avg = total / len;
+        //     //let len = edges.len() as i32;
 
-        //     for (src, tgt, w) in edges {
-        //         if w > avg {
-        //             graph.add_edge(src, tgt, 0);
-        //         }
-        //         if w * 2 > avg * 3 {
-        //             graph.add_edge(src, tgt, 0);
-        //         }
-        //         if w > avg * 2 {
+        //     //let avg = total / len;
+
+        //     for (i, (src, tgt, w)) in edges.into_iter().enumerate() {
+        //         for _ in 0..i {
         //             graph.add_edge(src, tgt, 0);
         //         }
         //     }
@@ -209,8 +205,18 @@ impl WingedMesh {
         graph
     }
 }
+
 #[cfg(test)]
 pub mod test {
+    use std::{collections::HashMap, error};
+
+    use common::graph;
+
+    use crate::mesh::winged_mesh::{
+        test::{TEST_MESH_LOW, TEST_MESH_PLANE_LOW},
+        WingedMesh,
+    };
+
     pub const DOT_OUT: &str = "baker\\graph.gv";
 
     pub const HIERARCHY_SVG_OUT: &str = "baker\\hierarchy_graph.svg";
@@ -233,39 +239,12 @@ pub mod test {
         "orchid",
         "peru",
     ];
-    pub fn assert_contiguous_graph<V: std::fmt::Debug, E: std::fmt::Debug>(
-        graph: &petgraph::Graph<V, E, petgraph::Undirected>,
-    ) {
-        let n0 = petgraph::graph::node_index(0);
-        let mut dfs_space = petgraph::algo::DfsSpace::default();
 
-        for i in graph.node_indices() {
-            if !petgraph::algo::has_path_connecting(&graph, n0, i, Some(&mut dfs_space)) {
-                println!("Graph is not contiguous, outputting error...");
-
-                graph::petgraph_to_svg(
-                    graph,
-                    ERROR_SVG_OUT,
-                    &|_, _| String::new(),
-                    graph::GraphSVGRender::Directed {
-                        node_label: common::graph::Label::None,
-                    },
-                )
-                .unwrap();
-
-                assert!(
-                    false,
-                    "Graph is not contiguous. Outputted error graph to {}",
-                    ERROR_SVG_OUT
-                );
-            }
-        }
-    }
     #[test]
-    pub fn generate_face_graph() -> Result<(), Box<dyn error::Error>> {
+    pub fn test_generate_face_graph() -> Result<(), Box<dyn error::Error>> {
         let test_config = &metis::PartitioningConfig {
             method: metis::PartitioningMethod::MultilevelKWay,
-            force_contiguous_partitions: true,
+            force_contiguous_partitions: Some(true),
             minimize_subgraph_degree: Some(true),
             ..Default::default()
         };
@@ -338,7 +317,7 @@ pub mod test {
     pub fn generate_partition_graph() -> Result<(), Box<dyn error::Error>> {
         let test_config = &metis::PartitioningConfig {
             method: metis::PartitioningMethod::MultilevelKWay,
-            force_contiguous_partitions: true,
+            force_contiguous_partitions: Some(true),
             minimize_subgraph_degree: Some(true),
             ..Default::default()
         };
@@ -366,7 +345,7 @@ pub mod test {
     pub fn generate_partition_hierarchy_graph() -> Result<(), Box<dyn error::Error>> {
         let test_config = &metis::PartitioningConfig {
             method: metis::PartitioningMethod::MultilevelKWay,
-            force_contiguous_partitions: true,
+            force_contiguous_partitions: Some(true),
             minimize_subgraph_degree: Some(true),
             ..Default::default()
         };
@@ -433,13 +412,4 @@ pub mod test {
 
         Ok(())
     }
-
-    use std::{collections::HashMap, error};
-
-    use common::graph;
-
-    use crate::mesh::winged_mesh::{
-        test::{TEST_MESH_LOW, TEST_MESH_PLANE_LOW},
-        WingedMesh,
-    };
 }

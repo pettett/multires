@@ -555,7 +555,8 @@ impl MultiResMeshComponent {
             // Quick conservative estimation of total clusters that could be drawn to test performance impact.
             let current_count = (((mesh.cluster_count as f32 / cam_dist) * 400.0
                 / (mesh_renderer.error_target)) as u32)
-                .min(mesh.cluster_count);
+                .min(mesh.cluster_count)
+                .max(4);
 
             //let current_count = mesh.cluster_count;
 

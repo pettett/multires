@@ -4,7 +4,7 @@ use baker::mesh::winged_mesh::WingedMesh;
 fn group_and_partition_and_simplify(mesh: &mut WingedMesh, verts: &[glam::Vec4]) {
     let config = &metis::PartitioningConfig {
         method: metis::PartitioningMethod::MultilevelKWay,
-        force_contiguous_partitions: true,
+        force_contiguous_partitions: Some(true),
         minimize_subgraph_degree: Some(true),
         ..Default::default()
     };

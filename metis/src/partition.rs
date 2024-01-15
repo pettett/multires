@@ -18,6 +18,7 @@ use crate::{
     miptype_et_METIS_IPTYPE_METISRB, mobjtype_et_METIS_OBJTYPE_CUT, mobjtype_et_METIS_OBJTYPE_VOL,
     moptions_et_METIS_OPTION_OBJTYPE, mptype_et_METIS_PTYPE_KWAY, mptype_et_METIS_PTYPE_RB,
 };
+use common::graph::filter_nodes_by_weight;
 use petgraph::visit::EdgeRef;
 use std::ptr::null_mut;
 use thiserror::Error;
@@ -99,6 +100,79 @@ pub enum ObjectiveType {
     Volume = mobjtype_et_METIS_OBJTYPE_VOL,
 }
 
+/// Configuration for METIS graph partitioning, with only valid options for K-way partitioning.
+/// METIS_OPTION_OBJTYPE, METIS_OPTION_CTYPE, METIS_OPTION_IPTYPE,
+/// METIS_OPTION_RTYPE, METIS_OPTION_NO2HOP, METIS_OPTION_NCUTS,
+/// METIS_OPTION_NITER, METIS_OPTION_UFACTOR, METIS_OPTION_MINCONN,
+/// METIS_OPTION_CONTIG, METIS_OPTION_SEED, METIS_OPTION_NUMBERING,
+/// METIS_OPTION_DBGLVL
+pub struct MultilevelKWayPartitioningConfig {
+    /// `METIS_OPTION_OBJTYPE`
+    pub objective_type: Option<ObjectiveType>,
+    /// Specifies the matching scheme to be used during coarsening
+    /// `METIS_OPTION_CTYPE`
+    pub coarsening: Option<CoarseningScheme>,
+    /// Specifies the algorithm used during initial partitioning
+    /// `METIS_OPTION_IPTYPE`
+    pub initial_partitioning: Option<InitialPartitioningAlgorithm>,
+    /// Specifies the algorithm used for refinement
+    /// `METIS_OPTION_RTYPE`
+    pub refinement: Option<RefinementAlgorithm>,
+    /// Specifies that the coarsening will not perform any 2–hop matchings when the standard matching approach fails to
+    /// sufficiently coarsen the graph. The 2–hop matching is very effective for graphs with power-law degree distributions.
+    /// `METIS_OPTION_NO2HOP`
+    pub two_hop_matching: Option<bool>,
+    /// Specifies the number of different partitionings that it will compute.
+    /// The final partitioning is the one that achieves the best edgecut or communication volume.
+    /// Default is 1.
+    /// `METIS_OPTION_NCUTS`
+    pub partitioning_attempts: Option<i32>,
+
+    /// Specifies the number of iterations for the refinement algorithms at each stage of the uncoarsening process.
+    /// Default is 10.
+    /// `METIS_OPTION_NITER`
+    pub refinement_iterations: Option<i32>,
+    /// Specifies the maximum allowed load imbalance among the partitions. (See manual.pdf for details)
+    /// `METIS_OPTION_UFACTOR`
+    pub u_factor: Option<i32>,
+
+    /// Specifies that the partitioning routines should try to minimize the maximum degree of the subdomain graph,
+    /// i.e., the graph in which each partition is a node, and edges connect subdomains with a shared interface.
+    /// `METIS_OPTION_MINCONN`
+    pub minimize_subgraph_degree: Option<bool>,
+
+    /// Specifies that the partitioning routines should try to produce partitions that are contiguous.
+    /// Note that if the input graph is not connected this option is ignored.
+    /// `METIS_OPTION_CONTIG`
+    pub force_contiguous_partitions: Option<bool>,
+    /// Specifies the seed for the random number generator.
+    /// `METIS_OPTION_SEED`
+    pub rng_seed: Option<i32>,
+}
+
+impl Into<PartitioningConfig> for MultilevelKWayPartitioningConfig {
+    fn into(self) -> PartitioningConfig {
+        PartitioningConfig {
+            method: PartitioningMethod::MultilevelKWay,
+            coarsening: self.coarsening,
+            initial_partitioning: self.initial_partitioning,
+            refinement: self.refinement,
+            partitioning_attempts: self.partitioning_attempts,
+            separator_attempts: None,
+            refinement_iterations: self.refinement_iterations,
+            objective_type: self.objective_type,
+            rng_seed: self.rng_seed,
+            minimize_subgraph_degree: self.minimize_subgraph_degree,
+            two_hop_matching: self.two_hop_matching,
+            force_contiguous_partitions: self.force_contiguous_partitions,
+            compress_graph: Some(false),
+            //order_contiguous_components: None,
+            p_factor: None,
+            u_factor: self.u_factor,
+        }
+    }
+}
+
 /// Configuration for METIS graph partitioning.
 /// Used to select an algorithm and configure METIS options.
 /// [`None`] values correspond to the default METIS option.
@@ -144,7 +218,7 @@ pub struct PartitioningConfig {
     /// Specifies that the partitioning routines should try to produce partitions that are contiguous.
     /// Note that if the input graph is not connected this option is ignored.
     /// `METIS_OPTION_CONTIG`
-    pub force_contiguous_partitions: bool,
+    pub force_contiguous_partitions: Option<bool>,
     /// Specifies that the graph should be compressed by combining together vertices that have identical adjacency lists.
     /// `METIS_OPTION_COMPRESS`
     pub compress_graph: Option<bool>,
@@ -173,10 +247,28 @@ impl Default for PartitioningConfig {
             rng_seed: None,
             minimize_subgraph_degree: None,
             two_hop_matching: None,
-            force_contiguous_partitions: true,
+            force_contiguous_partitions: None,
             compress_graph: Some(false),
             //order_contiguous_components: None,
             p_factor: None,
+            u_factor: None,
+        }
+    }
+}
+
+impl Default for MultilevelKWayPartitioningConfig {
+    fn default() -> Self {
+        Self {
+            coarsening: None,
+            initial_partitioning: None,
+            refinement: None,
+            partitioning_attempts: None,
+            refinement_iterations: None,
+            objective_type: None,
+            rng_seed: None,
+            minimize_subgraph_degree: None,
+            two_hop_matching: None,
+            force_contiguous_partitions: Some(true),
             u_factor: None,
         }
     }
@@ -221,8 +313,9 @@ impl PartitioningConfig {
             options[moptions_et_METIS_OPTION_NO2HOP as usize] = 1 - idx_t::from(x);
         }
 
-        options[moptions_et_METIS_OPTION_CONTIG as usize] =
-            idx_t::from(self.force_contiguous_partitions);
+        if let Some(x) = self.force_contiguous_partitions {
+            options[moptions_et_METIS_OPTION_CONTIG as usize] = idx_t::from(x);
+        }
 
         if let Some(x) = self.objective_type {
             options[moptions_et_METIS_OPTION_OBJTYPE as usize] = x as _;
@@ -247,17 +340,56 @@ impl PartitioningConfig {
         //options[moptions_et_METIS_OPTION_DBGLVL as usize] = mdbglvl_et_METIS_DBG_INFO;
     }
 
+    pub fn exact_partition_onto_graph<V, E>(
+        &self,
+        partition_size: usize,
+        graph: &petgraph::graph::UnGraph<V, E>,
+    ) -> Result<(petgraph::graph::UnGraph<i32, E>, u32), PartitioningError>
+    where
+        E: Copy,
+    {
+        if graph.node_count() > partition_size as usize * 4 + 1 {
+            let mut partitioned_graph = self.partition_onto_graph(2, graph)?;
+
+            let graphs = filter_nodes_by_weight(&partitioned_graph, 0..2);
+
+            assert_eq!(graphs.len(), 2);
+
+            let mut total_parts: u32 = 0;
+
+            for g in graphs {
+                let (exact_graph, total_sub_parts) =
+                    self.exact_partition_onto_graph(partition_size, &g)?;
+
+                for n in g.node_indices() {
+                    let original_index = g.node_weight(n).unwrap();
+                    let new_part = (total_parts as i32) + exact_graph.node_weight(n).unwrap();
+
+                    *partitioned_graph
+                        .node_weight_mut(petgraph::graph::node_index(*original_index))
+                        .unwrap() = new_part;
+                }
+                total_parts += total_sub_parts;
+            }
+
+            Ok((partitioned_graph, total_parts))
+        } else {
+            let parts = (graph.node_count() - 1).div_ceil(partition_size) as _;
+            Ok((self.partition_onto_graph(parts, graph)?, parts))
+        }
+    }
+
     pub fn partition_onto_graph<V, E>(
         &self,
         partitions: u32,
         graph: &petgraph::graph::UnGraph<V, E>,
-    ) -> Result<petgraph::graph::UnGraph<usize, E>, PartitioningError>
+    ) -> Result<petgraph::graph::UnGraph<i32, E>, PartitioningError>
     where
         E: Copy,
     {
         let p = self.partition_from_graph(partitions, graph)?;
 
-        Ok(graph.map(|i, _| p[i.index()] as usize, |_, w| *w))
+        Ok(graph.map(|i, _| p[i.index()], |_, w| *w))
     }
 
     pub fn partition_from_graph<V, E>(
@@ -343,7 +475,7 @@ impl PartitioningConfig {
         )
     }
 
-    pub fn partition_from_edge_weighted_edge_graph<V>(
+    pub fn partition_from_edge_weighted_graph<V>(
         &self,
         partitions: u32,
         graph: &petgraph::graph::UnGraph<V, idx_t>,

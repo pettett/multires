@@ -1,12 +1,17 @@
 pub mod mesh;
 pub mod pidge;
 
-use std::collections::BTreeSet;
+use std::{
+    collections::{BTreeSet, HashSet},
+    ops::Range,
+    vec,
+};
 
-use common::{asset::Asset, MeshLevel, MeshVert, MultiResMesh, SubMesh};
+use common::{asset::Asset, graph, MeshLevel, MeshVert, MultiResMesh, SubMesh};
 
 use glam::Vec4;
 use mesh::winged_mesh::WingedMesh;
+use petgraph::visit::IntoNeighbors;
 
 // use meshopt::VertexDataAdapter;
 
@@ -28,108 +33,26 @@ pub fn to_mesh_layer(mesh: &WingedMesh, verts: &[Vec4]) -> MeshLevel {
     }
 }
 
-pub fn group_and_partition_full_res(mut working_mesh: WingedMesh, verts: &[Vec4], name: String) {
-    let config = metis::PartitioningConfig {
-        method: metis::PartitioningMethod::MultilevelKWay,
-        force_contiguous_partitions: true,
-        minimize_subgraph_degree: Some(true),
-        ..Default::default()
-    };
-
-    // Apply primary partition, that will define the lowest level clusterings
-    working_mesh
-        .partition_full_mesh(&config, working_mesh.vert_count().div_ceil(40) as _)
-        .unwrap();
-
-    working_mesh.group(&config, &verts).unwrap();
-
-    let mut layers = Vec::new();
-
-    layers.push(to_mesh_layer(&working_mesh, &verts));
-
-    // Generate 2 more meshes
-    for i in 0..10 {
-        // i = index of previous mesh layer
-        //working_mesh = reduce_mesh(working_mesh);
-
-        println!("Face count L{}: {}", i + 1, working_mesh.face_count());
-
-        match working_mesh.partition_within_groups(&config, Some(2), None) {
-            Ok(partition_count) => {
-                // View a snapshot of the mesh without any re-groupings applied
-                //layers.push(to_mesh_layer(&next_mesh));
-
-                println!("{partition_count} Partitions from groups");
-
-                match working_mesh.group(&config, &verts) {
-                    Ok(group_count) => {
-                        // view a snapshot of the mesh ready to create the next layer
-                        // let error = (1.0 + i as f32) / 10.0 + rng.gen_range(-0.05..0.05);
-
-                        println!("{group_count} Groups from partitions");
-
-                        layers.push(to_mesh_layer(&working_mesh, &verts));
-
-                        if group_count == 1 {
-                            println!("Finished with single group");
-                            break;
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("{}", e);
-                        break;
-                    }
-                }
-            }
-            Err(e) => {
-                eprintln!("{}", e);
-                break;
-            }
-        }
-    }
-
-    println!("Done with partitioning");
-
-    //assert_eq!(partitions1.len() * 3, layer_1_indices.len());
-
-    MultiResMesh {
-        name,
-        verts: verts
-            .iter()
-            .map(|v| MeshVert {
-                pos: [v.x, v.y, v.z, 1.0],
-                normal: [0.0; 4],
-            })
-            .collect(),
-        // layer_1_indices: indices.clone(),
-        lods: layers,
-    }
-    .save()
-    .unwrap();
-}
-
 pub fn group_and_partition_and_simplify(
     mut mesh: WingedMesh,
     verts: &[Vec4],
     normals: &[Vec4],
     name: String,
 ) {
-    let triangle_clustering_config = &metis::PartitioningConfig {
-        method: metis::PartitioningMethod::MultilevelKWay,
-        force_contiguous_partitions: true,
+    let triangle_clustering_config = &metis::MultilevelKWayPartitioningConfig {
         //u_factor: Some(10),
         //minimize_subgraph_degree: Some(true), // this will sometimes break contiguous partitions
         ..Default::default()
-    };
+    }
+    .into();
 
-    let group_clustering_config = &metis::PartitioningConfig {
-        method: metis::PartitioningMethod::MultilevelKWay,
-        force_contiguous_partitions: true,
+    let group_clustering_config = &metis::MultilevelKWayPartitioningConfig {
         //u_factor: Some(1),
         //objective_type: Some(metis::ObjectiveType::Volume),
         minimize_subgraph_degree: Some(true), // this will sometimes break contiguous partitions
         ..Default::default()
-    };
+    }
+    .into();
 
     let non_contig_even_clustering_config = &metis::PartitioningConfig {
         method: metis::PartitioningMethod::MultilevelRecursiveBisection,
@@ -140,11 +63,10 @@ pub fn group_and_partition_and_simplify(
         ..Default::default()
     };
 
-    let grouping_config = &metis::PartitioningConfig {
-        method: metis::PartitioningMethod::MultilevelKWay,
-        force_contiguous_partitions: true,
+    let grouping_config = &metis::MultilevelKWayPartitioningConfig {
         //objective_type: Some(metis::ObjectiveType::Volume),
-        u_factor: Some(100), // Strictly require very similar partition sizes
+        force_contiguous_partitions: Some(true),
+        u_factor: Some(100), // Allow large 'inequality' to get similar sized groups
         //partitioning_attempts: Some(3),
         //separator_attempts: Some(3),
         //two_hop_matching: Some(true),
@@ -152,9 +74,10 @@ pub fn group_and_partition_and_simplify(
         //refinement: Some(metis::RefinementAlgorithm::TwoSidedFm),
         //refinement_iterations: Some(30),
         //coarsening: Some(metis::CoarseningScheme::SortedHeavyEdgeMatching),
-        minimize_subgraph_degree: Some(true), // this will sometimes break contiguous partitions
+        //minimize_subgraph_degree: Some(true), // this will sometimes break contiguous partitions
         ..Default::default()
-    };
+    }
+    .into();
 
     let mut quadrics = mesh.create_quadrics(verts);
 
@@ -209,7 +132,7 @@ pub fn group_and_partition_and_simplify(
             println!("Ensuring groups are contiguous... ");
             let graphs = mesh.generate_group_keyed_graphs();
             for graph in graphs {
-                mesh::graph::test::assert_contiguous_graph(&graph);
+                graph::assert_graph_contiguous(&graph);
             }
         }
 
@@ -484,9 +407,10 @@ pub fn generate_submeshes(mesh: &WingedMesh, _verts: &[Vec4]) -> Vec<SubMesh> {
 
 #[cfg(test)]
 mod test {
-    use crate::mesh::{graph::test::assert_contiguous_graph, winged_mesh::test::TEST_MESH_CONE};
+    use crate::mesh::winged_mesh::test::TEST_MESH_CONE;
 
     use super::*;
+    use common::graph;
 
     #[test]
     fn test_contiguous_meshes() {
@@ -496,12 +420,12 @@ mod test {
         let mesh_dual = mesh.generate_face_graph();
 
         println!("Testing Contiguous!");
-        assert_contiguous_graph(&mesh_dual);
+        graph::assert_graph_contiguous(&mesh_dual);
     }
 
     #[test]
     fn test_group_and_partition_and_simplify() {
-        let mesh_name = "../../assets/torrin_main.glb";
+        let mesh_name = "../../assets/sphere.glb";
 
         println!("Loading from gltf!");
         let (mesh, verts, norms) = WingedMesh::from_gltf(mesh_name);
@@ -523,6 +447,6 @@ mod test {
 
         println!("Asserting face graph is contiguous");
         // It should still be contiguous
-        assert_contiguous_graph(&mesh.generate_face_graph());
+        graph::assert_graph_contiguous(&mesh.generate_face_graph());
     }
 }

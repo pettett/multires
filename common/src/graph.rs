@@ -1,7 +1,7 @@
 use anyhow::Context;
 use core::fmt;
 use petgraph::dot;
-use std::{fs, path, process};
+use std::{collections::HashSet, fs, ops::Range, path, process, vec};
 
 /// Generate a graph corresponding to the dual mesh of a mesh generated from triangulating a grid
 ///
@@ -205,7 +205,110 @@ where
 
     fs::write(&out_path, dot_out.stdout).context("Failed to write output SVG")?;
 
-    open::with(out_path, "firefox").context("Failed to trigger auto-open of SVG")?;
+    open::that(out_path).context("Failed to trigger auto-open of SVG")?;
 
     Ok(())
+}
+
+pub fn filter_nodes_by_weight<E: Copy, Ty: petgraph::EdgeType>(
+    graph: &petgraph::Graph<i32, E, Ty>,
+    weights: Range<i32>,
+) -> Vec<petgraph::Graph<usize, E, Ty>> {
+    weights
+        .into_iter()
+        .map(|i| {
+            graph.filter_map(
+                |n, &w| if w == i { Some(n.index()) } else { None },
+                |_, &w| Some(w),
+            )
+        })
+        .collect()
+}
+
+pub fn graph_contiguous<V, E, Ty: petgraph::EdgeType>(graph: &petgraph::Graph<V, E, Ty>) -> bool {
+    if graph.node_count() == 0 {
+        return true;
+    }
+
+    let mut search = vec![0];
+    let mut seen = vec![false; graph.node_count()];
+
+    while let Some(next) = search.pop() {
+        seen[next] = true;
+
+        for n in graph.neighbors(petgraph::graph::node_index(next)) {
+            if !seen[n.index()] {
+                search.push(n.index())
+            }
+        }
+    }
+
+    seen.iter().all(|&x| x)
+}
+
+pub fn assert_graph_contiguous<V: std::fmt::Debug, E: std::fmt::Debug>(
+    graph: &petgraph::Graph<V, E, petgraph::Undirected>,
+) {
+    let dir = if cfg!(test) {
+        "..\\svg\\non_contig_graph.svg"
+    } else {
+        "svg\\non_contig_graph.svg"
+    };
+
+    if !graph_contiguous(graph) {
+        println!("Graph is not contiguous, outputting error...");
+
+        petgraph_to_svg(
+            graph,
+            dir,
+            &|_, _| String::new(),
+            GraphSVGRender::Directed {
+                node_label: Label::None,
+            },
+        )
+        .unwrap();
+
+        assert!(
+            false,
+            "Graph is not contiguous. Outputted error graph to {}",
+            dir
+        );
+    }
+}
+
+#[cfg(test)]
+pub mod test {
+    use super::*;
+
+    #[test]
+    fn test_contiguous_graph() {
+        let mut g = petgraph::Graph::new();
+
+        let a = g.add_node(());
+        let b = g.add_node(());
+
+        g.add_edge(a, b, ());
+
+        assert!(graph_contiguous(&g));
+    }
+
+    #[test]
+    fn test_contiguous_empty_graph() {
+        let mut g: petgraph::prelude::Graph<(), ()> = petgraph::Graph::new();
+
+        assert!(graph_contiguous(&g));
+    }
+
+    #[test]
+    fn test_non_contiguous_graph() {
+        let mut g = petgraph::Graph::new();
+
+        let a = g.add_node(());
+        let b = g.add_node(());
+        let c = g.add_node(());
+
+        g.add_edge(a, b, ());
+
+        assert!(!graph_contiguous(&g));
+    }
 }

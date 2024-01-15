@@ -3,7 +3,9 @@ use std::collections::BTreeSet;
 //use crate::MAX_TRIS_PER_CLUSTER;
 
 use super::winged_mesh::WingedMesh;
-use common::graph::petgraph_to_svg;
+use common::graph::{
+    assert_graph_contiguous, filter_nodes_by_weight, graph_contiguous, petgraph_to_svg,
+};
 use glam::Vec4Swizzles;
 
 impl WingedMesh {
@@ -126,7 +128,7 @@ impl WingedMesh {
     ) -> Result<usize, metis::PartitioningError> {
         let group_count = self.clusters.len().div_ceil(4);
 
-        assert!(config.force_contiguous_partitions);
+        assert!(config.force_contiguous_partitions.unwrap());
 
         println!(
             "Partitioning into {group_count} groups from {} partitions",
@@ -134,6 +136,42 @@ impl WingedMesh {
         );
 
         let cluster_graph = self.generate_cluster_graph();
+
+        //std::mem::swap(&mut self.groups, &mut new_groups);
+        let (cluster_partitioning, group_count) =
+            config.exact_partition_onto_graph(4, &cluster_graph)?;
+
+        let group_count = group_count as usize;
+
+        // let non_contig_even_clustering_config = &metis::PartitioningConfig {
+        //     method: metis::PartitioningMethod::MultilevelRecursiveBisection,
+        //     force_contiguous_partitions: Some(true),
+        //     u_factor: Some(1),
+        //     //objective_type: Some(metis::ObjectiveType::Volume),
+        //     //    minimize_subgraph_degree: Some(true), // this will sometimes break contiguous partitions
+        //     ..Default::default()
+        // };
+
+        let mut occupancies = vec![0; group_count];
+        for &group in cluster_partitioning.node_weights() {
+            occupancies[group as usize] += 1;
+        }
+        println!(
+            "Generated groups with sizes {}<->{}",
+            occupancies.iter().min().unwrap(),
+            occupancies.iter().max().unwrap()
+        );
+
+        // Tell each partition what group they now belong to.
+        if group_count != 1 {
+            for (part, &group) in cluster_partitioning.node_weights().enumerate() {
+                self.clusters[part].group_index = group as usize;
+            }
+        } else {
+            for p in &mut self.clusters {
+                p.group_index = 0;
+            }
+        };
 
         // create new array of groups, and remember the old groups
         let mut new_groups = vec![
@@ -145,30 +183,6 @@ impl WingedMesh {
             };
             group_count
         ];
-
-        //std::mem::swap(&mut self.groups, &mut new_groups);
-        let cluster_partitioning =
-            config.partition_from_graph(group_count as u32, &cluster_graph)?;
-        let mut occupancies = vec![0; group_count];
-        for &group in &cluster_partitioning {
-            occupancies[group as usize] += 1;
-        }
-        println!(
-            "Generated groups with sizes {}<->{}",
-            occupancies.iter().min().unwrap(),
-            occupancies.iter().max().unwrap()
-        );
-
-        // Tell each partition what group they now belong to.
-        if group_count != 1 {
-            for (part, &group) in cluster_partitioning.iter().enumerate() {
-                self.clusters[part].group_index = group as usize;
-            }
-        } else {
-            for p in &mut self.clusters {
-                p.group_index = 0;
-            }
-        };
 
         // Record the partitions that each of these groups come from
         for (part, info) in self.clusters.iter().enumerate() {
@@ -227,17 +241,18 @@ impl WingedMesh {
 
         self.groups = new_groups;
 
-        #[cfg(test)]
-        {
-            //Assert that we have made good groups
-            //TODO: Split graph into contiguous segments beforehand
+        //#[cfg(test)]
+        //{
+        //Assert that we have made good groups
+        //TODO: Split graph into contiguous segments beforehand
 
-            let groups = self.generate_group_keyed_graphs();
+        let groups = self.generate_group_keyed_graphs();
 
-            for g in &groups {
-                super::graph::test::assert_contiguous_graph(g);
-            }
+        for g in &groups {
+            assert_graph_contiguous(g);
+            //super::graph::test::assert_contiguous_graph(g);
         }
+        //}
 
         Ok(group_count)
     }
@@ -273,10 +288,7 @@ impl WingedMesh {
                 (graph.node_count() as u32).div_ceil(tris_per_cluster.unwrap())
             };
 
-            #[cfg(test)]
-            {
-                super::graph::test::assert_contiguous_graph(graph);
-            }
+            assert_graph_contiguous(graph);
 
             let part = match config.partition_from_graph(parts, graph) {
                 Ok(part) => part,
@@ -363,7 +375,7 @@ impl WingedMesh {
 
             #[cfg(test)]
             {
-                super::graph::test::assert_contiguous_graph(graph);
+                assert_graph_contiguous(graph);
             }
 
             let partitioning = match config.partition_from_graph(parts as u32, graph) {
@@ -417,12 +429,12 @@ pub mod tests {
 
     #[test]
     pub fn test_group_neighbours() -> anyhow::Result<()> {
-        let test_config = &metis::PartitioningConfig {
-            method: metis::PartitioningMethod::MultilevelKWay,
-            force_contiguous_partitions: true,
+        let test_config = &metis::MultilevelKWayPartitioningConfig {
+            force_contiguous_partitions: Some(true),
             minimize_subgraph_degree: Some(true),
             ..Default::default()
-        };
+        }
+        .into();
         let (mut mesh, verts, norms) = WingedMesh::from_gltf(TEST_MESH_LOW);
 
         mesh.partition_full_mesh(test_config, 200)?;
