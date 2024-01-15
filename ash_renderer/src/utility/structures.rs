@@ -24,8 +24,15 @@ impl QueueFamilyIndices {
 }
 
 #[repr(C)]
-#[derive(Clone, Debug, Copy)]
-pub struct UniformBufferObject {
-    pub model: Mat4,
-    pub view_proj: Mat4,
+#[derive(Clone, Debug, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct ModelUniformBufferObject {
+    pub model: glam::Mat4,
+}
+
+#[repr(C)]
+#[derive(Clone, Debug, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct CameraUniformBufferObject {
+    pub view_proj: glam::Mat4,
+    pub cam_pos: glam::Vec3,
+    pub target_error: f32,
 }

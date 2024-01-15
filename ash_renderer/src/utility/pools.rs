@@ -2,9 +2,14 @@ use std::{ptr, sync::Arc};
 
 use ash::vk;
 
-use crate::VkWrapper;
+use crate::{CameraUniformBufferObject, VkHandle};
 
-use super::{buffer::Buffer, device::Device, image::Image, structures::UniformBufferObject};
+use super::{
+    buffer::{AsBuffer, Buffer},
+    device::Device,
+    image::Image,
+    structures::ModelUniformBufferObject,
+};
 
 pub struct DescriptorPool {
     device: Arc<Device>,
@@ -16,12 +21,12 @@ impl DescriptorPool {
             vk::DescriptorPoolSize {
                 // transform descriptor pool
                 ty: vk::DescriptorType::UNIFORM_BUFFER,
-                descriptor_count: swapchain_images_size,
+                descriptor_count: swapchain_images_size * 2,
             },
             vk::DescriptorPoolSize {
                 // SSBO pool
                 ty: vk::DescriptorType::STORAGE_BUFFER,
-                descriptor_count: 2,
+                descriptor_count: 3,
             },
             vk::DescriptorPoolSize {
                 // sampler descriptor pool
@@ -52,172 +57,180 @@ impl DescriptorPool {
 
 pub struct DescriptorSet {
     set: vk::DescriptorSet,
+    device: Arc<Device>,
     buffers: Vec<Arc<Buffer>>,
 }
 
-impl VkWrapper for DescriptorSet {
-    type Item = vk::DescriptorSet;
+impl VkHandle for DescriptorSet {
+    type VkItem = vk::DescriptorSet;
 
-    fn vk_root(&self) -> Self::Item {
+    fn handle(&self) -> Self::VkItem {
         self.set
     }
 }
 
-pub fn create_descriptor_sets(
-    device: &ash::Device,
-    descriptor_pool: &DescriptorPool,
-    descriptor_set_layout: vk::DescriptorSetLayout,
-    uniform_buffers: &Vec<Buffer>,
-    vert_buffer: Arc<Buffer>,
-    meshlet_buffer: Arc<Buffer>,
-    submesh_buffer: Arc<Buffer>,
-    texture: &Image,
-    swapchain_images_size: usize,
-) -> Vec<DescriptorSet> {
-    let mut layouts: Vec<vk::DescriptorSetLayout> = vec![];
-    for _ in 0..swapchain_images_size {
-        layouts.push(descriptor_set_layout);
-    }
-
-    let descriptor_set_allocate_info = vk::DescriptorSetAllocateInfo {
-        s_type: vk::StructureType::DESCRIPTOR_SET_ALLOCATE_INFO,
-        p_next: ptr::null(),
-        descriptor_pool: descriptor_pool.pool,
-        descriptor_set_count: swapchain_images_size as u32,
-        p_set_layouts: layouts.as_ptr(),
-    };
-
-    let vk_descriptor_sets = unsafe {
-        device
-            .allocate_descriptor_sets(&descriptor_set_allocate_info)
-            .expect("Failed to allocate descriptor sets!")
-    };
-
-    let descriptor_sets: Vec<_> = vk_descriptor_sets
-        .into_iter()
-        .map(|set| DescriptorSet {
-            set,
-            buffers: vec![
-                vert_buffer.clone(),
-                meshlet_buffer.clone(),
-                submesh_buffer.clone(),
-            ],
-        })
-        .collect();
-
-    for (i, descriptor_set) in descriptor_sets.iter().enumerate() {
-        let descriptor_buffer_infos = [vk::DescriptorBufferInfo {
-            buffer: uniform_buffers[i].buffer(),
-            offset: 0,
-            range: ::std::mem::size_of::<UniformBufferObject>() as u64,
-        }];
-
-        let vertex_buffer_infos = [vk::DescriptorBufferInfo {
-            buffer: vert_buffer.buffer(),
-            offset: 0,
-            range: vert_buffer.size(),
-        }];
-        let index_buffer_infos = [vk::DescriptorBufferInfo {
-            buffer: meshlet_buffer.buffer(),
-            offset: 0,
-            range: meshlet_buffer.size(),
-        }];
-        let submesh_buffer_infos = [vk::DescriptorBufferInfo {
-            buffer: submesh_buffer.buffer(),
-            offset: 0,
-            range: submesh_buffer.size(),
-        }];
-
-        let descriptor_image_infos = [vk::DescriptorImageInfo {
-            sampler: texture.sampler(),
-            image_view: texture.image_view(),
-            image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-        }];
-
-        let descriptor_write_sets = [
-            vk::WriteDescriptorSet {
-                // transform uniform
-                s_type: vk::StructureType::WRITE_DESCRIPTOR_SET,
-                p_next: ptr::null(),
-                dst_set: descriptor_set.set,
-                dst_binding: 0,
-                dst_array_element: 0,
-                descriptor_count: 1,
-                descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
-                p_image_info: ptr::null(),
-                p_buffer_info: descriptor_buffer_infos.as_ptr(),
-                p_texel_buffer_view: ptr::null(),
-            },
-            vk::WriteDescriptorSet {
-                // sampler uniform
-                s_type: vk::StructureType::WRITE_DESCRIPTOR_SET,
-                p_next: ptr::null(),
-                dst_set: descriptor_set.set,
-                dst_binding: 1,
-                dst_array_element: 0,
-                descriptor_count: 1,
-                descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-                p_image_info: descriptor_image_infos.as_ptr(),
-                p_buffer_info: ptr::null(),
-                p_texel_buffer_view: ptr::null(),
-            },
-            vk::WriteDescriptorSet {
-                // submesh info buffer
-                s_type: vk::StructureType::WRITE_DESCRIPTOR_SET,
-                p_next: ptr::null(),
-                dst_set: descriptor_set.set,
-                dst_binding: 2,
-                dst_array_element: 0,
-                descriptor_count: 1,
-                descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
-                p_image_info: ptr::null(),
-                p_buffer_info: submesh_buffer_infos.as_ptr(),
-                p_texel_buffer_view: ptr::null(),
-            },
-            vk::WriteDescriptorSet {
-                // meshlet info buffer
-                s_type: vk::StructureType::WRITE_DESCRIPTOR_SET,
-                p_next: ptr::null(),
-                dst_set: descriptor_set.set,
-                dst_binding: 3,
-                dst_array_element: 0,
-                descriptor_count: 1,
-                descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
-                p_image_info: ptr::null(),
-                p_buffer_info: index_buffer_infos.as_ptr(),
-                p_texel_buffer_view: ptr::null(),
-            },
-            vk::WriteDescriptorSet {
-                // vertex buffer
-                s_type: vk::StructureType::WRITE_DESCRIPTOR_SET,
-                p_next: ptr::null(),
-                dst_set: descriptor_set.set,
-                dst_binding: 4,
-                dst_array_element: 0,
-                descriptor_count: 1,
-                descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
-                p_image_info: ptr::null(),
-                p_buffer_info: vertex_buffer_infos.as_ptr(),
-                p_texel_buffer_view: ptr::null(),
-            },
-        ];
-
-        unsafe {
-            device.update_descriptor_sets(&descriptor_write_sets, &[]);
+impl DescriptorSet {
+    pub fn create_descriptor_sets(
+        device: &Arc<Device>,
+        descriptor_pool: &DescriptorPool,
+        descriptor_set_layout: vk::DescriptorSetLayout,
+        uniform_transform_buffer: &Arc<Buffer>,
+        uniform_camera_buffers: &[impl AsBuffer],
+        vertex_buffer: &Arc<Buffer>,
+        meshlet_buffer: &Arc<Buffer>,
+        submesh_buffer: &Arc<Buffer>,
+        texture: &Image,
+        swapchain_images_size: usize,
+    ) -> Vec<DescriptorSet> {
+        let mut layouts: Vec<vk::DescriptorSetLayout> = vec![];
+        for _ in 0..swapchain_images_size {
+            layouts.push(descriptor_set_layout);
         }
+
+        let descriptor_set_allocate_info = vk::DescriptorSetAllocateInfo {
+            s_type: vk::StructureType::DESCRIPTOR_SET_ALLOCATE_INFO,
+            p_next: ptr::null(),
+            descriptor_pool: descriptor_pool.pool,
+            descriptor_set_count: swapchain_images_size as u32,
+            p_set_layouts: layouts.as_ptr(),
+        };
+
+        let vk_descriptor_sets = unsafe {
+            device
+                .handle
+                .allocate_descriptor_sets(&descriptor_set_allocate_info)
+                .expect("Failed to allocate descriptor sets!")
+        };
+
+        let descriptor_sets: Vec<_> = vk_descriptor_sets
+            .into_iter()
+            .map(|set| DescriptorSet {
+                set,
+                device: device.clone(),
+                buffers: vec![
+                    vertex_buffer.clone(),
+                    uniform_transform_buffer.clone(),
+                    meshlet_buffer.clone(),
+                    submesh_buffer.clone(),
+                ],
+            })
+            .collect();
+
+        for (i, descriptor_set) in descriptor_sets.iter().enumerate() {
+            let descriptor_transform_buffer_infos =
+                [uniform_transform_buffer.full_range_descriptor()];
+            let descriptor_camera_buffer_infos =
+                [uniform_camera_buffers[i].full_range_descriptor()];
+
+            let vertex_buffer_infos = [vertex_buffer.full_range_descriptor()];
+            let index_buffer_infos = [meshlet_buffer.full_range_descriptor()];
+            let submesh_buffer_infos = [submesh_buffer.full_range_descriptor()];
+
+            let descriptor_image_infos = [vk::DescriptorImageInfo {
+                sampler: texture.sampler(),
+                image_view: texture.image_view(),
+                image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            }];
+
+            let descriptor_write_sets = [
+                vk::WriteDescriptorSet {
+                    // transform uniform
+                    s_type: vk::StructureType::WRITE_DESCRIPTOR_SET,
+                    p_next: ptr::null(),
+                    dst_set: descriptor_set.set,
+                    dst_binding: 0,
+                    dst_array_element: 0,
+                    descriptor_count: 1,
+                    descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
+                    p_image_info: ptr::null(),
+                    p_buffer_info: descriptor_transform_buffer_infos.as_ptr(),
+                    p_texel_buffer_view: ptr::null(),
+                },
+                vk::WriteDescriptorSet {
+                    // transform uniform
+                    s_type: vk::StructureType::WRITE_DESCRIPTOR_SET,
+                    p_next: ptr::null(),
+                    dst_set: descriptor_set.set,
+                    dst_binding: 5,
+                    dst_array_element: 0,
+                    descriptor_count: 1,
+                    descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
+                    p_image_info: ptr::null(),
+                    p_buffer_info: descriptor_camera_buffer_infos.as_ptr(),
+                    p_texel_buffer_view: ptr::null(),
+                },
+                vk::WriteDescriptorSet {
+                    // sampler uniform
+                    s_type: vk::StructureType::WRITE_DESCRIPTOR_SET,
+                    p_next: ptr::null(),
+                    dst_set: descriptor_set.set,
+                    dst_binding: 1,
+                    dst_array_element: 0,
+                    descriptor_count: 1,
+                    descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+                    p_image_info: descriptor_image_infos.as_ptr(),
+                    p_buffer_info: ptr::null(),
+                    p_texel_buffer_view: ptr::null(),
+                },
+                vk::WriteDescriptorSet {
+                    // submesh info buffer
+                    s_type: vk::StructureType::WRITE_DESCRIPTOR_SET,
+                    p_next: ptr::null(),
+                    dst_set: descriptor_set.set,
+                    dst_binding: 2,
+                    dst_array_element: 0,
+                    descriptor_count: 1,
+                    descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
+                    p_image_info: ptr::null(),
+                    p_buffer_info: submesh_buffer_infos.as_ptr(),
+                    p_texel_buffer_view: ptr::null(),
+                },
+                vk::WriteDescriptorSet {
+                    // meshlet info buffer
+                    s_type: vk::StructureType::WRITE_DESCRIPTOR_SET,
+                    p_next: ptr::null(),
+                    dst_set: descriptor_set.set,
+                    dst_binding: 3,
+                    dst_array_element: 0,
+                    descriptor_count: 1,
+                    descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
+                    p_image_info: ptr::null(),
+                    p_buffer_info: index_buffer_infos.as_ptr(),
+                    p_texel_buffer_view: ptr::null(),
+                },
+                vk::WriteDescriptorSet {
+                    // vertex buffer
+                    s_type: vk::StructureType::WRITE_DESCRIPTOR_SET,
+                    p_next: ptr::null(),
+                    dst_set: descriptor_set.set,
+                    dst_binding: 4,
+                    dst_array_element: 0,
+                    descriptor_count: 1,
+                    descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
+                    p_image_info: ptr::null(),
+                    p_buffer_info: vertex_buffer_infos.as_ptr(),
+                    p_texel_buffer_view: ptr::null(),
+                },
+            ];
+
+            unsafe {
+                device
+                    .handle
+                    .update_descriptor_sets(&descriptor_write_sets, &[]);
+            }
+        }
+
+        descriptor_sets
     }
-
-    descriptor_sets
 }
-
 pub fn create_descriptor_set_layout(device: &ash::Device) -> vk::DescriptorSetLayout {
     let ubo_layout_bindings = [
         vk::DescriptorSetLayoutBinding {
             // transform uniform
             binding: 0,
-            descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
+            descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
             descriptor_count: 1,
-            stage_flags: vk::ShaderStageFlags::MESH_EXT,
+            stage_flags: vk::ShaderStageFlags::MESH_EXT | vk::ShaderStageFlags::TASK_EXT,
             p_immutable_samplers: ptr::null(),
         },
         vk::DescriptorSetLayoutBinding {
@@ -250,6 +263,14 @@ pub fn create_descriptor_set_layout(device: &ash::Device) -> vk::DescriptorSetLa
             descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
             descriptor_count: 1,
             stage_flags: vk::ShaderStageFlags::MESH_EXT,
+            p_immutable_samplers: ptr::null(),
+        },
+        vk::DescriptorSetLayoutBinding {
+            // camera uniform
+            binding: 5,
+            descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
+            descriptor_count: 1,
+            stage_flags: vk::ShaderStageFlags::MESH_EXT | vk::ShaderStageFlags::TASK_EXT,
             p_immutable_samplers: ptr::null(),
         },
     ];

@@ -7,6 +7,8 @@ use std::{
 use ash::vk::{self, PhysicalDeviceMaintenance4Features, PhysicalDeviceMeshShaderFeaturesEXT};
 use winapi::ctypes::c_char;
 
+use crate::{VkDeviceOwned, VkHandle};
+
 use super::{
     instance::Instance,
     structures::{DeviceExtension, QueueFamilyIndices},
@@ -27,6 +29,7 @@ impl Drop for Device {
         }
     }
 }
+
 impl Device {
     pub fn wait_device_idle(&self) {
         unsafe {

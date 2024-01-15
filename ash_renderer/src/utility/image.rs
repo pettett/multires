@@ -2,7 +2,12 @@ use std::{cmp::max, path::Path, ptr, sync::Arc};
 
 use ash::vk;
 
-use super::{buffer::create_buffer, device::Device, instance::Instance, pools::CommandPool};
+use super::{
+    buffer::{AsBuffer, Buffer},
+    device::Device,
+    instance::Instance,
+    pools::CommandPool,
+};
 
 pub struct Image {
     device: Arc<Device>,
@@ -135,7 +140,7 @@ impl Image {
             panic!("Failed to load texture image!")
         }
 
-        let staging_buffer = create_buffer(
+        let staging_buffer = Buffer::new(
             device.clone(),
             image_size,
             vk::BufferUsageFlags::TRANSFER_SRC,

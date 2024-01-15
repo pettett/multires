@@ -1,14 +1,14 @@
+pub mod multires;
 mod utility;
 
 use crate::utility::{
-    buffer::{create_storage_buffer, create_uniform_buffers},
     // the mod define some fixed functions that have been learned before.
     constants::*,
     debug::*,
     image::Image,
     instance::Instance,
     pipeline::create_graphics_pipeline,
-    pools::{create_descriptor_set_layout, create_descriptor_sets, DescriptorPool},
+    pools::{create_descriptor_set_layout, DescriptorPool},
     render_pass::create_render_pass,
     structures::*,
     sync::SyncObjects,
@@ -29,7 +29,11 @@ use common_renderer::components::{
 };
 use glam::{Mat4, Quat, Vec3A};
 use utility::{
-    device::Device, pipeline::Pipeline, pools::DescriptorSet, surface::Surface,
+    buffer::{AsBuffer, Buffer, UniformBuffer},
+    device::Device,
+    pipeline::Pipeline,
+    pools::DescriptorSet,
+    surface::Surface,
     swapchain::Swapchain,
 };
 use winit::event::WindowEvent;
@@ -41,12 +45,12 @@ use std::{path::Path, sync::Arc};
 const WINDOW_TITLE: &'static str = "26.Depth Buffering";
 const TEXTURE_PATH: &'static str = "../../../assets/vulkan.jpg";
 
-pub trait VkWrapper {
-    type Item;
+pub trait VkHandle {
+    type VkItem;
 
-    fn vk_root(&self) -> Self::Item;
+    fn handle(&self) -> Self::VkItem;
 }
-pub trait VkDevice: VkWrapper<Item = vk::Device> {}
+pub trait VkDeviceOwned: VkHandle<VkItem = vk::Device> {}
 
 pub struct App {
     window: winit::window::Window,
@@ -78,8 +82,10 @@ pub struct App {
     depth_image: Image,
     texture_image: Image,
 
-    uniform_transform: UniformBufferObject,
-    uniform_buffers: Vec<utility::buffer::Buffer>,
+    uniform_transforms: Vec<ModelUniformBufferObject>,
+    uniform_transform_buffer: Arc<Buffer>,
+    uniform_camera: CameraUniformBufferObject,
+    uniform_camera_buffers: Vec<UniformBuffer<CameraUniformBufferObject>>,
 
     descriptor_pool: Arc<DescriptorPool>,
     command_pool: Arc<utility::pools::CommandPool>,
@@ -95,77 +101,6 @@ pub struct App {
     is_framebuffer_resized: bool,
 
     submesh_count: u32,
-}
-
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct GpuMeshlet {
-    pub vertices: [u32; 64],
-    pub indices: [u32; 378], // 126 triangles => 378 indices
-    pub vertex_count: u32,
-    pub index_count: u32,
-}
-
-unsafe impl bytemuck::Zeroable for GpuMeshlet {}
-unsafe impl bytemuck::Pod for GpuMeshlet {}
-
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct GpuSubmesh {
-    pub meshlet_start: u32,
-    pub meshlet_count: u32,
-}
-
-unsafe impl bytemuck::Zeroable for GpuSubmesh {}
-unsafe impl bytemuck::Pod for GpuSubmesh {}
-
-pub fn generate_meshlets(mesh: &MultiResMesh) -> (Vec<GpuSubmesh>, Vec<GpuMeshlet>) {
-    println!("Generating meshlets!");
-
-    // Precondition: partition indexes completely span in some range 0..N
-    let mut meshlets = Vec::new();
-    let mut submeshes = Vec::new();
-
-    for lod in mesh.lods.iter().rev() {
-        for submesh in &lod.submeshes {
-            let mut s = GpuSubmesh::zeroed();
-
-            s.meshlet_start = meshlets.len() as _;
-
-            for c in 0..submesh.colour_count() {
-                let mut m = GpuMeshlet::zeroed();
-
-                assert!(submesh.indices_for_colour(c).len() <= 126 * 3);
-
-                for &vert in submesh.indices_for_colour(c) {
-                    // If unique, add to list
-                    let idx = (0..m.vertex_count as usize).find(|&j| m.vertices[j] == vert);
-
-                    let idx = if let Some(idx) = idx {
-                        idx as u32
-                    } else {
-                        assert!((m.vertex_count as usize) < 64);
-
-                        m.vertex_count += 1;
-
-                        m.vertices[m.vertex_count as usize - 1] = vert;
-                        m.vertex_count - 1
-                    };
-
-                    m.indices[m.index_count as usize] = idx;
-
-                    m.index_count += 1;
-                }
-
-                meshlets.push(m);
-            }
-
-            s.meshlet_count = meshlets.len() as u32 - s.meshlet_start;
-            submeshes.push(s);
-        }
-    }
-
-    (submeshes, meshlets)
 }
 
 impl App {
@@ -294,7 +229,7 @@ impl App {
 
         let data = MultiResMesh::load().unwrap();
 
-        let (submeshs, meshlets) = generate_meshlets(&data);
+        let (submeshs, meshlets) = multires::generate_meshlets(&data);
 
         let mut all_clusters_data_real_error = data.cluster_data();
 
@@ -305,7 +240,7 @@ impl App {
 
         println!("V: {:?} M: {:?}", data.verts.len(), meshlets.len());
 
-        let vertex_buffer = create_storage_buffer(
+        let vertex_buffer = Buffer::new_storage(
             device.clone(),
             &physical_device_memory_properties,
             command_pool.clone(),
@@ -313,7 +248,7 @@ impl App {
             &data.verts,
         );
 
-        let meshlet_buffer = create_storage_buffer(
+        let meshlet_buffer = Buffer::new_storage(
             device.clone(),
             &physical_device_memory_properties,
             command_pool.clone(),
@@ -321,7 +256,7 @@ impl App {
             &meshlets,
         );
 
-        let submesh_buffer = create_storage_buffer(
+        let submesh_buffer = Buffer::new_storage(
             device.clone(),
             &physical_device_memory_properties,
             command_pool.clone(),
@@ -329,7 +264,27 @@ impl App {
             &all_clusters_data_real_error,
         );
 
-        let uniform_buffers = create_uniform_buffers(
+        let mut uniform_transforms = Vec::new();
+
+        for i in 0..25 {
+            for j in 0..100 {
+                uniform_transforms.push(ModelUniformBufferObject {
+                    model: Mat4::from_translation(
+                        glam::Vec3::X * i as f32 * 40.0 + glam::Vec3::Y * j as f32 * 40.0,
+                    ),
+                })
+            }
+        }
+
+        let uniform_transform_buffer = Buffer::new_storage(
+            device.clone(),
+            &physical_device_memory_properties,
+            command_pool.clone(),
+            graphics_queue,
+            &uniform_transforms,
+        );
+
+        let uniform_camera_buffers = UniformBuffer::<CameraUniformBufferObject>::new_per_swapchain(
             device.clone(),
             &physical_device_memory_properties,
             swapchain.images.len(),
@@ -338,14 +293,15 @@ impl App {
         println!("Loading descriptors");
         let descriptor_pool = DescriptorPool::new(device.clone(), swapchain.images.len() as u32);
 
-        let descriptor_sets = create_descriptor_sets(
-            &device.handle,
+        let descriptor_sets = DescriptorSet::create_descriptor_sets(
+            &device,
             &descriptor_pool,
             ubo_layout,
-            &uniform_buffers,
-            vertex_buffer.clone(),
-            meshlet_buffer.clone(),
-            submesh_buffer.clone(),
+            &uniform_transform_buffer,
+            &uniform_camera_buffers,
+            &vertex_buffer,
+            &meshlet_buffer,
+            &submesh_buffer,
             &texture_image,
             swapchain.images.len(),
         );
@@ -353,7 +309,8 @@ impl App {
         println!("Loading command buffers");
 
         let command_buffers = App::create_command_buffers(
-            all_clusters_data_real_error.len() as u32,
+            all_clusters_data_real_error.len() as _,
+            uniform_transforms.len() as _,
             &device,
             command_pool.pool,
             graphics_pipeline.pipeline(),
@@ -368,20 +325,22 @@ impl App {
         println!("Generated App");
 
         let cam = Camera::new(1.0);
-        let transform = Transform::new(Vec3A::new(0.0, -0.2, 0.0), Quat::IDENTITY);
+        let transform = Transform::new(Vec3A::ZERO, Quat::IDENTITY);
 
-        let mut world = World::new();
+        let uniform_camera = CameraUniformBufferObject {
+            view_proj: cam.build_view_projection_matrix(&transform),
+            cam_pos: (*transform.get_pos()).into(),
+            target_error: 0.3,
+        };
+
+        let mut world: World = World::new();
 
         world.insert_resource(Events::<MouseIn>::default());
         world.insert_resource(Events::<MouseMv>::default());
         world.insert_resource(Events::<KeyIn>::default());
 
         let camera = world
-            .spawn((
-                CameraController::new(0.005),
-                Camera::new(1.0),
-                Transform::new(Vec3A::ZERO, Quat::IDENTITY),
-            ))
+            .spawn((CameraController::new(0.05), cam, transform))
             .id();
 
         let mut schedule = Schedule::default();
@@ -408,6 +367,11 @@ impl App {
             queue_family,
             graphics_queue,
             present_queue,
+            uniform_camera,
+
+            uniform_transforms,
+            uniform_transform_buffer,
+            uniform_camera_buffers,
 
             swapchain,
             swapchain_imageviews,
@@ -420,12 +384,6 @@ impl App {
             depth_image,
 
             texture_image,
-
-            uniform_transform: UniformBufferObject {
-                model: Mat4::from_rotation_z(1.5),
-                view_proj: cam.build_view_projection_matrix(&transform),
-            },
-            uniform_buffers,
 
             descriptor_pool,
             descriptor_sets,
@@ -554,6 +512,7 @@ impl App {
 impl App {
     fn create_command_buffers(
         submesh_count: u32,
+        instance_count: u32,
         device: &Device,
         command_pool: vk::CommandPool,
         graphics_pipeline: vk::Pipeline,
@@ -636,7 +595,7 @@ impl App {
 
                 //let vertex_buffers = [vertex_buffer];
                 //let offsets = [0_u64];
-                let descriptor_sets_to_bind = [descriptor_sets[i].vk_root()];
+                let descriptor_sets_to_bind = [descriptor_sets[i].handle()];
 
                 //device.cmd_bind_vertex_buffers(command_buffer, 0, &vertex_buffers, &offsets);
                 //device.cmd_bind_index_buffer(
@@ -654,9 +613,12 @@ impl App {
                     &[],
                 );
 
-                device
-                    .fn_mesh_shader
-                    .cmd_draw_mesh_tasks(command_buffer, submesh_count, 1, 1);
+                device.fn_mesh_shader.cmd_draw_mesh_tasks(
+                    command_buffer,
+                    submesh_count,
+                    instance_count,
+                    1,
+                );
                 // device.cmd_draw_indexed(
                 //     command_buffer,
                 //     RECT_TEX_COORD_INDICES_DATA.len() as u32,
@@ -678,37 +640,25 @@ impl App {
         command_buffers
     }
 
-    fn update_uniform_buffer(&mut self, current_image: usize, _delta_time: f32) {
+    fn update_camera_uniform_buffer(&mut self, current_image: usize, _delta_time: f32) {
         let cam = self.world.entity(self.camera);
 
-        self.uniform_transform.view_proj = cam
+        self.uniform_camera.view_proj = cam
             .get::<Camera>()
             .unwrap()
             .build_view_projection_matrix(cam.get().unwrap());
 
-        let ubos = [self.uniform_transform.clone()];
+        self.uniform_camera.cam_pos = (*cam.get::<Transform>().unwrap().get_pos()).into();
 
-        let buffer_size = (std::mem::size_of::<UniformBufferObject>() * ubos.len()) as u64;
-
-        unsafe {
-            let data_ptr =
-                self.device
-                    .handle
-                    .map_memory(
-                        self.uniform_buffers[current_image].memory(),
-                        0,
-                        buffer_size,
-                        vk::MemoryMapFlags::empty(),
-                    )
-                    .expect("Failed to Map Memory") as *mut UniformBufferObject;
-
-            data_ptr.copy_from_nonoverlapping(ubos.as_ptr(), ubos.len());
-
-            self.device
-                .handle
-                .unmap_memory(self.uniform_buffers[current_image].memory());
-        }
+        self.uniform_camera_buffers[current_image].update_uniform_buffer(self.uniform_camera);
     }
+
+    // fn update_model_uniform_buffer(&mut self, current_image: usize, _delta_time: f32) {
+    //     unsafe {
+    //         self.uniform_transform_buffer
+    //             .update_uniform_buffer(self.uniform_transform);
+    //     }
+    // }
 
     fn draw_frame(&mut self, delta_time: f32) {
         let wait_fences = [self.sync_objects.in_flight_fences[self.current_frame]];
@@ -740,7 +690,12 @@ impl App {
             }
         };
 
-        self.update_uniform_buffer(image_index as usize, delta_time);
+        // if self.transform_dirty[image_index as usize] {
+        //     self.update_model_uniform_buffer(image_index as usize, delta_time);
+        //     self.transform_dirty[image_index as usize] = false;
+        // }
+
+        self.update_camera_uniform_buffer(image_index as usize, delta_time);
 
         let wait_semaphores = [self.sync_objects.image_available_semaphores[self.current_frame]];
         let wait_stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
@@ -857,6 +812,7 @@ impl App {
         );
         self.command_buffers = App::create_command_buffers(
             self.submesh_count,
+            self.uniform_transforms.len() as _,
             &self.device,
             self.command_pool.pool,
             self.graphics_pipeline.pipeline(),

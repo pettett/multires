@@ -23,9 +23,14 @@ struct s_meshlet
     uint index_count;
 };
 
-layout (binding = 0) uniform UniformBufferObject {
-    mat4 model;
+layout (binding = 0) readonly buffer ModelUniformBufferObject {
+    mat4 models[];
+} model;
+
+layout (binding = 5) uniform CameraUniformBufferObject {
     mat4 view_proj;
+	vec3 camera_pos;
+	float target_error;
 } ubo;
 
 layout (std430, binding = 3) readonly buffer InputBufferI {
@@ -49,6 +54,7 @@ layout (location = 0) out Interpolants {
 } OUT[];
 
 struct MeshTaskPayload {
+    uint instance;
     uint meshlet_start;
 };
 
@@ -65,7 +71,7 @@ vec3 integer_to_rgb(float integer) {
 void vert(uint v, uint meshlet_index) {
     // gl_MeshVerticesEXT[v].gl_Position = ubo.view_proj * ubo.model * p;
     uint vert_idx = indices.meshlets[meshlet_index].vertices[v];
-    gl_MeshVerticesEXT[v].gl_Position = ubo.view_proj * ubo.model * vec4(sourceData.verts[vert_idx].pos.xyz, 1);
+    gl_MeshVerticesEXT[v].gl_Position = ubo.view_proj * model.models[payload.instance] * vec4(sourceData.verts[vert_idx].pos.xyz, 1);
     OUT[v].fragColor = integer_to_rgb(meshlet_index);
     OUT[v].fragTexCoord = vec2(1, 1);
 }
