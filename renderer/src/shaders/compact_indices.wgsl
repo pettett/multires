@@ -2,10 +2,9 @@
 struct ClusterData {
     // Range into the index array that this submesh resides
     center: vec3<f32>,
-
     index_offset: u32,
-    index_count: u32,
 
+    index_count: u32,
     error: f32,
     //radius: f32,
     // All of these could be n1u (-1), if we are a leaf or a root node
@@ -34,7 +33,7 @@ struct DrawIndexedIndirect {
 
 @group(0) @binding(0) var<storage, write> result_indicies: array<i32>;
 
-@group(0) @binding(1) var<storage, write> draw_indirect_params: DrawIndexedIndirect;
+@group(0) @binding(1) var<storage, write> draw_indirect_params: array<DrawIndexedIndirect>;
 
 //@group(0) @binding(2) var<storage, read_write> prefix_sum: array<u32>;
 
@@ -53,12 +52,14 @@ fn main(
     @builtin(local_invocation_id) lid: vec3<u32>,
 ) {
     let idx = id.x;
+    let len = arrayLength(&indices);
+    let offset = 0u;// len * id.y;
 	// For the end workgroup
-    if idx >= should_draw[0u] {
+    if idx >= should_draw[offset + 0u] {
         return;
     }
 
-    let cull = should_draw[idx + 1u];
+    let cull = should_draw[offset + idx + 1u];
 
 	// Initialise scan to list of sizes [2,0,0,3,1,0,0]
     var idx_val = u32(cull) * clusters[idx].index_count;
@@ -73,7 +74,7 @@ fn main(
 
 		// Sum everything before us in parallel
         for (var meshlet: u32 = u32(lid.x); meshlet < workgroup_start; meshlet += pre_workgroup_summing_threads) {
-            workgroup_data[lid.x] += should_draw[meshlet + 1u] * clusters[meshlet].index_count;
+            workgroup_data[lid.x] += should_draw[offset + meshlet + 1u] * clusters[meshlet].index_count;
         }
     }
 
@@ -89,7 +90,7 @@ fn main(
 
 	// Add things within this workgroup
     for (var meshlet: u32 = workgroup_start; meshlet < idx; meshlet ++) {
-        idx_val += should_draw[meshlet + 1u] * clusters[meshlet].index_count;
+        idx_val += should_draw[offset + meshlet + 1u] * clusters[offset + meshlet].index_count;
     }
 
 
@@ -174,7 +175,7 @@ fn main(
 		
 		// Ideally, compute this in a step after writing cull to a buffer and compacting it down
         for (var ind: u32 = 0u; ind < clusters[idx].index_count; ind++) {
-            result_indicies[idx_val + ind] = indices[ind_start + ind] * i32(cull);
+            result_indicies[offset + idx_val + ind] = indices[ind_start + ind] * i32(cull);
         }
 
         idx_val += clusters[idx].index_count;
@@ -182,7 +183,7 @@ fn main(
 
 	// Fill the max index count from the final work item
 
-    if idx == should_draw[0u] - 1u {
-        draw_indirect_params.index_count = idx_val;
+    if idx == should_draw[offset + 0u] - 1u {
+        draw_indirect_params[id.y].index_count = idx_val;
     }
 }

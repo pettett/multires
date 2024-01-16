@@ -61,7 +61,7 @@ impl App {
             &mesh_renderer,
         ));
 
-        for i in 0..10 {
+        for i in 0..5 {
             for j in 0..10 {
                 MultiResMeshComponent::from_asset(
                     "Mesh 0".to_owned(),

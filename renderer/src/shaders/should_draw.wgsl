@@ -25,18 +25,17 @@ struct ClusterData {
 }
 
 struct DrawData {
-	model: mat4x4<f32>,
-	camera_pos: vec3<f32>,
-    error: f32,
-	mode: i32,
+	model: mat4x4<f32>, 
 	current_count: u32,
 }
 
 
 struct CameraUniform {
-    view_proj: mat4x4<f32>,
-	camera_pos: vec3<f32>,
+ 	view_proj: mat4x4<f32>,
+    camera_pos: vec3<f32>,
     part_highlight: i32,
+    error: f32,
+    mode: u32,
 };
 
 
@@ -44,14 +43,13 @@ struct CameraUniform {
 
 @group(0) @binding(0) var<storage, write> should_draw: array<u32>;
 
-// @group(1) @binding(0) var<storage, read> indices: array<i32>;
+@group(1) @binding(0) var<storage, read> indices: array<i32>;
 
 @group(1) @binding(1) var<storage, read> clusters: array<ClusterData>;
 
 @group(2) @binding(0) var<storage, read> draw_data: DrawData;
 
-
-//@group(3) @binding(0) var<storage, read> camera: CameraUniform;
+@group(3) @binding(0) var<uniform> camera: CameraUniform;
 
 const LARGE_ERROR = 100000000000000000.0;
 
@@ -60,17 +58,20 @@ fn cluster_error(idx: u32) -> f32 {
     if out_of_range {
         return LARGE_ERROR;
     } else {
-        return clusters[idx].error * (clusters[idx].radius / distance((draw_data.model * vec4<f32>(clusters[idx].center, 1.0)).xyz, draw_data.camera_pos));
+        return clusters[idx].error * (clusters[idx].radius / distance((draw_data.model * vec4<f32>(clusters[idx].center, 1.0)).xyz, camera.camera_pos));
     }
 }
 
-@compute @workgroup_size(64)
+@compute @workgroup_size(64, 1, 1)
 fn main(
     @builtin(global_invocation_id) id: vec3<u32>
 ) {
     let i = id.x;
+    let len = arrayLength(&indices);
+    let offset = 0u;// len * id.y;
+
     if i == 0u {
-        should_draw[0u] = draw_data.current_count;
+        should_draw[offset + 0u] = draw_data.current_count;
     }
 
     if i >= draw_data.current_count {
@@ -99,9 +100,9 @@ fn main(
         parent_error = min(cluster_error(u32(clusters[i].parent0)), cluster_error(u32(clusters[i].parent1)));
     }
 
-    let cull = u32(draw_data.error >= this_error && draw_data.error < parent_error);
+    let cull = u32(camera.error >= this_error && camera.error < parent_error);
 
-    should_draw[i + 1u] = cull;
+    should_draw[offset + i + 1u] = cull;
 	
 	// Ideally, compute this in a step after writing cull to a buffer and compacting it down
 

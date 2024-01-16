@@ -29,7 +29,7 @@ pub struct Renderer {
     size: winit::dpi::PhysicalSize<u32>,
     window: Window,
     camera_buffer: BufferGroup<1>,
-    depth_texture: Texture,
+    pub depth_texture: Texture,
     surface_format: wgpu::TextureFormat,
     pub sphere_gizmo: DebugMesh,
     pub mesh_index: usize,
@@ -102,7 +102,9 @@ impl Renderer {
             &device,
             &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                visibility: wgpu::ShaderStages::VERTEX
+                    | wgpu::ShaderStages::FRAGMENT
+                    | wgpu::ShaderStages::COMPUTE,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
@@ -115,9 +117,7 @@ impl Renderer {
 
         let camera_buffer = BufferGroup::create_single(
             &[CameraUniform::new()],
-            wgpu::BufferUsages::UNIFORM
-                | wgpu::BufferUsages::COPY_DST
-                | wgpu::BufferUsages::STORAGE,
+            wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             &device,
             &camera_bind_group_layout,
             Some("Camera Buffer"),
@@ -216,7 +216,7 @@ pub fn render(
         array_layer_count: None,
     });
 
-    let mut compute_encoder =
+    let mut encoder =
         renderer
             .instance
             .device()
@@ -232,20 +232,15 @@ pub fn render(
         bytemuck::cast_slice(&[*camera]),
     );
 
-    {
-        let mut compute_pass = compute_encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some("Compute Pass"),
-        });
-
-        MultiResMeshComponent::compute_pass(
-            &meshes,
-            &renderer,
-            &mesh_renderer,
-            camera_trans,
-            &submeshes,
-            &mut compute_pass,
-        );
-    }
+    MultiResMeshComponent::draw(
+        &mut meshes,
+        &renderer,
+        &mesh_renderer,
+        camera_trans,
+        &submeshes,
+        &mut encoder,
+        &view,
+    );
 
     // {
     //     for (mesh, _) in meshes.iter() {
@@ -262,10 +257,10 @@ pub fn render(
     //     }
     // }
 
-    renderer
-        .instance
-        .queue()
-        .submit(std::iter::once(compute_encoder.finish()));
+    //renderer
+    //    .instance
+    //    .queue()
+    //    .submit(std::iter::once(compute_encoder.finish()));
 
     // {
     //     // Note that we're not calling `.await` here.
@@ -290,53 +285,19 @@ pub fn render(
     //     renderer.debug_staging_buffer.unmap();
     // }
 
-    let mut render_encoder =
-        renderer
-            .instance
-            .device()
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("Render Encoder"),
-            });
-
-    {
-        let mut render_pass = render_encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("Mesh Render Pass"),
-            color_attachments: &[
-                // This is what @location(0) in the fragment shader targets
-                Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.1,
-                            g: 0.2,
-                            b: 0.3,
-                            a: 1.0,
-                        }),
-                        store: true,
-                    },
-                }),
-            ],
-            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                view: &renderer.depth_texture.view(),
-                depth_ops: Some(wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(1.0),
-                    store: true,
-                }),
-                stencil_ops: None,
-            }),
-        });
-
-        for (mesh, _trans) in meshes.iter() {
-            mesh.render_pass(&renderer, &mut render_pass, &mesh_renderer);
-        }
-    }
+    //let mut render_encoder =
+    //    renderer
+    //        .instance
+    //        .device()
+    //        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+    //            label: Some("Render Encoder"),
+    //        });
 
     gui.render_pass(
         &renderer,
         &mut state,
         &ctx,
-        &mut render_encoder,
+        &mut encoder,
         &view,
         &mut meshes,
         mesh_renderer,
@@ -349,7 +310,7 @@ pub fn render(
     renderer
         .instance
         .queue()
-        .submit(std::iter::once(render_encoder.finish()));
+        .submit(std::iter::once(encoder.finish()));
     output.present();
 
     // {

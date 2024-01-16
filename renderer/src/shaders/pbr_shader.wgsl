@@ -3,8 +3,11 @@
 // https://nccastaff.bournemouth.ac.uk/jmacey/Lectures/OpenGL/shaders/?print-pdf#/
 
 struct CameraUniform {
-    view_proj: mat4x4<f32>,
+ 	view_proj: mat4x4<f32>,
+    camera_pos: vec3<f32>,
     part_highlight: i32,
+    error: f32,
+    mode: u32,
 };
 
 @group(0) @binding(0) // 1.

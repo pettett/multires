@@ -18,6 +18,8 @@ use wgpu::util::{DeviceExt, DispatchIndirect};
 
 use crate::core::{pipeline::make_render_pipeline, BufferGroup, Instance, Renderer};
 
+const MAX_PARALLEL_INSTANCES: usize = 1;
+
 #[derive(Component)]
 pub struct ClusterComponent {
     // Range into the index array that this submesh resides
@@ -74,14 +76,15 @@ impl Debug for ErrorMode {
 
 #[repr(C)]
 #[derive(bytemuck::Zeroable, bytemuck::Pod, Clone, Copy)]
-struct DrawData {
+struct InstanceData {
     model: Mat4,
-    camera_pos: Vec3,
-    error: f32,
+    //camera_pos: Vec3,
+    //error: f32,
 
-    mode: u32,
+    //mode: u32,
     // Having a vec3 always brings fun antics like this
     current_count: u32,
+    _0: i32,
     _1: i32,
     _2: i32,
 }
@@ -89,15 +92,13 @@ struct DrawData {
 #[derive(Component)]
 pub struct MultiResMeshComponent {
     name: String,
-    cluster_count: u32,
-    write_can_draw_buffer: BufferGroup<1>,
-    read_can_draw_buffer: BufferGroup<1>,
-    pub result_indices_buffer: BufferGroup<2>,
+    //cluster_count: u32,
     //FIXME: This really should exist on the camera/part of uniform group
     draw_data_buffer: BufferGroup<1>,
     model: BufferGroup<1>,
     index_format: wgpu::IndexFormat,
     asset: Arc<MultiResMeshAsset>,
+    dirty: bool,
 }
 
 #[derive(Resource)]
@@ -134,6 +135,10 @@ pub struct MultiResMeshAsset {
     cluster_data_real_error_group: BufferGroup<2>,
     index_format: wgpu::IndexFormat,
     root_asset: MultiResMesh,
+
+    result_indices_buffer: BufferGroup<2>,
+    write_can_draw_buffer: BufferGroup<1>,
+    read_can_draw_buffer: BufferGroup<1>,
 }
 
 pub struct MultiResMeshDatabase {
@@ -320,7 +325,7 @@ impl MultiResMeshRenderer {
                         (&write_compute_bind_group_layout).into(),
                         (&cluster_info_buffer_bind_group_layout).into(),
                         (&read_compute_bind_group_layout).into(),
-                        //(&read_compute_buffer_bind_group).into(),
+                        (&renderer.instance.camera_bind_group_layout).into(),
                     ],
                     push_constant_ranges: &[],
                 });
@@ -537,128 +542,135 @@ impl MultiResMeshRenderer {
 // }
 
 impl MultiResMeshComponent {
-    pub fn compute_pass<'a>(
-        meshes: &'a Query<(&mut MultiResMeshComponent, &Transform)>,
+    pub fn draw<'a>(
+        meshes: &'a mut Query<(&mut MultiResMeshComponent, &Transform)>,
         renderer: &'a Renderer,
         mesh_renderer: &'a MultiResMeshRenderer,
         camera_trans: &Transform,
         _submeshes: &'a Query<(Entity, &ClusterComponent)>,
-        render_pass: &mut wgpu::ComputePass<'a>,
+        encoder: &mut wgpu::CommandEncoder,
+        view: &wgpu::TextureView,
     ) {
-        if mesh_renderer.freeze {
-            return;
+        let mut load_op = wgpu::LoadOp::Clear(wgpu::Color {
+            r: 0.1,
+            g: 0.2,
+            b: 0.3,
+            a: 1.0,
+        });
+
+        let mut load_op_depth = wgpu::LoadOp::Clear(1.0);
+
+        for (mut mesh, transform) in meshes.iter_mut() {
+            //    if !mesh_renderer.freeze
+            {
+                let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("Compute Pass"),
+                });
+
+                let cam_dist = (*transform.get_pos() - *camera_trans.get_pos()).length_squared();
+
+                // Quick conservative estimation of total clusters that could be drawn to test performance impact.
+                //let current_count = (((mesh.asset.cluster_count as f32 / cam_dist) * 400.0
+                //    / (mesh_renderer.error_target)) as u32)
+                //    .min(mesh.asset.cluster_count)
+                //    .max(4);
+
+                let current_count = mesh.asset.cluster_count;
+
+                if mesh.dirty {
+                    renderer.queue().write_buffer(
+                        mesh.draw_data_buffer.buffer(),
+                        0,
+                        &bytemuck::cast_slice(&[InstanceData {
+                            model: transform.get_local_to_world(),
+                            current_count,
+                            _0: 0,
+                            _1: 0,
+                            _2: 0,
+                        }]),
+                    );
+                    mesh.dirty = false;
+                }
+
+                let cluster_data = mesh.asset.cluster_data_real_error_group.bind_group();
+
+                compute_pass.set_pipeline(&mesh_renderer.culling_compute_pipeline);
+
+                compute_pass.set_bind_group(0, mesh.asset.write_can_draw_buffer.bind_group(), &[]);
+                compute_pass.set_bind_group(1, cluster_data, &[]);
+                compute_pass.set_bind_group(2, mesh.draw_data_buffer.bind_group(), &[]);
+                compute_pass.set_bind_group(3, renderer.camera_buffer().bind_group(), &[]);
+
+                //render_pass.set_bind_group(3, mesh.draw_data_buffer.bind_group(), &[]);
+
+                //render_pass.set_bind_group(3, renderer.camera_buffer().bind_group(), &[]);
+
+                compute_pass.dispatch_workgroups(current_count.div_ceil(64), 1, 1);
+
+                compute_pass.set_pipeline(&mesh_renderer.compacting_compute_pipeline);
+
+                compute_pass.set_bind_group(0, mesh.asset.result_indices_buffer.bind_group(), &[]);
+                compute_pass.set_bind_group(1, cluster_data, &[]);
+                compute_pass.set_bind_group(2, mesh.asset.read_can_draw_buffer.bind_group(), &[]);
+
+                compute_pass.dispatch_workgroups(current_count.div_ceil(64), 1, 1);
+            }
+
+            {
+                let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("Mesh Render Pass"),
+                    color_attachments: &[
+                        // This is what @location(0) in the fragment shader targets
+                        Some(wgpu::RenderPassColorAttachment {
+                            view,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: load_op,
+                                store: true,
+                            },
+                        }),
+                    ],
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view: &renderer.depth_texture.view(),
+                        depth_ops: Some(wgpu::Operations {
+                            load: load_op_depth,
+                            store: true,
+                        }),
+                        stencil_ops: None,
+                    }),
+                });
+
+                render_pass.set_vertex_buffer(0, mesh.asset.vertex_buffer.slice(..));
+                render_pass.set_index_buffer(
+                    mesh.asset.result_indices_buffer.get_buffer(0).slice(..),
+                    mesh.asset.index_format,
+                );
+
+                render_pass.set_bind_group(0, renderer.camera_buffer().bind_group(), &[]);
+                render_pass.set_bind_group(1, mesh.asset.partition_buffer.bind_group(), &[]);
+                render_pass.set_bind_group(2, mesh.model.bind_group(), &[]);
+
+                if mesh_renderer.show_solid {
+                    let pipeline = match mesh_renderer.draw_mode {
+                        DrawMode::Clusters => &mesh_renderer.render_pipeline,
+                        DrawMode::Pbr => &mesh_renderer.render_pipeline_pbr,
+                    };
+
+                    render_pass.set_pipeline(pipeline);
+
+                    render_pass
+                        .draw_indexed_indirect(mesh.asset.result_indices_buffer.get_buffer(1), 0);
+                }
+                if mesh_renderer.show_wire {
+                    render_pass.set_pipeline(&mesh_renderer.render_pipeline_wire);
+
+                    render_pass
+                        .draw_indexed_indirect(mesh.asset.result_indices_buffer.get_buffer(1), 0);
+                }
+            }
+            load_op = wgpu::LoadOp::Load;
+            load_op_depth = wgpu::LoadOp::Load;
         }
-
-        for (mesh, transform) in meshes.iter() {
-            let cam_dist = (*transform.get_pos() - *camera_trans.get_pos()).length_squared();
-
-            // Quick conservative estimation of total clusters that could be drawn to test performance impact.
-            let current_count = (((mesh.cluster_count as f32 / cam_dist) * 400.0
-                / (mesh_renderer.error_target)) as u32)
-                .min(mesh.cluster_count)
-                .max(4);
-
-            //let current_count = mesh.cluster_count;
-
-            renderer.queue().write_buffer(
-                mesh.draw_data_buffer.buffer(),
-                0,
-                &bytemuck::cast_slice(&[DrawData {
-                    model: transform.get_local_to_world(),
-                    camera_pos: (*camera_trans.get_pos()).into(),
-                    error: mesh_renderer.error_target,
-                    mode: mesh_renderer.error_calc.mode(),
-                    current_count,
-                    _1: 0,
-                    _2: 0,
-                }]),
-            );
-
-            let cluster_data = mesh.asset.cluster_data_real_error_group.bind_group();
-
-            render_pass.set_pipeline(&mesh_renderer.culling_compute_pipeline);
-
-            render_pass.set_bind_group(0, mesh.write_can_draw_buffer.bind_group(), &[]);
-            render_pass.set_bind_group(1, cluster_data, &[]);
-            render_pass.set_bind_group(2, mesh.draw_data_buffer.bind_group(), &[]);
-
-            //render_pass.set_bind_group(3, mesh.draw_data_buffer.bind_group(), &[]);
-
-            //render_pass.set_bind_group(3, renderer.camera_buffer().bind_group(), &[]);
-
-            render_pass.dispatch_workgroups(current_count.div_ceil(64), 1, 1);
-
-            render_pass.set_pipeline(&mesh_renderer.compacting_compute_pipeline);
-
-            render_pass.set_bind_group(0, mesh.result_indices_buffer.bind_group(), &[]);
-            render_pass.set_bind_group(1, cluster_data, &[]);
-            render_pass.set_bind_group(2, mesh.read_can_draw_buffer.bind_group(), &[]);
-
-            render_pass.dispatch_workgroups(current_count.div_ceil(64), 1, 1);
-        }
-    }
-
-    pub fn render_pass<'a>(
-        &'a self,
-        renderer: &'a Renderer,
-        //    submeshes: &'a Query<(Entity, &ClusterComponent)>,
-        render_pass: &mut wgpu::RenderPass<'a>,
-        mesh_renderer: &'a MultiResMeshRenderer,
-    ) {
-        //{
-        //    for i in 0..self.staging_buffer_size {
-        //        let r = self.debug_staging_buffer.slice(..).get_mapped_range();
-        //        print!("{}|", r[i]);
-        //    }
-        //    println!("");
-        //}
-
-        render_pass.set_vertex_buffer(0, self.asset.vertex_buffer.slice(..));
-        render_pass.set_index_buffer(
-            self.result_indices_buffer.get_buffer(0).slice(..),
-            self.asset.index_format,
-        );
-
-        render_pass.set_bind_group(0, renderer.camera_buffer().bind_group(), &[]);
-        render_pass.set_bind_group(1, self.asset.partition_buffer.bind_group(), &[]);
-        render_pass.set_bind_group(2, self.model.bind_group(), &[]);
-
-        if mesh_renderer.show_solid {
-            let pipeline = match mesh_renderer.draw_mode {
-                DrawMode::Clusters => &mesh_renderer.render_pipeline,
-                DrawMode::Pbr => &mesh_renderer.render_pipeline_pbr,
-            };
-
-            render_pass.set_pipeline(pipeline);
-
-            render_pass.draw_indexed_indirect(self.result_indices_buffer.get_buffer(1), 0);
-        }
-        if mesh_renderer.show_wire {
-            render_pass.set_pipeline(&mesh_renderer.render_pipeline_wire);
-
-            render_pass.draw_indexed_indirect(self.result_indices_buffer.get_buffer(1), 0);
-        }
-
-        // Draw bounds gizmos
-        // if mesh_renderer.show_bounds {
-        //     render_pass.set_vertex_buffer(0, renderer.sphere_gizmo.verts.slice(..));
-
-        //     render_pass.set_pipeline(&renderer.render_pipeline_wire);
-
-        //     for (_, submesh) in submeshes.iter() {
-        //         if submesh.cluster_layer_idx == mesh_renderer.focus_part {
-        //             if submesh.should_draw(submeshes, self, mesh_renderer) {
-        //                 render_pass.set_index_buffer(
-        //                     renderer.sphere_gizmo.indices.slice(..),
-        //                     wgpu::IndexFormat::Uint32,
-        //                 );
-
-        //                 render_pass.set_bind_group(2, submesh.model.bind_group(), &[]);
-        //                 render_pass.draw_indexed(0..renderer.sphere_gizmo.index_count, 0, 0..1);
-        //             }
-        //         }
-        //     }
-        // }
     }
 
     pub fn submesh_error_graph(
@@ -817,12 +829,10 @@ impl MultiResMeshComponent {
         // }
 
         let draw_data_buffer = BufferGroup::create_single(
-            &[DrawData {
+            &[InstanceData {
                 model: trans.get_local_to_world(),
-                camera_pos: Vec3::ZERO,
-                error: 1.5,
-                mode: 0,
                 current_count: 2,
+                _0: 0,
                 _1: 0,
                 _2: 0,
             }],
@@ -856,41 +866,6 @@ impl MultiResMeshComponent {
         //    writer.write(data).unwrap();
         //}
 
-        let cluster_can_draw = vec![0i32; (asset.cluster_count + 1) as _];
-        let cluster_result_indices = vec![0i32; asset.index_count as _];
-
-        let can_draw_buffer = BufferGroup::create_single(
-            &cluster_can_draw,
-            wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-            instance.device(),
-            &mesh_renderer.write_compute_bind_group_layout,
-            Some("cluster_can_draw_cull_buffer"),
-        );
-
-        let result_indices_buffer = BufferGroup::create_plural(
-            &[
-                &cluster_result_indices,
-                &[asset.index_count as i32, 1, 0, 0, 0],
-                //    &cluster_can_draw,
-            ],
-            &[
-                wgpu::BufferUsages::STORAGE
-                    | wgpu::BufferUsages::COPY_SRC
-                    | wgpu::BufferUsages::INDEX,
-                wgpu::BufferUsages::STORAGE
-                    | wgpu::BufferUsages::COPY_SRC
-                    | wgpu::BufferUsages::INDIRECT,
-                //    wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-            ],
-            instance.device(),
-            &mesh_renderer.result_indices_buffer_bind_group_layout,
-            &[
-                Some("cluster_result_indices"),
-                Some("Indirect draw indexed buffer"),
-                //    Some("Prefix scan buffer"),
-            ],
-        );
-
         let staging_buffer_size = 100; // std::mem::size_of_val(&cluster_can_draw[..]);
                                        // let _debug_staging_buffer = instance.device().create_buffer(&wgpu::BufferDescriptor {
                                        //     label: Some("Compute Buffer"),
@@ -905,19 +880,13 @@ impl MultiResMeshComponent {
                 name,
                 index_format,
                 draw_data_buffer,
-                read_can_draw_buffer: can_draw_buffer.alternate_bind_group(
-                    instance.device(),
-                    &mesh_renderer.read_compute_bind_group_layout,
-                    Some("read_cluster_can_draw"),
-                ),
-                write_can_draw_buffer: can_draw_buffer,
 
-                result_indices_buffer,
+                //result_indices_buffer,
                 //debug_staging_buffer,
                 //staging_buffer_size,
-                cluster_count: asset.cluster_count,
                 model,
                 asset,
+                dirty: true,
             },
             trans,
         ));
@@ -981,12 +950,56 @@ impl MultiResMeshAsset {
             &[Some("Partition Buffer"), Some("Group")],
         );
 
+        let cluster_result_indices = vec![0i32; indices.len() * MAX_PARALLEL_INSTANCES];
+
+        let result_indices_buffer = BufferGroup::create_plural(
+            &[
+                &cluster_result_indices,
+                bytemuck::cast_slice(&[[indices.len() as i32, 1, 0, 0, 0]; MAX_PARALLEL_INSTANCES]),
+                //    &cluster_can_draw,
+            ],
+            &[
+                wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_SRC
+                    | wgpu::BufferUsages::INDEX,
+                wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_SRC
+                    | wgpu::BufferUsages::INDIRECT,
+                //    wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            ],
+            instance.device(),
+            &mesh_renderer.result_indices_buffer_bind_group_layout,
+            &[
+                Some("cluster_result_indices"),
+                Some("Indirect draw indexed buffer"),
+                //    Some("Prefix scan buffer"),
+            ],
+        );
+
+        let cluster_can_draw =
+            vec![0i32; (all_clusters_data_real_error.len() + 1) * MAX_PARALLEL_INSTANCES];
+
+        let can_draw_buffer = BufferGroup::create_single(
+            &cluster_can_draw,
+            wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            instance.device(),
+            &mesh_renderer.write_compute_bind_group_layout,
+            Some("cluster_can_draw_cull_buffer"),
+        );
+
         // Update the value stored in this mesh
 
         MultiResMeshAsset {
             vertex_buffer,
             partition_buffer,
             index_format,
+            result_indices_buffer,
+            read_can_draw_buffer: can_draw_buffer.alternate_bind_group(
+                instance.device(),
+                &mesh_renderer.read_compute_bind_group_layout,
+                Some("read_cluster_can_draw"),
+            ),
+            write_can_draw_buffer: can_draw_buffer,
             index_count: indices.len() as _,
             cluster_data_real_error_group,
             cluster_count: all_clusters_data_real_error.len() as _,
