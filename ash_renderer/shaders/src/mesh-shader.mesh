@@ -6,6 +6,11 @@
 
 #include "shaders/src/mesh_task_payload.glsl"
 
+
+const uint MAX_PRIMITIVES = 126;
+const uint MAX_VERTS = 64;
+
+
 struct Vertex {
     vec4 pos;
     vec4 normal;
@@ -15,8 +20,8 @@ struct Vertex {
 // https://github.com/KhronosGroup/Vulkan-Samples/blob/26eb94f79f9c2377cbaa28db2fbd7dd6efb55ffe/framework/api_vulkan_sample.h#L89
 struct s_meshlet
 {
-    uint vertices[64]; // 64
-    uint indices[126 * 3]; // 126 triangles => 378 indices
+    uint vertices[MAX_VERTS]; // 64
+    uint indices[MAX_PRIMITIVES * 3]; // 126 triangles => 378 indices
     uint vertex_count;
     uint index_count;
 };
@@ -44,7 +49,7 @@ layout (std430, binding = 4) readonly buffer InputBufferV {
 
 
 layout (local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
-layout (triangles, max_vertices = 64, max_primitives = 126) out;
+layout (triangles, max_vertices = MAX_VERTS, max_primitives = MAX_PRIMITIVES) out;
 
 layout (location = 0) out Interpolants {
     vec3 fragColor;
@@ -82,14 +87,17 @@ void main() {
 
     s_meshlet meshlet = indices.meshlets[meshlet_index];
 
-    SetMeshOutputsEXT(meshlet.vertex_count, meshlet.index_count / 3);
+	const uint vertex_count = min(MAX_VERTS, meshlet.vertex_count);
+	const uint primitive_count = min(MAX_PRIMITIVES, meshlet.index_count / 3);
+
+    SetMeshOutputsEXT(vertex_count, primitive_count);
 
     // pub const RECT_TEX_COORD_INDICES_DATA: [u32; 12] = [0, 1, 2, 2, 3, 0, 4, 5, 6, 6, 7, 4];
-    for (uint i = 0; i < meshlet.vertex_count; i++) {
+    for (uint i = 0; i < vertex_count; i++) {
         vert(i, meshlet_index);
     }
 
-    for (uint i = 0; i < meshlet.index_count / 3; i++) {
+    for (uint i = 0; i < primitive_count; i++) {
         gl_PrimitiveTriangleIndicesEXT[i] = uvec3(meshlet.indices[i * 3], meshlet.indices[i * 3 + 1], meshlet.indices[i * 3 + 2]);
     }
 }

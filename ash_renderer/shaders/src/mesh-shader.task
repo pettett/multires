@@ -41,7 +41,7 @@ struct ClusterData {
 	// Filler draw_data for alignment
     float radius;
     uint layer;
-    int _2;
+    int max_child_index;
 
 	int _3;
     int _4;
@@ -125,7 +125,7 @@ void main() {
 	//if (local_index % 2 == 0){
 	//	atomicMax(max_count, max(payload.meshlet_count[local_index], payload.meshlet_count[local_index+1]) );
 	//}
-	
+
 	uint max_count = subgroupMax(payload.meshlet_count[local_index]);
 
     EmitMeshTasksEXT(max_count, TASK_GROUP_SIZE, 1);

@@ -1,35 +1,14 @@
 use std::{
     fs,
     io::{BufReader, Write},
+    path::{self, PathBuf},
 };
 
+use anyhow::Context;
 use bincode::{config, de, enc};
-#[derive(Debug)]
-pub enum ErrorKind {
-    EncodeError(bincode::error::EncodeError),
-    DecodeError(bincode::error::DecodeError),
-    Io(std::io::Error),
-}
-
-impl From<bincode::error::EncodeError> for ErrorKind {
-    fn from(value: bincode::error::EncodeError) -> Self {
-        ErrorKind::EncodeError(value)
-    }
-}
-impl From<bincode::error::DecodeError> for ErrorKind {
-    fn from(value: bincode::error::DecodeError) -> Self {
-        ErrorKind::DecodeError(value)
-    }
-}
-
-impl From<std::io::Error> for ErrorKind {
-    fn from(value: std::io::Error) -> Self {
-        ErrorKind::Io(value)
-    }
-}
 
 pub trait Asset: Sized + enc::Encode + de::Decode {
-    fn save(&self) -> Result<(), ErrorKind> {
+    fn save(&self) -> anyhow::Result<()> {
         let config = config::standard();
 
         let data = bincode::encode_to_vec(self, config)?;
@@ -39,10 +18,25 @@ pub trait Asset: Sized + enc::Encode + de::Decode {
 
         Ok(())
     }
-    fn load() -> Result<Self, ErrorKind> {
+    fn load() -> anyhow::Result<Self> {
         let config = config::standard();
 
-        let file = fs::File::open("asset.bin")?;
+        let path = "asset.bin";
+
+        let file = fs::File::open(&path)?;
+        let mut buf = BufReader::new(file);
+
+        Ok(bincode::decode_from_reader(&mut buf, config)?)
+    }
+
+    fn load_from_cargo_manifest_dir() -> anyhow::Result<Self> {
+        let config = config::standard();
+
+        let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        path.push("..");
+        path.push("asset.bin");
+
+        let file = fs::File::open(&path).with_context(|| format!("{:?}", path.canonicalize()))?;
         let mut buf = BufReader::new(file);
 
         Ok(bincode::decode_from_reader(&mut buf, config)?)

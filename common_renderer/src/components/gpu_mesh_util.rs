@@ -28,12 +28,28 @@ pub struct ClusterData {
     // Pad alignment to 4 bytes
     pub radius: f32,
     pub layer: u32,
-    _2: i32,
+    pub max_child_index: i32,
 
     _3: i32,
     _4: i32,
     pub meshlet_start: u32,
     pub meshlet_count: u32,
+}
+
+impl ClusterData {
+    /// Get indexes of both parents of this cluster in the asset array
+    pub fn get_parents(&self) -> Option<(usize, usize)> {
+        // If we have one parent, we must have to other, otherwise the function is invalid
+        self.parent0
+            .try_into()
+            .ok()
+            .map(|p0| (p0, self.parent1 as _))
+    }
+
+    /// Get index of co-parent of this cluster in the asset array
+    pub fn get_co_parent(&self) -> Option<usize> {
+        self.co_parent.try_into().ok()
+    }
 }
 
 pub trait MultiResData {
@@ -154,6 +170,17 @@ impl MultiResData for MultiResMesh {
                     panic!("Non-binary parented DAG, not currently (or ever) supported");
                 }
             };
+
+            let max_child_idx = dag
+                .neighbors_directed(
+                    petgraph::graph::node_index(i),
+                    petgraph::Direction::Outgoing,
+                )
+                .max()
+                .map(|x| x.index() as i32)
+                .unwrap_or(-1);
+
+            all_clusters_data_real_error[i].max_child_index = max_child_idx;
         }
 
         all_clusters_data_real_error
@@ -195,5 +222,48 @@ impl MultiResData for MultiResMesh {
         assert_eq!(groups.len(), *partitions.last().unwrap() as usize + 1);
 
         (indices, partitions, groups)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{path, str::FromStr};
+
+    use common::{asset::Asset, MultiResMesh};
+
+    use super::MultiResData;
+
+    #[test]
+    fn test_co_parents() {
+        let mesh = MultiResMesh::load_from_cargo_manifest_dir().unwrap();
+
+        let clusters = mesh.cluster_data();
+
+        for c in &clusters {
+            if let Some((p0id, p1id)) = c.get_parents() {
+                let p0 = &clusters[p0id];
+                let p1 = &clusters[p1id];
+
+                assert_eq!(p0.get_co_parent().unwrap(), p1id);
+                assert_eq!(p1.get_co_parent().unwrap(), p0id);
+            }
+        }
+    }
+
+    #[test]
+    fn test_max_children() {
+        let mesh = MultiResMesh::load_from_cargo_manifest_dir().unwrap();
+
+        let clusters = mesh.cluster_data();
+
+        for i in 0..clusters.len() {
+            if let Some((p0id, p1id)) = clusters[i].get_parents() {
+                let p0 = &clusters[p0id];
+                let p1 = &clusters[p1id];
+
+                assert!(p0.max_child_index >= i as i32);
+                assert!(p1.max_child_index >= i as i32);
+            }
+        }
     }
 }
