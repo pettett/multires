@@ -8,6 +8,7 @@ pub mod device;
 pub mod fps_limiter;
 pub mod image;
 pub mod instance;
+pub mod physical_device;
 pub mod pipeline;
 pub mod platforms;
 pub mod pools;

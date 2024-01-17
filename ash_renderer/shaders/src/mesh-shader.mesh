@@ -4,15 +4,13 @@
 
 #extension GL_ARB_separate_shader_objects: enable
 
+#include "shaders/src/mesh_task_payload.glsl"
 
 struct Vertex {
     vec4 pos;
     vec4 normal;
 };
 
-struct Index {
-    uint i;
-};
 
 // https://github.com/KhronosGroup/Vulkan-Samples/blob/26eb94f79f9c2377cbaa28db2fbd7dd6efb55ffe/framework/api_vulkan_sample.h#L89
 struct s_meshlet
@@ -53,10 +51,6 @@ layout (location = 0) out Interpolants {
     vec2 fragTexCoord;
 } OUT[];
 
-struct MeshTaskPayload {
-    uint instance;
-    uint meshlet_start;
-};
 
 taskPayloadSharedEXT MeshTaskPayload payload;
 
@@ -66,7 +60,6 @@ vec3 integer_to_rgb(float integer) {
     float blue = mod((integer * 251.0 + 83.0), 293.0) / 293.0;
     return vec3(red, green, blue);
 }
-
 
 void vert(uint v, uint meshlet_index) {
     // gl_MeshVerticesEXT[v].gl_Position = ubo.view_proj * ubo.model * p;
@@ -78,7 +71,14 @@ void vert(uint v, uint meshlet_index) {
 
 void main() {
     uint thread_id = gl_GlobalInvocationID.x;
-    uint meshlet_index = payload.meshlet_start + thread_id;
+    uint cluster_id = gl_GlobalInvocationID.y;
+
+	if (thread_id >= payload.meshlet_count[cluster_id]){
+    	SetMeshOutputsEXT(0, 0);
+		return;
+	}
+
+    uint meshlet_index = payload.meshlet_start[cluster_id] + thread_id;
 
     s_meshlet meshlet = indices.meshlets[meshlet_index];
 

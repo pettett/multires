@@ -11,13 +11,15 @@ use crate::{VkDeviceOwned, VkHandle};
 
 use super::{
     instance::Instance,
+    physical_device::PhysicalDevice,
     structures::{DeviceExtension, QueueFamilyIndices},
     surface::Surface,
 };
 
 pub struct Device {
-    physical_device: vk::PhysicalDevice,
     instance: Arc<Instance>,
+    physical_device: Arc<PhysicalDevice>,
+
     pub fn_mesh_shader: ash::extensions::ext::MeshShader,
     pub fn_swapchain: ash::extensions::khr::Swapchain,
     pub handle: ash::Device,
@@ -41,12 +43,12 @@ impl Device {
 
     pub fn create_logical_device(
         instance: Arc<Instance>,
-        physical_device: vk::PhysicalDevice,
+        physical_device: Arc<PhysicalDevice>,
         validation: &super::debug::ValidationInfo,
         device_extensions: &DeviceExtension,
         surface: &Surface,
     ) -> (Arc<Self>, QueueFamilyIndices) {
-        let indices = instance.find_queue_family(physical_device, surface);
+        let indices = instance.find_queue_family(physical_device.handle(), surface);
 
         use std::collections::HashSet;
         let mut unique_queue_families = HashSet::new();
@@ -111,7 +113,7 @@ impl Device {
         let device: ash::Device = unsafe {
             instance
                 .handle
-                .create_device(physical_device, &device_create_info, None)
+                .create_device(physical_device.handle(), &device_create_info, None)
                 .expect("Failed to create logical Device!")
         };
 

@@ -4,10 +4,12 @@ use ash::vk;
 
 use crate::App;
 
+use super::physical_device::PhysicalDevice;
+
 pub fn create_render_pass(
     instance: &ash::Instance,
     device: &ash::Device,
-    physcial_device: vk::PhysicalDevice,
+    physical_device: &PhysicalDevice,
     surface_format: vk::Format,
 ) -> vk::RenderPass {
     let color_attachment = vk::AttachmentDescription {
@@ -24,7 +26,7 @@ pub fn create_render_pass(
 
     let depth_attachment = vk::AttachmentDescription {
         flags: vk::AttachmentDescriptionFlags::empty(),
-        format: App::find_depth_format(instance, physcial_device),
+        format: App::find_depth_format(instance, physical_device),
         samples: vk::SampleCountFlags::TYPE_1,
         load_op: vk::AttachmentLoadOp::CLEAR,
         store_op: vk::AttachmentStoreOp::DONT_CARE,

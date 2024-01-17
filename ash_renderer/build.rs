@@ -13,15 +13,22 @@ fn main() {
 
     println!("cargo:rerun-if-changed=shaders/src");
 
-    let entries = fs::read_dir("shaders/src").unwrap();
-
     // Compile all shaders to spirv::1.6
 
     let compiler = shaderc::Compiler::new().unwrap();
     let mut options = shaderc::CompileOptions::new().unwrap();
     options.set_target_spirv(shaderc::SpirvVersion::V1_6);
     options.add_macro_definition("EP", Some("main"));
+    options.set_include_callback(
+        |requested_source, type_, requesting_source, include_depth| {
+            Ok(shaderc::ResolvedInclude {
+                resolved_name: requested_source.to_owned(),
+                content: fs::read_to_string(&requested_source).unwrap(),
+            })
+        },
+    );
 
+    let entries = fs::read_dir("shaders/src").unwrap();
     let mut success = true;
     for entry in entries {
         let entry = entry.unwrap();

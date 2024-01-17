@@ -1,8 +1,13 @@
 use std::{ptr, sync::Arc};
 
-use ash::{vk, RawPtr};
+use ash::vk::{self};
 
-use super::{device::Device, instance::Instance, structures::QueueFamilyIndices, surface::Surface};
+use crate::VkHandle;
+
+use super::{
+    device::Device, instance::Instance, physical_device::PhysicalDevice,
+    structures::QueueFamilyIndices, surface::Surface,
+};
 pub struct SwapChainSupportDetail {
     pub capabilities: vk::SurfaceCapabilitiesKHR,
     pub formats: Vec<vk::SurfaceFormatKHR>,
@@ -32,13 +37,13 @@ impl Drop for Swapchain {
 impl Swapchain {
     pub fn new(
         device: Arc<Device>,
-        physical_device: vk::PhysicalDevice,
+        physical_device: &PhysicalDevice,
         window: &winit::window::Window,
         surface: Arc<Surface>,
         queue_family: &QueueFamilyIndices,
         old_swapchain: Option<&Swapchain>,
     ) -> Swapchain {
-        let swapchain_support = query_swapchain_support(physical_device, &surface);
+        let swapchain_support = query_swapchain_support(physical_device.handle(), &surface);
 
         let surface_format = choose_swapchain_format(&swapchain_support.formats);
         let present_mode = choose_swapchain_present_mode(&swapchain_support.present_modes);

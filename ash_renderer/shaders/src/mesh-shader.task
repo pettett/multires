@@ -3,7 +3,16 @@
 
 #extension GL_ARB_separate_shader_objects: enable
 
-layout (local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+#extension GL_KHR_shader_subgroup_arithmetic: enable
+
+#include "shaders/src/mesh_task_payload.glsl"
+
+
+const float LARGE_ERROR = 100000000000000000.0;
+
+// Bindings and layout
+
+layout (local_size_x = TASK_GROUP_SIZE, local_size_y = 1, local_size_z = 1) in;
 
 layout (binding = 0) readonly buffer ModelUniformBufferObject {
     mat4 models[];
@@ -45,14 +54,10 @@ layout (std430, binding = 2) readonly buffer InputBufferC {
 } cluster_data;
 
 
-struct MeshTaskPayload {
-	uint instance;
-    uint meshlet_start;
-};
-
+// Workgroup Shared memory
+//shared uint max_count;
 taskPayloadSharedEXT MeshTaskPayload payload;
 
-const float LARGE_ERROR = 100000000000000000.0;
 
 float cluster_error(uint idx, uint idy) {
     //bool out_of_range = idx >= draw_data.current_count;
@@ -69,13 +74,16 @@ float cluster_error(uint idx, uint idy) {
 
 void main() {
     uint cluster_index = gl_GlobalInvocationID.x;
+    uint local_index = gl_LocalInvocationID.x;
     uint instance_index = gl_GlobalInvocationID.y;
 	
 
 
-    // if i >= draw_data.current_count {
-    //     return;
-    // }
+    if (cluster_index >= cluster_data.clusters.length()) {
+    	payload.meshlet_start[local_index] = -1;
+    	payload.meshlet_count[local_index] = -1;
+        return;
+    }
 
 
 	// Calculate if this cluster should be drawn:
@@ -104,18 +112,23 @@ void main() {
 
 	float error =  ubo.target_error;
 
-    bool cull = error >= this_error && error < parent_error;
+    bool draw = error >= this_error && error < parent_error;
 
+    payload.meshlet_start[local_index] = draw ? cluster_data.clusters[cluster_index].meshlet_start : -1;
+    payload.meshlet_count[local_index] = draw ? cluster_data.clusters[cluster_index].meshlet_count : 0;
+    payload.instance = instance_index;
+	
+	//max_count = 0;
 
+	//barrier();
 
-	if (cull)
-	{
-    	payload.meshlet_start = cluster_data.clusters[cluster_index].meshlet_start;
-    	payload.instance = instance_index;
-    	//payload.meshlet_start = cluster_index;
+	//if (local_index % 2 == 0){
+	//	atomicMax(max_count, max(payload.meshlet_count[local_index], payload.meshlet_count[local_index+1]) );
+	//}
+	
+	uint max_count = subgroupMax(payload.meshlet_count[local_index]);
 
-    	//EmitMeshTasksEXT(cluster_data.clusters[cluster_index].meshlet_count, 1, 1);
-    	EmitMeshTasksEXT(cluster_data.clusters[cluster_index].meshlet_count, 1, 1);
-	}
+    EmitMeshTasksEXT(max_count, TASK_GROUP_SIZE, 1);
+	
 
 } 

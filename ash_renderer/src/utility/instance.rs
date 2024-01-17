@@ -6,12 +6,16 @@ use std::{
 
 use ash::vk;
 
-use crate::utility::{
-    constants::{API_VERSION, APPLICATION_VERSION, ENGINE_VERSION, VALIDATION},
-    debug, platforms,
+use crate::{
+    utility::{
+        constants::{API_VERSION, APPLICATION_VERSION, ENGINE_VERSION, VALIDATION},
+        debug, platforms,
+    },
+    VkHandle,
 };
 
 use super::{
+    physical_device::PhysicalDevice,
     structures::{DeviceExtension, QueueFamilyIndices},
     surface::Surface,
     swapchain::query_swapchain_support,
@@ -21,6 +25,7 @@ pub struct Instance {
     pub handle: ash::Instance,
     pub fn_surface: ash::extensions::khr::Surface,
 }
+
 impl Instance {
     pub fn new(
         entry: &ash::Entry,
@@ -139,14 +144,10 @@ impl Instance {
         panic!("Failed to find supported format!")
     }
 
-    pub fn check_mipmap_support(
-        &self,
-        physcial_device: vk::PhysicalDevice,
-        image_format: vk::Format,
-    ) {
+    pub fn check_mipmap_support(&self, physical_device: &PhysicalDevice, image_format: vk::Format) {
         let format_properties = unsafe {
             self.handle
-                .get_physical_device_format_properties(physcial_device, image_format)
+                .get_physical_device_format_properties(physical_device.handle(), image_format)
         };
 
         let is_sample_image_filter_linear_support = format_properties
@@ -158,10 +159,10 @@ impl Instance {
         }
     }
     pub fn pick_physical_device(
-        &self,
+        self: &Arc<Self>,
         surface: &Surface,
         required_device_extensions: &DeviceExtension,
-    ) -> vk::PhysicalDevice {
+    ) -> Arc<PhysicalDevice> {
         let physical_devices = unsafe {
             self.handle
                 .enumerate_physical_devices()
@@ -185,7 +186,9 @@ impl Instance {
         });
 
         match result {
-            Some(p_physical_device) => *p_physical_device,
+            Some(p_physical_device) => {
+                Arc::new(PhysicalDevice::new(*p_physical_device, self.clone()))
+            }
             None => panic!("Failed to find a suitable GPU!"),
         }
     }

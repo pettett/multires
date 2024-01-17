@@ -31,6 +31,7 @@ use glam::{Mat4, Quat, Vec3A};
 use utility::{
     buffer::{AsBuffer, Buffer, UniformBuffer},
     device::Device,
+    physical_device::PhysicalDevice,
     pipeline::Pipeline,
     pools::DescriptorSet,
     surface::Surface,
@@ -38,12 +39,13 @@ use utility::{
 };
 use winit::event::WindowEvent;
 
-use std::ptr;
+use std::ptr::{self, null_mut};
 use std::{path::Path, sync::Arc};
 
 // Constants
 const WINDOW_TITLE: &'static str = "26.Depth Buffering";
 const TEXTURE_PATH: &'static str = "../../../assets/vulkan.jpg";
+const TASK_GROUP_SIZE: u32 = 16;
 
 pub trait VkHandle {
     type VkItem;
@@ -63,7 +65,7 @@ pub struct App {
     debug_utils_loader: ash::extensions::ext::DebugUtils,
     debug_messenger: vk::DebugUtilsMessengerEXT,
 
-    physical_device: vk::PhysicalDevice,
+    physical_device: Arc<PhysicalDevice>,
     memory_properties: vk::PhysicalDeviceMemoryProperties,
     device: Arc<Device>,
 
@@ -146,14 +148,22 @@ impl App {
             setup_debug_utils(VALIDATION.is_enable, &entry, &instance.handle);
         let physical_device = instance.pick_physical_device(&surface, &DEVICE_EXTENSIONS);
 
-        let physical_device_memory_properties = unsafe {
-            instance
-                .handle
-                .get_physical_device_memory_properties(physical_device)
-        };
+        let physical_device_memory_properties = physical_device.get_memory_properties();
+
+        let physical_device_subgroup_properties = physical_device.get_subgroup_properties();
+
+        // Features required for subgroupMax to work in task shader
+        assert!(TASK_GROUP_SIZE <= physical_device_subgroup_properties.subgroup_size);
+        assert!(physical_device_subgroup_properties
+            .supported_stages
+            .contains(vk::ShaderStageFlags::TASK_EXT));
+        assert!(physical_device_subgroup_properties
+            .supported_operations
+            .contains(vk::SubgroupFeatureFlags::ARITHMETIC));
+
         let (device, queue_family) = Device::create_logical_device(
             instance.clone(),
-            physical_device,
+            physical_device.clone(),
             &VALIDATION,
             &DEVICE_EXTENSIONS,
             &surface,
@@ -174,7 +184,7 @@ impl App {
         println!("Loading swapchain");
         let swapchain = Swapchain::new(
             device.clone(),
-            physical_device,
+            &physical_device,
             &window,
             surface.clone(),
             &queue_family,
@@ -185,7 +195,7 @@ impl App {
         let render_pass = create_render_pass(
             &instance.handle,
             &device.handle,
-            physical_device,
+            &physical_device,
             swapchain.format,
         );
         let ubo_layout = create_descriptor_set_layout(&device.handle);
@@ -200,7 +210,7 @@ impl App {
         let depth_image = App::create_depth_resources(
             &instance.handle,
             device.clone(),
-            physical_device,
+            &physical_device,
             command_pool.pool,
             graphics_queue,
             swapchain.extent,
@@ -340,7 +350,7 @@ impl App {
         world.insert_resource(Events::<KeyIn>::default());
 
         let camera = world
-            .spawn((CameraController::new(0.05), cam, transform))
+            .spawn((CameraController::new(0.2), cam, transform))
             .id();
 
         let mut schedule = Schedule::default();
@@ -403,7 +413,7 @@ impl App {
     fn create_depth_resources(
         instance: &ash::Instance,
         device: Arc<Device>,
-        physical_device: vk::PhysicalDevice,
+        physical_device: &PhysicalDevice,
         _command_pool: vk::CommandPool,
         _submit_queue: vk::Queue,
         swapchain_extent: vk::Extent2D,
@@ -425,10 +435,7 @@ impl App {
         .create_image_view(depth_format, vk::ImageAspectFlags::DEPTH, 1)
     }
 
-    fn find_depth_format(
-        instance: &ash::Instance,
-        physical_device: vk::PhysicalDevice,
-    ) -> vk::Format {
+    fn find_depth_format(instance: &ash::Instance, physical_device: &PhysicalDevice) -> vk::Format {
         App::find_supported_format(
             instance,
             physical_device,
@@ -444,14 +451,15 @@ impl App {
 
     fn find_supported_format(
         instance: &ash::Instance,
-        physical_device: vk::PhysicalDevice,
+        physical_device: &PhysicalDevice,
         candidate_formats: &[vk::Format],
         tiling: vk::ImageTiling,
         features: vk::FormatFeatureFlags,
     ) -> vk::Format {
         for &format in candidate_formats.iter() {
-            let format_properties =
-                unsafe { instance.get_physical_device_format_properties(physical_device, format) };
+            let format_properties = unsafe {
+                instance.get_physical_device_format_properties(physical_device.handle(), format)
+            };
             if tiling == vk::ImageTiling::LINEAR
                 && format_properties.linear_tiling_features.contains(features)
             {
@@ -615,7 +623,7 @@ impl App {
 
                 device.fn_mesh_shader.cmd_draw_mesh_tasks(
                     command_buffer,
-                    submesh_count,
+                    submesh_count.div_ceil(TASK_GROUP_SIZE),
                     instance_count,
                     1,
                 );
@@ -770,7 +778,7 @@ impl App {
 
         self.swapchain = Swapchain::new(
             self.device.clone(),
-            self.physical_device,
+            &self.physical_device,
             &self.window,
             self.surface.clone(),
             &self.queue_family,
@@ -782,7 +790,7 @@ impl App {
         self.render_pass = create_render_pass(
             &self.instance.handle,
             &self.device.handle,
-            self.physical_device,
+            &self.physical_device,
             self.swapchain.format,
         );
         let graphics_pipeline = create_graphics_pipeline(
@@ -796,7 +804,7 @@ impl App {
         self.depth_image = App::create_depth_resources(
             &self.instance.handle,
             self.device.clone(),
-            self.physical_device,
+            &self.physical_device,
             self.command_pool.pool,
             self.graphics_queue,
             self.swapchain.extent,
