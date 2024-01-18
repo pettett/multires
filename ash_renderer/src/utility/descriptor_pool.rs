@@ -13,7 +13,7 @@ use super::{
 
 pub struct DescriptorPool {
     device: Arc<Device>,
-    pub pool: vk::DescriptorPool,
+    pub handle: vk::DescriptorPool,
 }
 impl DescriptorPool {
     pub fn new(device: Arc<Device>, swapchain_images_size: u32) -> Arc<DescriptorPool> {
@@ -35,14 +35,11 @@ impl DescriptorPool {
             },
         ];
 
-        let descriptor_pool_create_info = vk::DescriptorPoolCreateInfo {
-            s_type: vk::StructureType::DESCRIPTOR_POOL_CREATE_INFO,
-            p_next: ptr::null(),
-            flags: vk::DescriptorPoolCreateFlags::empty(),
-            max_sets: swapchain_images_size as u32,
-            pool_size_count: pool_sizes.len() as u32,
-            p_pool_sizes: pool_sizes.as_ptr(),
-        };
+        let descriptor_pool_create_info = vk::DescriptorPoolCreateInfo::builder()
+            .pool_sizes(&pool_sizes)
+            .max_sets(swapchain_images_size as u32)
+            //.flags(vk::DescriptorPoolCreateFlags::FREE_DESCRIPTOR_SET)
+			;
 
         let pool = unsafe {
             device
@@ -51,12 +48,16 @@ impl DescriptorPool {
                 .expect("Failed to create Descriptor Pool!")
         };
 
-        Arc::new(Self { pool, device })
+        Arc::new(Self {
+            handle: pool,
+            device,
+        })
     }
 }
 
 pub struct DescriptorSet {
-    set: vk::DescriptorSet,
+    handle: vk::DescriptorSet,
+    pool: Arc<DescriptorPool>,
     device: Arc<Device>,
     buffers: Vec<Arc<Buffer>>,
 }
@@ -65,14 +66,14 @@ impl VkHandle for DescriptorSet {
     type VkItem = vk::DescriptorSet;
 
     fn handle(&self) -> Self::VkItem {
-        self.set
+        self.handle
     }
 }
 
 impl DescriptorSet {
     pub fn create_descriptor_sets(
         device: &Arc<Device>,
-        descriptor_pool: &DescriptorPool,
+        descriptor_pool: &Arc<DescriptorPool>,
         descriptor_set_layout: vk::DescriptorSetLayout,
         uniform_transform_buffer: &Arc<Buffer>,
         uniform_camera_buffers: &[impl AsBuffer],
@@ -88,13 +89,9 @@ impl DescriptorSet {
             layouts.push(descriptor_set_layout);
         }
 
-        let descriptor_set_allocate_info = vk::DescriptorSetAllocateInfo {
-            s_type: vk::StructureType::DESCRIPTOR_SET_ALLOCATE_INFO,
-            p_next: ptr::null(),
-            descriptor_pool: descriptor_pool.pool,
-            descriptor_set_count: swapchain_images_size as u32,
-            p_set_layouts: layouts.as_ptr(),
-        };
+        let descriptor_set_allocate_info = vk::DescriptorSetAllocateInfo::builder()
+            .descriptor_pool(descriptor_pool.handle)
+            .set_layouts(&layouts);
 
         let vk_descriptor_sets = unsafe {
             device
@@ -106,7 +103,7 @@ impl DescriptorSet {
         let descriptor_sets: Vec<_> = vk_descriptor_sets
             .into_iter()
             .map(|set| DescriptorSet {
-                set,
+                handle: set,
                 device: device.clone(),
                 buffers: vec![
                     vertex_buffer.clone(),
@@ -114,6 +111,7 @@ impl DescriptorSet {
                     meshlet_buffer.clone(),
                     submesh_buffer.clone(),
                 ],
+                pool: descriptor_pool.clone(),
             })
             .collect();
 
@@ -138,7 +136,7 @@ impl DescriptorSet {
             let descriptor_write_sets = [
                 vk::WriteDescriptorSet {
                     // transform uniform
-                    dst_set: descriptor_set.set,
+                    dst_set: descriptor_set.handle,
                     dst_binding: 0,
                     dst_array_element: 0,
                     descriptor_count: 1,
@@ -149,7 +147,7 @@ impl DescriptorSet {
                 },
                 vk::WriteDescriptorSet {
                     // transform uniform
-                    dst_set: descriptor_set.set,
+                    dst_set: descriptor_set.handle,
                     dst_binding: 5,
                     dst_array_element: 0,
                     descriptor_count: 1,
@@ -160,7 +158,7 @@ impl DescriptorSet {
                 },
                 vk::WriteDescriptorSet {
                     // sampler uniform
-                    dst_set: descriptor_set.set,
+                    dst_set: descriptor_set.handle,
                     dst_binding: 1,
                     dst_array_element: 0,
                     descriptor_count: 1,
@@ -170,7 +168,7 @@ impl DescriptorSet {
                 },
                 vk::WriteDescriptorSet {
                     // submesh info buffer
-                    dst_set: descriptor_set.set,
+                    dst_set: descriptor_set.handle,
                     dst_binding: 2,
                     dst_array_element: 0,
                     descriptor_count: 1,
@@ -181,7 +179,7 @@ impl DescriptorSet {
                 },
                 vk::WriteDescriptorSet {
                     // meshlet info buffer
-                    dst_set: descriptor_set.set,
+                    dst_set: descriptor_set.handle,
                     dst_binding: 3,
                     dst_array_element: 0,
                     descriptor_count: 1,
@@ -192,7 +190,7 @@ impl DescriptorSet {
                 },
                 vk::WriteDescriptorSet {
                     // vertex buffer
-                    dst_set: descriptor_set.set,
+                    dst_set: descriptor_set.handle,
                     dst_binding: 4,
                     dst_array_element: 0,
                     descriptor_count: 1,
@@ -202,7 +200,7 @@ impl DescriptorSet {
                 },
                 vk::WriteDescriptorSet {
                     // vertex buffer
-                    dst_set: descriptor_set.set,
+                    dst_set: descriptor_set.handle,
                     dst_binding: 6,
                     dst_array_element: 0,
                     descriptor_count: 1,
@@ -300,130 +298,20 @@ pub fn create_descriptor_set_layout(device: &ash::Device) -> vk::DescriptorSetLa
 impl Drop for DescriptorPool {
     fn drop(&mut self) {
         unsafe {
-            self.device.handle.destroy_descriptor_pool(self.pool, None);
-        }
-    }
-}
-
-pub struct CommandPool {
-    pub device: Arc<Device>,
-    pub pool: vk::CommandPool,
-}
-
-pub struct SingleTimeCommandBuffer {
-    pool: Arc<CommandPool>,
-    pub cmd: vk::CommandBuffer,
-    submit_queue: vk::Queue,
-}
-
-impl Drop for SingleTimeCommandBuffer {
-    fn drop(&mut self) {
-        unsafe {
-            self.pool
-                .device
-                .handle
-                .end_command_buffer(self.cmd)
-                .expect("Failed to record Command Buffer at Ending!");
-        }
-
-        let buffers_to_submit = [self.cmd];
-
-        let sumbit_infos = [vk::SubmitInfo {
-            s_type: vk::StructureType::SUBMIT_INFO,
-            p_next: ptr::null(),
-            wait_semaphore_count: 0,
-            p_wait_semaphores: ptr::null(),
-            p_wait_dst_stage_mask: ptr::null(),
-            command_buffer_count: 1,
-            p_command_buffers: buffers_to_submit.as_ptr(),
-            signal_semaphore_count: 0,
-            p_signal_semaphores: ptr::null(),
-        }];
-
-        unsafe {
-            self.pool
-                .device
-                .handle
-                .queue_submit(self.submit_queue, &sumbit_infos, vk::Fence::null())
-                .expect("Failed to Queue Submit!");
-            self.pool
-                .device
-                .handle
-                .queue_wait_idle(self.submit_queue)
-                .expect("Failed to wait Queue idle!");
-            self.pool
-                .device
-                .handle
-                .free_command_buffers(self.pool.pool, &buffers_to_submit);
-        }
-    }
-}
-
-impl CommandPool {
-    pub fn new(device: Arc<Device>, queue_family_index: u32) -> Arc<Self> {
-        let command_pool_create_info = vk::CommandPoolCreateInfo {
-            s_type: vk::StructureType::COMMAND_POOL_CREATE_INFO,
-            p_next: std::ptr::null(),
-            flags: vk::CommandPoolCreateFlags::empty(),
-            queue_family_index,
-        };
-
-        let pool = unsafe {
-            device
-                .handle
-                .create_command_pool(&command_pool_create_info, None)
-                .expect("Failed to create Command Pool!")
-        };
-
-        Arc::new(Self { device, pool })
-    }
-
-    pub fn begin_single_time_command(
-        self: Arc<Self>,
-        submit_queue: vk::Queue,
-    ) -> SingleTimeCommandBuffer {
-        let command_buffer_allocate_info = vk::CommandBufferAllocateInfo {
-            s_type: vk::StructureType::COMMAND_BUFFER_ALLOCATE_INFO,
-            p_next: ptr::null(),
-            command_buffer_count: 1,
-            command_pool: self.pool,
-            level: vk::CommandBufferLevel::PRIMARY,
-        };
-
-        let command_buffer = unsafe {
             self.device
                 .handle
-                .allocate_command_buffers(&command_buffer_allocate_info)
-                .expect("Failed to allocate Command Buffers!")
-        }[0];
-
-        let command_buffer_begin_info = vk::CommandBufferBeginInfo {
-            s_type: vk::StructureType::COMMAND_BUFFER_BEGIN_INFO,
-            p_next: ptr::null(),
-            p_inheritance_info: ptr::null(),
-            flags: vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT,
-        };
-
-        unsafe {
-            self.device
-                .handle
-                .begin_command_buffer(command_buffer, &command_buffer_begin_info)
-                .expect("Failed to begin recording Command Buffer at beginning!")
-        };
-
-        SingleTimeCommandBuffer {
-            pool: self,
-            cmd: command_buffer,
-            submit_queue,
+                .destroy_descriptor_pool(self.handle, None);
         }
     }
 }
-
-impl Drop for CommandPool {
-    fn drop(&mut self) {
-        //TODO: Command buffers will be freed when the pool is dropped, so any buffers created from this pool must be invalidated
-        unsafe {
-            self.device.handle.destroy_command_pool(self.pool, None);
-        }
-    }
-}
+//FIXME:
+// impl Drop for DescriptorSet {
+//     fn drop(&mut self) {
+//         unsafe {
+//             self.device
+//                 .handle
+//                 .free_descriptor_sets(self.pool.handle, &[self.handle])
+//                 .unwrap();
+//         }
+//     }
+// }

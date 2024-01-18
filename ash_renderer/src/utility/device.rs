@@ -5,8 +5,8 @@ use std::{
 };
 
 use ash::vk::{
-    self, PhysicalDeviceMaintenance4Features, PhysicalDeviceMeshShaderFeaturesEXT,
-    PhysicalDeviceShaderDrawParameterFeatures,
+    self, PhysicalDeviceBufferDeviceAddressFeatures, PhysicalDeviceMaintenance4Features,
+    PhysicalDeviceMeshShaderFeaturesEXT, PhysicalDeviceShaderDrawParameterFeatures,
 };
 use winapi::ctypes::c_char;
 
@@ -87,27 +87,26 @@ impl Device {
         // Just go ahead and enable everything we have
         let mut physical_device_features = physical_device.get_features();
 
-        let mut shader_draw_params = PhysicalDeviceShaderDrawParameterFeatures::builder()
-            .shader_draw_parameters(true)
-            .build();
+        let mut shader_draw_params =
+            PhysicalDeviceShaderDrawParameterFeatures::builder().shader_draw_parameters(true);
 
         let mut mesh_shader = PhysicalDeviceMeshShaderFeaturesEXT::builder()
             .mesh_shader(true)
-            .task_shader(true)
-            .build();
+            .task_shader(true);
 
-        let mut man4 = PhysicalDeviceMaintenance4Features::builder()
-            .maintenance4(true)
-            .build();
+        let mut man4 = PhysicalDeviceMaintenance4Features::builder().maintenance4(true);
+
+        let mut buffer_device_info =
+            PhysicalDeviceBufferDeviceAddressFeatures::builder().buffer_device_address(true);
 
         let device_create_info = vk::DeviceCreateInfo::builder()
             .push_next(&mut physical_device_features)
             .push_next(&mut shader_draw_params)
             .push_next(&mut mesh_shader)
             .push_next(&mut man4)
+            .push_next(&mut buffer_device_info)
             .queue_create_infos(&queue_create_infos)
-            .enabled_extension_names(&enable_extension_names)
-            .build();
+            .enabled_extension_names(&enable_extension_names);
 
         let device: ash::Device = unsafe {
             instance

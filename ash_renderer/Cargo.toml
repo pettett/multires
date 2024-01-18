@@ -23,10 +23,17 @@ ash = { version = "0.37", default-features = false, features = [
 	"debug",
 ] }
 ash-window = "0.12"
-raw-window-handle = "0.6"
+raw-window-handle = "0.5"
 memoffset = "0.9"
 num = "0.4"
 image = "0.22"
+egui = "0.23"
+gpu-allocator = { version = "0.24.0", default-features = false, features = [
+	"vulkan",
+	"visualizer",
+] }
+egui-winit-ash-integration = { version = "0.6.0" }
+anyhow.workspace = true
 
 [build-dependencies]
 shaderc = { version = "0.8", optional = true }

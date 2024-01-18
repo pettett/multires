@@ -4,7 +4,7 @@ use ash::vk::{self, BufferUsageFlags};
 
 use crate::VkHandle;
 
-use super::{device::Device, image::find_memory_type, pools::CommandPool};
+use super::{command_pool::CommandPool, device::Device, image::find_memory_type};
 
 pub trait AsBuffer {
     fn buffer(&self) -> vk::Buffer;
@@ -126,7 +126,7 @@ impl<T> TypedBuffer<T> {
     pub fn new_filled(
         device: Arc<Device>,
         device_memory_properties: &vk::PhysicalDeviceMemoryProperties,
-        command_pool: Arc<CommandPool>,
+        command_pool: &Arc<CommandPool>,
         submit_queue: vk::Queue,
         usage: vk::BufferUsageFlags,
         data: &[T],
@@ -255,7 +255,7 @@ impl Buffer {
     pub fn new_storage_filled<T: bytemuck::Pod>(
         device: Arc<Device>,
         device_memory_properties: &vk::PhysicalDeviceMemoryProperties,
-        command_pool: Arc<CommandPool>,
+        command_pool: &Arc<CommandPool>,
         submit_queue: vk::Queue,
         data: &[T],
     ) -> Arc<Buffer> {
@@ -273,7 +273,7 @@ impl Buffer {
     pub fn new_filled<T>(
         device: Arc<Device>,
         device_memory_properties: &vk::PhysicalDeviceMemoryProperties,
-        command_pool: Arc<CommandPool>,
+        command_pool: &Arc<CommandPool>,
         submit_queue: vk::Queue,
         usage: vk::BufferUsageFlags,
         data: &[T],
@@ -322,7 +322,7 @@ impl Buffer {
     pub fn copy_to_other(
         &self,
         submit_queue: vk::Queue,
-        command_pool: Arc<CommandPool>,
+        command_pool: &Arc<CommandPool>,
         other: &Buffer,
         size: vk::DeviceSize,
     ) {
@@ -339,7 +339,7 @@ impl Buffer {
 
         unsafe {
             self.device.handle.cmd_copy_buffer(
-                command_buffer.cmd,
+                command_buffer.handle,
                 self.handle,
                 other.handle,
                 &copy_regions,

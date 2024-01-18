@@ -1,14 +1,16 @@
+pub mod gui;
 pub mod multires;
 mod utility;
 
 use crate::utility::{
+    command_pool::CommandPool,
     // the mod define some fixed functions that have been learned before.
     constants::*,
     debug::*,
+    descriptor_pool::{create_descriptor_set_layout, DescriptorPool},
     image::Image,
     instance::Instance,
     pipeline::create_graphics_pipeline,
-    pools::{create_descriptor_set_layout, DescriptorPool},
     render_pass::create_render_pass,
     structures::*,
     sync::SyncObjects,
@@ -31,12 +33,14 @@ use common_renderer::{
     resources::time::Time,
 };
 use glam::{Mat4, Quat, Vec3A};
+use gpu_allocator::vulkan::*;
+use gui::gpu_allocator::GpuAllocator;
 use utility::{
     buffer::{AsBuffer, Buffer, TypedBuffer},
+    descriptor_pool::DescriptorSet,
     device::Device,
     physical_device::PhysicalDevice,
     pipeline::Pipeline,
-    pools::DescriptorSet,
     surface::Surface,
     swapchain::Swapchain,
 };
@@ -45,6 +49,7 @@ use winit::event::WindowEvent;
 use std::{
     mem,
     ptr::{self, null_mut},
+    sync::Mutex,
 };
 use std::{path::Path, sync::Arc};
 
@@ -70,6 +75,9 @@ pub struct App {
     surface: Arc<Surface>,
     debug_utils_loader: ash::extensions::ext::DebugUtils,
     debug_messenger: vk::DebugUtilsMessengerEXT,
+
+    allocator: Arc<Mutex<Allocator>>,
+    integration: egui_winit_ash_integration::Integration<GpuAllocator>,
 
     physical_device: Arc<PhysicalDevice>,
     memory_properties: vk::PhysicalDeviceMemoryProperties,
@@ -98,11 +106,15 @@ pub struct App {
     uniform_camera_buffers: Vec<TypedBuffer<CameraUniformBufferObject>>,
 
     descriptor_pool: Arc<DescriptorPool>,
-    command_pool: Arc<utility::pools::CommandPool>,
+    command_pool: Arc<CommandPool>,
 
     descriptor_sets: Vec<DescriptorSet>,
 
-    command_buffers: Vec<vk::CommandBuffer>,
+    mesh_command_buffers: Vec<vk::CommandBuffer>,
+
+    ui_command_buffers: Vec<vk::CommandBuffer>,
+    visualizer: AllocatorVisualizer,
+    visualizer_open: bool,
 
     sync_objects: SyncObjects,
 
@@ -115,6 +127,10 @@ pub struct App {
 
 impl App {
     pub fn input(&mut self, event: &WindowEvent) -> bool {
+        if self.integration.handle_event(event).consumed {
+            return true;
+        }
+
         match event {
             WindowEvent::MouseInput { state, button, .. } => self
                 .world
@@ -152,7 +168,7 @@ impl App {
             WINDOW_WIDTH,
             WINDOW_HEIGHT,
         );
-        let (debug_utils_loader, debug_merssager) =
+        let (debug_utils_loader, debug_messenger) =
             setup_debug_utils(VALIDATION.is_enable, &entry, &instance.handle);
         let physical_device = instance.pick_physical_device(&surface, &DEVICE_EXTENSIONS);
 
@@ -177,6 +193,18 @@ impl App {
             &surface,
         );
 
+        let allocator = Arc::new(Mutex::new(
+            Allocator::new(&AllocatorCreateDesc {
+                instance: instance.handle.clone(),
+                device: device.handle.clone(),
+                physical_device: physical_device.handle(),
+                debug_settings: Default::default(),
+                buffer_device_address: true, // Ideally, check the BufferDeviceAddressFeatures struct.
+                allocation_sizes: Default::default(),
+            })
+            .unwrap(),
+        ));
+
         println!("Loading queues");
         let graphics_queue = unsafe {
             device
@@ -199,27 +227,24 @@ impl App {
             None, // This is the first swapchain
         );
         let swapchain_imageviews =
-            Image::create_image_views(&device, swapchain.format, &swapchain.images);
+            Image::create_image_views(&device, swapchain.surface_format.format, &swapchain.images);
         let render_pass = create_render_pass(
             &instance.handle,
             &device.handle,
             &physical_device,
-            swapchain.format,
+            swapchain.surface_format.format,
         );
         let ubo_layout = create_descriptor_set_layout(&device.handle);
         let graphics_pipeline =
             create_graphics_pipeline(device.clone(), render_pass, swapchain.extent, ubo_layout);
 
-        let command_pool = crate::utility::pools::CommandPool::new(
-            device.clone(),
-            queue_family.graphics_family.unwrap(),
-        );
+        let command_pool = CommandPool::new(device.clone(), queue_family.graphics_family.unwrap());
 
         let depth_image = App::create_depth_resources(
             &instance.handle,
             device.clone(),
             &physical_device,
-            command_pool.pool,
+            command_pool.handle,
             graphics_queue,
             swapchain.extent,
             &physical_device_memory_properties,
@@ -235,7 +260,7 @@ impl App {
         println!("Loading texture");
         let texture_image = Image::create_texture_image(
             device.clone(),
-            command_pool.clone(),
+            &command_pool,
             graphics_queue,
             &physical_device_memory_properties,
             &Path::new(TEXTURE_PATH),
@@ -261,7 +286,7 @@ impl App {
         let vertex_buffer = Buffer::new_storage_filled(
             device.clone(),
             &physical_device_memory_properties,
-            command_pool.clone(),
+            &command_pool,
             graphics_queue,
             &data.verts,
         );
@@ -269,7 +294,7 @@ impl App {
         let meshlet_buffer = Buffer::new_storage_filled(
             device.clone(),
             &physical_device_memory_properties,
-            command_pool.clone(),
+            &command_pool,
             graphics_queue,
             &meshlets,
         );
@@ -277,7 +302,7 @@ impl App {
         let submesh_buffer = Buffer::new_storage_filled(
             device.clone(),
             &physical_device_memory_properties,
-            command_pool.clone(),
+            &command_pool,
             graphics_queue,
             &cluster_data,
         );
@@ -287,11 +312,15 @@ impl App {
 
         for i in 0..100 {
             for j in 0..50 {
-                uniform_transforms.push(ModelUniformBufferObject {
-                    model: Mat4::from_translation(
-                        glam::Vec3::X * i as f32 * 40.0 + glam::Vec3::Y * j as f32 * 40.0,
-                    ),
-                });
+                let mut model = Mat4::from_translation(
+                    glam::Vec3::X * i as f32 * 40.0 + glam::Vec3::Y * j as f32 * 40.0,
+                );
+
+                if i == 10 && j == 10 {
+                    model *= Mat4::from_scale(glam::Vec3::ONE * 20.0)
+                };
+
+                uniform_transforms.push(ModelUniformBufferObject { model });
 
                 task_indirect_data.push(vk::DrawMeshTasksIndirectCommandEXT {
                     group_count_x: (cluster_data.len() as u32).div_ceil(TASK_GROUP_SIZE) / 4,
@@ -304,7 +333,7 @@ impl App {
         let uniform_transform_buffer = Buffer::new_storage_filled(
             device.clone(),
             &physical_device_memory_properties,
-            command_pool.clone(),
+            &command_pool,
             graphics_queue,
             &uniform_transforms,
         );
@@ -312,7 +341,7 @@ impl App {
         let indirect_task_buffer = TypedBuffer::new_filled(
             device.clone(),
             &physical_device_memory_properties,
-            command_pool.clone(),
+            &command_pool,
             graphics_queue,
             vk::BufferUsageFlags::INDIRECT_BUFFER | vk::BufferUsageFlags::STORAGE_BUFFER,
             &task_indirect_data,
@@ -343,11 +372,11 @@ impl App {
 
         println!("Loading command buffers");
 
-        let command_buffers = App::create_command_buffers(
+        let mesh_command_buffers = App::create_command_buffers(
             cluster_data.len() as _,
             uniform_transforms.len() as _,
             &device,
-            command_pool.pool,
+            &command_pool,
             graphics_pipeline.pipeline(),
             &swapchain_framebuffers,
             render_pass,
@@ -356,7 +385,10 @@ impl App {
             &descriptor_sets,
             &indirect_task_buffer,
         );
-        let sync_objects = SyncObjects::new(device.clone(), MAX_FRAMES_IN_FLIGHT);
+
+        let ui_command_buffers = command_pool.allocate_group(swapchain_framebuffers.len() as u32);
+
+        let sync_objects: SyncObjects = SyncObjects::new(device.clone(), MAX_FRAMES_IN_FLIGHT);
 
         println!("Generated App");
 
@@ -383,6 +415,22 @@ impl App {
         let mut schedule = Schedule::default();
         schedule.add_systems((camera_handle_input, update_camera));
 
+        let integration = egui_winit_ash_integration::Integration::<GpuAllocator>::new(
+            &event_loop,
+            swapchain.extent.width,
+            swapchain.extent.height,
+            1.0,
+            egui::FontDefinitions::default(),
+            egui::Style::default(),
+            device.handle.clone(),
+            GpuAllocator(allocator.clone()),
+            queue_family.graphics_family.unwrap(),
+            graphics_queue,
+            device.fn_swapchain.clone(),
+            swapchain.handle,
+            swapchain.surface_format,
+        );
+
         // cleanup(); the 'drop' function will take care of it.
         App {
             // winit stuff
@@ -395,7 +443,10 @@ impl App {
             instance,
             surface,
             debug_utils_loader,
-            debug_messenger: debug_merssager,
+            debug_messenger,
+
+            allocator,
+            integration,
 
             physical_device,
             memory_properties: physical_device_memory_properties,
@@ -428,7 +479,10 @@ impl App {
             descriptor_sets,
 
             command_pool,
-            command_buffers,
+            mesh_command_buffers,
+            ui_command_buffers,
+            visualizer: AllocatorVisualizer::new(),
+            visualizer_open: true,
 
             sync_objects,
             current_frame: 0,
@@ -520,17 +574,12 @@ impl App {
         for &image_view in image_views.iter() {
             let attachments = [image_view, depth_image_view];
 
-            let framebuffer_create_info = vk::FramebufferCreateInfo {
-                s_type: vk::StructureType::FRAMEBUFFER_CREATE_INFO,
-                p_next: ptr::null(),
-                flags: vk::FramebufferCreateFlags::empty(),
-                render_pass,
-                attachment_count: attachments.len() as u32,
-                p_attachments: attachments.as_ptr(),
-                width: swapchain_extent.width,
-                height: swapchain_extent.height,
-                layers: 1,
-            };
+            let framebuffer_create_info = vk::FramebufferCreateInfo::builder()
+                .render_pass(render_pass)
+                .attachments(&attachments)
+                .width(swapchain_extent.width)
+                .height(swapchain_extent.height)
+                .layers(1);
 
             let framebuffer = unsafe {
                 device
@@ -551,7 +600,7 @@ impl App {
         submesh_count: u32,
         instance_count: u32,
         device: &Device,
-        command_pool: vk::CommandPool,
+        command_pool: &Arc<CommandPool>,
         graphics_pipeline: vk::Pipeline,
         framebuffers: &Vec<vk::Framebuffer>,
         render_pass: vk::RenderPass,
@@ -560,28 +609,11 @@ impl App {
         descriptor_sets: &Vec<DescriptorSet>,
         indirect_task_buffer: &TypedBuffer<vk::DrawMeshTasksIndirectCommandEXT>,
     ) -> Vec<vk::CommandBuffer> {
-        let command_buffer_allocate_info = vk::CommandBufferAllocateInfo {
-            s_type: vk::StructureType::COMMAND_BUFFER_ALLOCATE_INFO,
-            p_next: ptr::null(),
-            command_buffer_count: framebuffers.len() as u32,
-            command_pool,
-            level: vk::CommandBufferLevel::PRIMARY,
-        };
-
-        let command_buffers = unsafe {
-            device
-                .handle
-                .allocate_command_buffers(&command_buffer_allocate_info)
-                .expect("Failed to allocate Command Buffers!")
-        };
+        let command_buffers = command_pool.allocate_group(framebuffers.len() as u32);
 
         for (i, &command_buffer) in command_buffers.iter().enumerate() {
-            let command_buffer_begin_info = vk::CommandBufferBeginInfo {
-                s_type: vk::StructureType::COMMAND_BUFFER_BEGIN_INFO,
-                p_next: ptr::null(),
-                p_inheritance_info: ptr::null(),
-                flags: vk::CommandBufferUsageFlags::SIMULTANEOUS_USE,
-            };
+            let command_buffer_begin_info = vk::CommandBufferBeginInfo::builder()
+                .flags(vk::CommandBufferUsageFlags::SIMULTANEOUS_USE);
 
             unsafe {
                 device
@@ -606,18 +638,14 @@ impl App {
                 },
             ];
 
-            let render_pass_begin_info = vk::RenderPassBeginInfo {
-                s_type: vk::StructureType::RENDER_PASS_BEGIN_INFO,
-                p_next: ptr::null(),
-                render_pass,
-                framebuffer: framebuffers[i],
-                render_area: vk::Rect2D {
+            let render_pass_begin_info = vk::RenderPassBeginInfo::builder()
+                .render_pass(render_pass)
+                .framebuffer(framebuffers[i])
+                .render_area(vk::Rect2D {
                     offset: vk::Offset2D { x: 0, y: 0 },
                     extent: surface_extent,
-                },
-                clear_value_count: clear_values.len() as u32,
-                p_clear_values: clear_values.as_ptr(),
-            };
+                })
+                .clear_values(&clear_values);
 
             unsafe {
                 device.handle.cmd_begin_render_pass(
@@ -740,16 +768,49 @@ impl App {
         let wait_stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
         let signal_semaphores = [self.sync_objects.render_finished_semaphores[self.current_frame]];
 
-        let submit_infos = [vk::SubmitInfo {
-            wait_semaphore_count: wait_semaphores.len() as u32,
-            p_wait_semaphores: wait_semaphores.as_ptr(),
-            p_wait_dst_stage_mask: wait_stages.as_ptr(),
-            command_buffer_count: 1,
-            p_command_buffers: &self.command_buffers[image_index as usize],
-            signal_semaphore_count: signal_semaphores.len() as u32,
-            p_signal_semaphores: signal_semaphores.as_ptr(),
-            ..Default::default()
-        }];
+        let cmd = self.ui_command_buffers[image_index as usize];
+
+        let command_buffer_begin_info = vk::CommandBufferBeginInfo::builder();
+
+        unsafe {
+            self.device
+                .handle
+                .begin_command_buffer(cmd, &command_buffer_begin_info)
+                .expect("Failed to begin recording Command Buffer at beginning!")
+        };
+
+        // //FIXME: this can be offloaded to a different thread
+        self.integration.begin_frame(&self.window);
+
+        self.visualizer.render_breakdown_window(
+            &self.integration.context(),
+            &self.allocator.lock().unwrap(),
+            &mut self.visualizer_open,
+        );
+
+        let output = self.integration.end_frame(&self.window);
+
+        let clipped_meshes = self.integration.context().tessellate(output.shapes);
+        self.integration.paint(
+            cmd,
+            image_index as usize,
+            clipped_meshes,
+            output.textures_delta,
+        );
+
+        unsafe {
+            self.device
+                .handle
+                .end_command_buffer(cmd)
+                .expect("Failed to record Command Buffer at Ending!");
+        }
+
+        let submit_infos = [vk::SubmitInfo::builder()
+            .command_buffers(&[self.mesh_command_buffers[image_index as usize], cmd])
+            .wait_dst_stage_mask(&wait_stages)
+            .signal_semaphores(&signal_semaphores)
+            .wait_semaphores(&wait_semaphores)
+            .build()];
 
         unsafe {
             self.device
@@ -768,16 +829,12 @@ impl App {
         }
 
         let swapchains = [self.swapchain.handle];
+        let image_indices = [image_index];
 
-        let present_info = vk::PresentInfoKHR {
-            wait_semaphore_count: 1,
-            p_wait_semaphores: signal_semaphores.as_ptr(),
-            swapchain_count: 1,
-            p_swapchains: swapchains.as_ptr(),
-            p_image_indices: &image_index,
-            p_results: ptr::null_mut(),
-            ..Default::default()
-        };
+        let present_info = vk::PresentInfoKHR::builder()
+            .swapchains(&swapchains)
+            .wait_semaphores(&signal_semaphores)
+            .image_indices(&image_indices);
 
         let result = unsafe {
             self.device
@@ -814,13 +871,16 @@ impl App {
             Some(&self.swapchain),
         );
 
-        self.swapchain_imageviews =
-            Image::create_image_views(&self.device, self.swapchain.format, &self.swapchain.images);
+        self.swapchain_imageviews = Image::create_image_views(
+            &self.device,
+            self.swapchain.surface_format.format,
+            &self.swapchain.images,
+        );
         self.render_pass = create_render_pass(
             &self.instance.handle,
             &self.device.handle,
             &self.physical_device,
-            self.swapchain.format,
+            self.swapchain.surface_format.format,
         );
         let graphics_pipeline = create_graphics_pipeline(
             self.device.clone(),
@@ -834,7 +894,7 @@ impl App {
             &self.instance.handle,
             self.device.clone(),
             &self.physical_device,
-            self.command_pool.pool,
+            self.command_pool.handle,
             self.graphics_queue,
             self.swapchain.extent,
             &self.memory_properties,
@@ -847,11 +907,11 @@ impl App {
             self.depth_image.image_view(),
             self.swapchain.extent,
         );
-        self.command_buffers = App::create_command_buffers(
+        self.mesh_command_buffers = App::create_command_buffers(
             self.submesh_count,
             self.uniform_transforms.len() as _,
             &self.device,
-            self.command_pool.pool,
+            &self.command_pool,
             self.graphics_pipeline.pipeline(),
             &self.swapchain_framebuffers,
             self.render_pass,
@@ -860,13 +920,21 @@ impl App {
             &self.descriptor_sets,
             &self.indirect_task_buffer,
         );
+
+        // Egui Integration
+        self.integration.update_swapchain(
+            self.swapchain.extent.width,
+            self.swapchain.extent.height,
+            self.swapchain.handle,
+            self.swapchain.surface_format,
+        );
     }
 
     fn cleanup_swapchain(&self) {
         unsafe {
             self.device
                 .handle
-                .free_command_buffers(self.command_pool.pool, &self.command_buffers);
+                .free_command_buffers(self.command_pool.handle, &self.mesh_command_buffers);
 
             for &framebuffer in self.swapchain_framebuffers.iter() {
                 self.device.handle.destroy_framebuffer(framebuffer, None);
@@ -899,6 +967,8 @@ impl Drop for App {
             self.device
                 .handle
                 .destroy_descriptor_set_layout(self.ubo_layout, None);
+
+            self.integration.destroy();
 
             if VALIDATION.is_enable {
                 self.debug_utils_loader

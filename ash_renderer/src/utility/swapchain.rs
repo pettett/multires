@@ -14,13 +14,41 @@ pub struct SwapChainSupportDetail {
     pub present_modes: Vec<vk::PresentModeKHR>,
 }
 
+impl SwapChainSupportDetail {
+    pub fn query(physical_device: vk::PhysicalDevice, surface: &Surface) -> Self {
+        unsafe {
+            let capabilities = surface
+                .instance
+                .fn_surface
+                .get_physical_device_surface_capabilities(physical_device, surface.handle)
+                .expect("Failed to query for surface capabilities.");
+            let formats = surface
+                .instance
+                .fn_surface
+                .get_physical_device_surface_formats(physical_device, surface.handle)
+                .expect("Failed to query for surface formats.");
+            let present_modes = surface
+                .instance
+                .fn_surface
+                .get_physical_device_surface_present_modes(physical_device, surface.handle)
+                .expect("Failed to query for surface present mode.");
+
+            Self {
+                capabilities,
+                formats,
+                present_modes,
+            }
+        }
+    }
+}
+
 pub struct Swapchain {
     device: Arc<Device>,
     // surface is the surface onto which the swapchain will present images. If the creation succeeds, the swapchain becomes associated with surface.
     surface: Arc<Surface>,
     pub handle: vk::SwapchainKHR,
     pub images: Vec<vk::Image>,
-    pub format: vk::Format,
+    pub surface_format: vk::SurfaceFormatKHR,
     pub extent: vk::Extent2D,
 }
 
@@ -43,11 +71,11 @@ impl Swapchain {
         queue_family: &QueueFamilyIndices,
         old_swapchain: Option<&Swapchain>,
     ) -> Swapchain {
-        let swapchain_support = query_swapchain_support(physical_device.handle(), &surface);
+        let swapchain_support = SwapChainSupportDetail::query(physical_device.handle(), &surface);
 
-        let surface_format = choose_swapchain_format(&swapchain_support.formats);
-        let present_mode = choose_swapchain_present_mode(&swapchain_support.present_modes);
-        let extent = choose_swapchain_extent(&swapchain_support.capabilities, window);
+        let surface_format = Self::choose_swapchain_format(&swapchain_support.formats);
+        let present_mode = Self::choose_swapchain_present_mode(&swapchain_support.present_modes);
+        let extent = Self::choose_swapchain_extent(&swapchain_support.capabilities, window);
 
         let image_count = swapchain_support.capabilities.min_image_count + 1;
         let image_count = if swapchain_support.capabilities.max_image_count > 0 {
@@ -76,9 +104,6 @@ impl Swapchain {
             .unwrap_or(vk::SwapchainKHR::null());
 
         let swapchain_create_info = vk::SwapchainCreateInfoKHR {
-            s_type: vk::StructureType::SWAPCHAIN_CREATE_INFO_KHR,
-            p_next: ptr::null(),
-            flags: vk::SwapchainCreateFlagsKHR::empty(),
             surface: surface.handle,
             min_image_count: image_count,
             image_color_space: surface_format.color_space,
@@ -94,6 +119,7 @@ impl Swapchain {
             clipped: vk::TRUE,
             old_swapchain,
             image_array_layers: 1,
+            ..Default::default()
         };
         let swapchain = unsafe {
             device
@@ -113,92 +139,65 @@ impl Swapchain {
             surface,
             device,
             handle: swapchain,
-            format: surface_format.format,
+            surface_format,
             extent,
             images,
         }
     }
-}
 
-fn choose_swapchain_format(available_formats: &Vec<vk::SurfaceFormatKHR>) -> vk::SurfaceFormatKHR {
-    for available_format in available_formats {
-        if available_format.format == vk::Format::B8G8R8A8_SRGB
-            && available_format.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR
-        {
-            return available_format.clone();
+    fn choose_swapchain_format(
+        available_formats: &Vec<vk::SurfaceFormatKHR>,
+    ) -> vk::SurfaceFormatKHR {
+        for available_format in available_formats {
+            if available_format.format == vk::Format::B8G8R8A8_SRGB
+                && available_format.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR
+            {
+                return available_format.clone();
+            }
         }
+
+        return available_formats.first().unwrap().clone();
     }
 
-    return available_formats.first().unwrap().clone();
-}
-
-fn choose_swapchain_present_mode(
-    available_present_modes: &Vec<vk::PresentModeKHR>,
-) -> vk::PresentModeKHR {
-    for &available_present_mode in available_present_modes.iter() {
-        if available_present_mode == vk::PresentModeKHR::MAILBOX {
-            return available_present_mode;
+    fn choose_swapchain_present_mode(
+        available_present_modes: &Vec<vk::PresentModeKHR>,
+    ) -> vk::PresentModeKHR {
+        for &available_present_mode in available_present_modes.iter() {
+            if available_present_mode == vk::PresentModeKHR::MAILBOX {
+                return available_present_mode;
+            }
         }
+
+        vk::PresentModeKHR::FIFO
     }
 
-    vk::PresentModeKHR::FIFO
-}
+    fn choose_swapchain_extent(
+        capabilities: &vk::SurfaceCapabilitiesKHR,
+        window: &winit::window::Window,
+    ) -> vk::Extent2D {
+        if capabilities.current_extent.width != u32::max_value() {
+            capabilities.current_extent
+        } else {
+            use num::clamp;
 
-fn choose_swapchain_extent(
-    capabilities: &vk::SurfaceCapabilitiesKHR,
-    window: &winit::window::Window,
-) -> vk::Extent2D {
-    if capabilities.current_extent.width != u32::max_value() {
-        capabilities.current_extent
-    } else {
-        use num::clamp;
+            let window_size = window.inner_size();
+            println!(
+                "\t\tInner Window Size: ({}, {})",
+                window_size.width, window_size.height
+            );
 
-        let window_size = window.inner_size();
-        println!(
-            "\t\tInner Window Size: ({}, {})",
-            window_size.width, window_size.height
-        );
-
-        vk::Extent2D {
-            width: clamp(
-                window_size.width as u32,
-                capabilities.min_image_extent.width,
-                capabilities.max_image_extent.width,
-            ),
-            height: clamp(
-                window_size.height as u32,
-                capabilities.min_image_extent.height,
-                capabilities.max_image_extent.height,
-            ),
-        }
-    }
-}
-
-pub fn query_swapchain_support(
-    physical_device: vk::PhysicalDevice,
-    surface: &Surface,
-) -> SwapChainSupportDetail {
-    unsafe {
-        let capabilities = surface
-            .instance
-            .fn_surface
-            .get_physical_device_surface_capabilities(physical_device, surface.handle)
-            .expect("Failed to query for surface capabilities.");
-        let formats = surface
-            .instance
-            .fn_surface
-            .get_physical_device_surface_formats(physical_device, surface.handle)
-            .expect("Failed to query for surface formats.");
-        let present_modes = surface
-            .instance
-            .fn_surface
-            .get_physical_device_surface_present_modes(physical_device, surface.handle)
-            .expect("Failed to query for surface present mode.");
-
-        SwapChainSupportDetail {
-            capabilities,
-            formats,
-            present_modes,
+            vk::Extent2D {
+                width: clamp(
+                    window_size.width as u32,
+                    capabilities.min_image_extent.width,
+                    capabilities.max_image_extent.width,
+                ),
+                height: clamp(
+                    window_size.height as u32,
+                    capabilities.min_image_extent.height,
+                    capabilities.max_image_extent.height,
+                ),
+            }
         }
     }
 }

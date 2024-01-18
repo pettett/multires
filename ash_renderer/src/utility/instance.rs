@@ -18,7 +18,7 @@ use super::{
     physical_device::PhysicalDevice,
     structures::{DeviceExtension, QueueFamilyIndices},
     surface::Surface,
-    swapchain::query_swapchain_support,
+    swapchain::{SwapChainSupportDetail, Swapchain},
 };
 
 pub struct Instance {
@@ -207,7 +207,7 @@ impl Instance {
         let is_device_extension_supported =
             self.check_device_extension_support(physical_device, required_device_extensions);
         let is_swapchain_supported = if is_device_extension_supported {
-            let swapchain_support = query_swapchain_support(physical_device, surface_stuff);
+            let swapchain_support = SwapChainSupportDetail::query(physical_device, surface_stuff);
             !swapchain_support.formats.is_empty() && !swapchain_support.present_modes.is_empty()
         } else {
             false

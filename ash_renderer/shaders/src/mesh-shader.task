@@ -38,7 +38,7 @@ struct IndirectDrawData {
     uint group_size_x;
 	uint group_size_y;
 	uint group_size_z;
-} ;
+};
 // Bindings and layout
 
 
@@ -77,7 +77,7 @@ float cluster_error(uint idx, uint idy) {
     if (out_of_range) {
         return LARGE_ERROR;
     } else {
-		vec3 vec = (model.models[idy] * vec4(cluster_data.clusters[idx].center, 1.0)).xyz - ubo.camera_pos;
+		vec3 vec = cluster_data.clusters[idx].center - (inverse(model.models[idy]) * vec4(ubo.camera_pos, 1.0)).xyz;
 		float inv_center_distance = inversesqrt(dot(vec, vec));
         return cluster_data.clusters[idx].error * (cluster_data.clusters[idx].radius * inv_center_distance);
 		//return cluster_data.clusters[idx].error;

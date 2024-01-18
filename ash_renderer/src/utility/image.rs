@@ -4,9 +4,9 @@ use ash::vk;
 
 use super::{
     buffer::{AsBuffer, Buffer},
+    command_pool::CommandPool,
     device::Device,
     instance::Instance,
-    pools::CommandPool,
 };
 
 pub struct Image {
@@ -112,7 +112,7 @@ impl Image {
 
     pub fn create_texture_image(
         device: Arc<Device>,
-        command_pool: Arc<CommandPool>,
+        command_pool: &Arc<CommandPool>,
         submit_queue: vk::Queue,
         device_memory_properties: &vk::PhysicalDeviceMemoryProperties,
         image_path: &Path,
@@ -179,7 +179,7 @@ impl Image {
 
         Self::transition_image_layout(
             &device,
-            command_pool.clone(),
+            command_pool,
             submit_queue,
             &texture_image,
             vk::Format::R8G8B8A8_SRGB,
@@ -190,7 +190,7 @@ impl Image {
 
         copy_buffer_to_image(
             &device,
-            command_pool.clone(),
+            command_pool,
             submit_queue,
             staging_buffer.buffer(),
             texture_image.image(),
@@ -255,7 +255,7 @@ impl Image {
 
     pub fn transition_image_layout(
         device: &Device,
-        command_pool: Arc<CommandPool>,
+        command_pool: &Arc<CommandPool>,
         submit_queue: vk::Queue,
         image: &Image,
         _format: vk::Format,
@@ -317,7 +317,7 @@ impl Image {
 
         unsafe {
             device.handle.cmd_pipeline_barrier(
-                command_buffer.cmd,
+                command_buffer.handle,
                 source_stage,
                 destination_stage,
                 vk::DependencyFlags::empty(),
@@ -354,7 +354,7 @@ impl Image {
 
     pub fn generate_mipmaps(
         device: &Device,
-        command_pool: Arc<CommandPool>,
+        command_pool: &Arc<CommandPool>,
         submit_queue: vk::Queue,
         image: vk::Image,
         tex_width: u32,
@@ -394,7 +394,7 @@ impl Image {
 
             unsafe {
                 device.handle.cmd_pipeline_barrier(
-                    command_buffer.cmd,
+                    command_buffer.handle,
                     vk::PipelineStageFlags::TRANSFER,
                     vk::PipelineStageFlags::TRANSFER,
                     vk::DependencyFlags::empty(),
@@ -437,7 +437,7 @@ impl Image {
 
             unsafe {
                 device.handle.cmd_blit_image(
-                    command_buffer.cmd,
+                    command_buffer.handle,
                     image,
                     vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
                     image,
@@ -454,7 +454,7 @@ impl Image {
 
             unsafe {
                 device.handle.cmd_pipeline_barrier(
-                    command_buffer.cmd,
+                    command_buffer.handle,
                     vk::PipelineStageFlags::TRANSFER,
                     vk::PipelineStageFlags::FRAGMENT_SHADER,
                     vk::DependencyFlags::empty(),
@@ -476,7 +476,7 @@ impl Image {
 
         unsafe {
             device.handle.cmd_pipeline_barrier(
-                command_buffer.cmd,
+                command_buffer.handle,
                 vk::PipelineStageFlags::TRANSFER,
                 vk::PipelineStageFlags::FRAGMENT_SHADER,
                 vk::DependencyFlags::empty(),
@@ -578,7 +578,7 @@ impl Image {
 
 pub fn copy_buffer_to_image(
     device: &Device,
-    command_pool: Arc<CommandPool>,
+    command_pool: &Arc<CommandPool>,
     submit_queue: vk::Queue,
     buffer: vk::Buffer,
     image: vk::Image,
@@ -607,7 +607,7 @@ pub fn copy_buffer_to_image(
 
     unsafe {
         device.handle.cmd_copy_buffer_to_image(
-            command_buffer.cmd,
+            command_buffer.handle,
             buffer,
             image,
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
