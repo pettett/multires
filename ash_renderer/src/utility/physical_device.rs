@@ -65,4 +65,15 @@ impl PhysicalDevice {
             }
         }
     }
+
+    pub fn get_features(&self) -> vk::PhysicalDeviceFeatures2 {
+        let mut features = vk::PhysicalDeviceFeatures2::default();
+        unsafe {
+            self.instance
+                .handle
+                .get_physical_device_features2(self.handle, &mut features)
+        };
+
+        features
+    }
 }

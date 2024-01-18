@@ -905,7 +905,7 @@ impl MultiResMeshAsset {
     pub fn load_mesh(instance: Arc<Instance>, mesh_renderer: &MultiResMeshRenderer) -> Self {
         let asset = common::MultiResMesh::load().unwrap();
 
-        let all_clusters_data_real_error = asset.cluster_data();
+        let all_clusters_data_real_error = asset.generate_cluster_data();
 
         let (indices, partitions, groups) = asset.indices_partitions_groups();
 

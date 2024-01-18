@@ -19,17 +19,20 @@ use ash::{extensions::ext::MeshShader, vk};
 use bevy_ecs::{entity::Entity, event::Events, schedule::Schedule, world::World};
 use bytemuck::Zeroable;
 use common::{asset::Asset, MultiResMesh};
-use common_renderer::components::{
-    camera::Camera,
-    camera_controller::{
-        camera_handle_input, update_camera, CameraController, KeyIn, MouseIn, MouseMv,
+use common_renderer::{
+    components::{
+        camera::Camera,
+        camera_controller::{
+            camera_handle_input, update_camera, CameraController, KeyIn, MouseIn, MouseMv,
+        },
+        gpu_mesh_util::MultiResData,
+        transform::Transform,
     },
-    gpu_mesh_util::MultiResData,
-    transform::Transform,
+    resources::time::Time,
 };
 use glam::{Mat4, Quat, Vec3A};
 use utility::{
-    buffer::{AsBuffer, Buffer, UniformBuffer},
+    buffer::{AsBuffer, Buffer, TypedBuffer},
     device::Device,
     physical_device::PhysicalDevice,
     pipeline::Pipeline,
@@ -39,7 +42,10 @@ use utility::{
 };
 use winit::event::WindowEvent;
 
-use std::ptr::{self, null_mut};
+use std::{
+    mem,
+    ptr::{self, null_mut},
+};
 use std::{path::Path, sync::Arc};
 
 // Constants
@@ -84,10 +90,12 @@ pub struct App {
     depth_image: Image,
     texture_image: Image,
 
+    indirect_task_buffer: Arc<TypedBuffer<vk::DrawMeshTasksIndirectCommandEXT>>,
+
     uniform_transforms: Vec<ModelUniformBufferObject>,
     uniform_transform_buffer: Arc<Buffer>,
     uniform_camera: CameraUniformBufferObject,
-    uniform_camera_buffers: Vec<UniformBuffer<CameraUniformBufferObject>>,
+    uniform_camera_buffers: Vec<TypedBuffer<CameraUniformBufferObject>>,
 
     descriptor_pool: Arc<DescriptorPool>,
     command_pool: Arc<utility::pools::CommandPool>,
@@ -241,16 +249,16 @@ impl App {
 
         let (submeshs, meshlets) = multires::generate_meshlets(&data);
 
-        let mut all_clusters_data_real_error = data.cluster_data();
+        let mut cluster_data = data.generate_cluster_data();
 
         for (i, submesh) in submeshs.into_iter().enumerate() {
-            all_clusters_data_real_error[i].meshlet_start = submesh.meshlet_start;
-            all_clusters_data_real_error[i].meshlet_count = submesh.meshlet_count;
+            cluster_data[i].meshlet_start = submesh.meshlet_start;
+            cluster_data[i].meshlet_count = submesh.meshlet_count;
         }
 
         println!("V: {:?} M: {:?}", data.verts.len(), meshlets.len());
 
-        let vertex_buffer = Buffer::new_storage(
+        let vertex_buffer = Buffer::new_storage_filled(
             device.clone(),
             &physical_device_memory_properties,
             command_pool.clone(),
@@ -258,7 +266,7 @@ impl App {
             &data.verts,
         );
 
-        let meshlet_buffer = Buffer::new_storage(
+        let meshlet_buffer = Buffer::new_storage_filled(
             device.clone(),
             &physical_device_memory_properties,
             command_pool.clone(),
@@ -266,27 +274,34 @@ impl App {
             &meshlets,
         );
 
-        let submesh_buffer = Buffer::new_storage(
+        let submesh_buffer = Buffer::new_storage_filled(
             device.clone(),
             &physical_device_memory_properties,
             command_pool.clone(),
             graphics_queue,
-            &all_clusters_data_real_error,
+            &cluster_data,
         );
 
         let mut uniform_transforms = Vec::new();
+        let mut task_indirect_data = Vec::new();
 
-        for i in 0..25 {
-            for j in 0..100 {
+        for i in 0..100 {
+            for j in 0..25 {
                 uniform_transforms.push(ModelUniformBufferObject {
                     model: Mat4::from_translation(
                         glam::Vec3::X * i as f32 * 40.0 + glam::Vec3::Y * j as f32 * 40.0,
                     ),
-                })
+                });
+
+                task_indirect_data.push(vk::DrawMeshTasksIndirectCommandEXT {
+                    group_count_x: (cluster_data.len() as u32).div_ceil(TASK_GROUP_SIZE) / 4,
+                    group_count_y: 1,
+                    group_count_z: 1,
+                });
             }
         }
 
-        let uniform_transform_buffer = Buffer::new_storage(
+        let uniform_transform_buffer = Buffer::new_storage_filled(
             device.clone(),
             &physical_device_memory_properties,
             command_pool.clone(),
@@ -294,7 +309,16 @@ impl App {
             &uniform_transforms,
         );
 
-        let uniform_camera_buffers = UniformBuffer::<CameraUniformBufferObject>::new_per_swapchain(
+        let indirect_task_buffer = TypedBuffer::new_filled(
+            device.clone(),
+            &physical_device_memory_properties,
+            command_pool.clone(),
+            graphics_queue,
+            vk::BufferUsageFlags::INDIRECT_BUFFER | vk::BufferUsageFlags::STORAGE_BUFFER,
+            &task_indirect_data,
+        );
+
+        let uniform_camera_buffers = TypedBuffer::<CameraUniformBufferObject>::new_per_swapchain(
             device.clone(),
             &physical_device_memory_properties,
             swapchain.images.len(),
@@ -312,6 +336,7 @@ impl App {
             &vertex_buffer,
             &meshlet_buffer,
             &submesh_buffer,
+            &indirect_task_buffer,
             &texture_image,
             swapchain.images.len(),
         );
@@ -319,7 +344,7 @@ impl App {
         println!("Loading command buffers");
 
         let command_buffers = App::create_command_buffers(
-            all_clusters_data_real_error.len() as _,
+            cluster_data.len() as _,
             uniform_transforms.len() as _,
             &device,
             command_pool.pool,
@@ -329,6 +354,7 @@ impl App {
             swapchain.extent,
             graphics_pipeline.layout(),
             &descriptor_sets,
+            &indirect_task_buffer,
         );
         let sync_objects = SyncObjects::new(device.clone(), MAX_FRAMES_IN_FLIGHT);
 
@@ -348,9 +374,10 @@ impl App {
         world.insert_resource(Events::<MouseIn>::default());
         world.insert_resource(Events::<MouseMv>::default());
         world.insert_resource(Events::<KeyIn>::default());
+        world.insert_resource(Time::default());
 
         let camera = world
-            .spawn((CameraController::new(0.2), cam, transform))
+            .spawn((CameraController::new(50.0), cam, transform))
             .id();
 
         let mut schedule = Schedule::default();
@@ -379,6 +406,8 @@ impl App {
             present_queue,
             uniform_camera,
 
+            indirect_task_buffer,
+
             uniform_transforms,
             uniform_transform_buffer,
             uniform_camera_buffers,
@@ -406,7 +435,7 @@ impl App {
 
             is_framebuffer_resized: false,
 
-            submesh_count: all_clusters_data_real_error.len() as u32,
+            submesh_count: cluster_data.len() as u32,
         }
     }
 
@@ -529,6 +558,7 @@ impl App {
         surface_extent: vk::Extent2D,
         pipeline_layout: vk::PipelineLayout,
         descriptor_sets: &Vec<DescriptorSet>,
+        indirect_task_buffer: &TypedBuffer<vk::DrawMeshTasksIndirectCommandEXT>,
     ) -> Vec<vk::CommandBuffer> {
         let command_buffer_allocate_info = vk::CommandBufferAllocateInfo {
             s_type: vk::StructureType::COMMAND_BUFFER_ALLOCATE_INFO,
@@ -621,11 +651,12 @@ impl App {
                     &[],
                 );
 
-                device.fn_mesh_shader.cmd_draw_mesh_tasks(
+                device.fn_mesh_shader.cmd_draw_mesh_tasks_indirect(
                     command_buffer,
-                    submesh_count.div_ceil(TASK_GROUP_SIZE),
+                    indirect_task_buffer.buffer(),
+                    0,
                     instance_count,
-                    1,
+                    indirect_task_buffer.stride() as _,
                 );
                 // device.cmd_draw_indexed(
                 //     command_buffer,
@@ -648,7 +679,7 @@ impl App {
         command_buffers
     }
 
-    fn update_camera_uniform_buffer(&mut self, current_image: usize, _delta_time: f32) {
+    fn update_camera_uniform_buffer(&mut self, current_image: usize) {
         let cam = self.world.entity(self.camera);
 
         self.uniform_camera.view_proj = cam
@@ -668,7 +699,7 @@ impl App {
     //     }
     // }
 
-    fn draw_frame(&mut self, delta_time: f32) {
+    fn draw_frame(&mut self) {
         let wait_fences = [self.sync_objects.in_flight_fences[self.current_frame]];
 
         unsafe {
@@ -703,15 +734,13 @@ impl App {
         //     self.transform_dirty[image_index as usize] = false;
         // }
 
-        self.update_camera_uniform_buffer(image_index as usize, delta_time);
+        self.update_camera_uniform_buffer(image_index as usize);
 
         let wait_semaphores = [self.sync_objects.image_available_semaphores[self.current_frame]];
         let wait_stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
         let signal_semaphores = [self.sync_objects.render_finished_semaphores[self.current_frame]];
 
         let submit_infos = [vk::SubmitInfo {
-            s_type: vk::StructureType::SUBMIT_INFO,
-            p_next: ptr::null(),
             wait_semaphore_count: wait_semaphores.len() as u32,
             p_wait_semaphores: wait_semaphores.as_ptr(),
             p_wait_dst_stage_mask: wait_stages.as_ptr(),
@@ -719,6 +748,7 @@ impl App {
             p_command_buffers: &self.command_buffers[image_index as usize],
             signal_semaphore_count: signal_semaphores.len() as u32,
             p_signal_semaphores: signal_semaphores.as_ptr(),
+            ..Default::default()
         }];
 
         unsafe {
@@ -740,14 +770,13 @@ impl App {
         let swapchains = [self.swapchain.handle];
 
         let present_info = vk::PresentInfoKHR {
-            s_type: vk::StructureType::PRESENT_INFO_KHR,
-            p_next: ptr::null(),
             wait_semaphore_count: 1,
             p_wait_semaphores: signal_semaphores.as_ptr(),
             swapchain_count: 1,
             p_swapchains: swapchains.as_ptr(),
             p_image_indices: &image_index,
             p_results: ptr::null_mut(),
+            ..Default::default()
         };
 
         let result = unsafe {
@@ -829,6 +858,7 @@ impl App {
             self.swapchain.extent,
             self.graphics_pipeline.layout(),
             &self.descriptor_sets,
+            &self.indirect_task_buffer,
         );
     }
 

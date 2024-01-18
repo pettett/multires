@@ -1,3 +1,4 @@
+use common_renderer::resources::time::Time;
 use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
 
@@ -69,8 +70,12 @@ impl ProgramProc {
                     vulkan_app.window_ref().request_redraw();
                 }
                 Event::RedrawRequested(_window_id) => {
-                    let delta_time = tick_counter.delta_time();
-                    vulkan_app.draw_frame(delta_time);
+                    vulkan_app
+                        .world
+                        .resource_mut::<Time>()
+                        .tick(tick_counter.delta_time());
+
+                    vulkan_app.draw_frame();
 
                     if IS_PAINT_FPS_COUNTER {
                         print!("FPS: {}\r", tick_counter.fps());

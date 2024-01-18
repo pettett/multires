@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, ptr, sync::Arc};
+use std::{marker::PhantomData, mem, ptr, sync::Arc};
 
 use ash::vk::{self, BufferUsageFlags};
 
@@ -22,20 +22,20 @@ pub trait AsBuffer {
     }
 }
 
-pub struct UniformBuffer<T> {
-    pub buffer: Buffer,
+pub struct TypedBuffer<T> {
+    pub buffer: Arc<Buffer>,
     _p: PhantomData<T>,
 }
 
-impl<T> UniformBuffer<T> {
-    pub fn new(buffer: Buffer) -> Self {
+impl<T> TypedBuffer<T> {
+    pub fn new(buffer: Arc<Buffer>) -> Self {
         Self {
             buffer,
             _p: PhantomData,
         }
     }
 }
-impl<T> AsBuffer for UniformBuffer<T> {
+impl<T> AsBuffer for TypedBuffer<T> {
     fn buffer(&self) -> vk::Buffer {
         self.buffer.handle
     }
@@ -48,7 +48,7 @@ impl<T> AsBuffer for UniformBuffer<T> {
         self.buffer.size
     }
 }
-impl<T> UniformBuffer<T> {
+impl<T> TypedBuffer<T> {
     pub fn new_per_swapchain(
         device: Arc<Device>,
         device_memory_properties: &vk::PhysicalDeviceMemoryProperties,
@@ -66,7 +66,7 @@ impl<T> UniformBuffer<T> {
                 vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
                 device_memory_properties,
             );
-            uniform_buffers.push(UniformBuffer::new(uniform_buffer));
+            uniform_buffers.push(TypedBuffer::new(Arc::new(uniform_buffer)));
         }
 
         uniform_buffers
@@ -89,7 +89,7 @@ impl<T> UniformBuffer<T> {
                 vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
                 device_memory_properties,
             );
-            let buf = UniformBuffer::new(uniform_buffer);
+            let buf = TypedBuffer::new(Arc::new(uniform_buffer));
 
             buf.update_uniform_buffer(datum);
 
@@ -121,6 +121,34 @@ impl<T> UniformBuffer<T> {
 
             self.buffer.device.handle.unmap_memory(self.buffer.memory());
         }
+    }
+
+    pub fn new_filled(
+        device: Arc<Device>,
+        device_memory_properties: &vk::PhysicalDeviceMemoryProperties,
+        command_pool: Arc<CommandPool>,
+        submit_queue: vk::Queue,
+        usage: vk::BufferUsageFlags,
+        data: &[T],
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            buffer: Buffer::new_filled(
+                device,
+                device_memory_properties,
+                command_pool,
+                submit_queue,
+                usage,
+                data,
+            ),
+            _p: PhantomData,
+        })
+    }
+
+    pub fn item_len(&self) -> usize {
+        (self.size() as usize) / self.stride()
+    }
+    pub fn stride(&self) -> usize {
+        mem::size_of::<T>()
     }
 }
 pub struct Buffer {
@@ -224,11 +252,30 @@ impl Buffer {
         }
     }
 
-    pub fn new_storage<T: bytemuck::Pod>(
+    pub fn new_storage_filled<T: bytemuck::Pod>(
         device: Arc<Device>,
         device_memory_properties: &vk::PhysicalDeviceMemoryProperties,
         command_pool: Arc<CommandPool>,
         submit_queue: vk::Queue,
+        data: &[T],
+    ) -> Arc<Buffer> {
+        Self::new_filled(
+            device,
+            device_memory_properties,
+            command_pool,
+            submit_queue,
+            vk::BufferUsageFlags::STORAGE_BUFFER,
+            data,
+        )
+    }
+
+    /// Create a new buffer and fill it with initial data copied in from a staging buffer
+    pub fn new_filled<T>(
+        device: Arc<Device>,
+        device_memory_properties: &vk::PhysicalDeviceMemoryProperties,
+        command_pool: Arc<CommandPool>,
+        submit_queue: vk::Queue,
+        usage: vk::BufferUsageFlags,
         data: &[T],
     ) -> Arc<Buffer> {
         let buffer_size = ::std::mem::size_of_val(data) as vk::DeviceSize;
@@ -257,19 +304,19 @@ impl Buffer {
             device.handle.unmap_memory(staging_buffer.memory);
         }
         //THIS is not actually a vertex buffer, but a storage buffer that can be accessed from the mesh shader
-        let storage_buffer = Self::new(
+        let buffer = Self::new(
             device.clone(),
             buffer_size,
-            vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::STORAGE_BUFFER,
+            vk::BufferUsageFlags::TRANSFER_DST | usage,
             vk::MemoryPropertyFlags::DEVICE_LOCAL,
             &device_memory_properties,
         );
 
-        staging_buffer.copy_to_other(submit_queue, command_pool, &storage_buffer, buffer_size);
+        staging_buffer.copy_to_other(submit_queue, command_pool, &buffer, buffer_size);
 
         println!("Created buffer, size: {}", buffer_size);
 
-        Arc::new(storage_buffer)
+        Arc::new(buffer)
     }
 
     pub fn copy_to_other(

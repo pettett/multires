@@ -79,6 +79,7 @@ impl DescriptorSet {
         vertex_buffer: &Arc<Buffer>,
         meshlet_buffer: &Arc<Buffer>,
         submesh_buffer: &Arc<Buffer>,
+        indirect_draw_array_buffer: &Arc<impl AsBuffer>,
         texture: &Image,
         swapchain_images_size: usize,
     ) -> Vec<DescriptorSet> {
@@ -125,6 +126,8 @@ impl DescriptorSet {
             let vertex_buffer_infos = [vertex_buffer.full_range_descriptor()];
             let index_buffer_infos = [meshlet_buffer.full_range_descriptor()];
             let submesh_buffer_infos = [submesh_buffer.full_range_descriptor()];
+            let indirect_draw_array_buffer_infos =
+                [indirect_draw_array_buffer.full_range_descriptor()];
 
             let descriptor_image_infos = [vk::DescriptorImageInfo {
                 sampler: texture.sampler(),
@@ -135,81 +138,77 @@ impl DescriptorSet {
             let descriptor_write_sets = [
                 vk::WriteDescriptorSet {
                     // transform uniform
-                    s_type: vk::StructureType::WRITE_DESCRIPTOR_SET,
-                    p_next: ptr::null(),
                     dst_set: descriptor_set.set,
                     dst_binding: 0,
                     dst_array_element: 0,
                     descriptor_count: 1,
                     descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
-                    p_image_info: ptr::null(),
+
                     p_buffer_info: descriptor_transform_buffer_infos.as_ptr(),
-                    p_texel_buffer_view: ptr::null(),
+                    ..Default::default()
                 },
                 vk::WriteDescriptorSet {
                     // transform uniform
-                    s_type: vk::StructureType::WRITE_DESCRIPTOR_SET,
-                    p_next: ptr::null(),
                     dst_set: descriptor_set.set,
                     dst_binding: 5,
                     dst_array_element: 0,
                     descriptor_count: 1,
                     descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
-                    p_image_info: ptr::null(),
+
                     p_buffer_info: descriptor_camera_buffer_infos.as_ptr(),
-                    p_texel_buffer_view: ptr::null(),
+                    ..Default::default()
                 },
                 vk::WriteDescriptorSet {
                     // sampler uniform
-                    s_type: vk::StructureType::WRITE_DESCRIPTOR_SET,
-                    p_next: ptr::null(),
                     dst_set: descriptor_set.set,
                     dst_binding: 1,
                     dst_array_element: 0,
                     descriptor_count: 1,
                     descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
                     p_image_info: descriptor_image_infos.as_ptr(),
-                    p_buffer_info: ptr::null(),
-                    p_texel_buffer_view: ptr::null(),
+                    ..Default::default()
                 },
                 vk::WriteDescriptorSet {
                     // submesh info buffer
-                    s_type: vk::StructureType::WRITE_DESCRIPTOR_SET,
-                    p_next: ptr::null(),
                     dst_set: descriptor_set.set,
                     dst_binding: 2,
                     dst_array_element: 0,
                     descriptor_count: 1,
                     descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
-                    p_image_info: ptr::null(),
+
                     p_buffer_info: submesh_buffer_infos.as_ptr(),
-                    p_texel_buffer_view: ptr::null(),
+                    ..Default::default()
                 },
                 vk::WriteDescriptorSet {
                     // meshlet info buffer
-                    s_type: vk::StructureType::WRITE_DESCRIPTOR_SET,
-                    p_next: ptr::null(),
                     dst_set: descriptor_set.set,
                     dst_binding: 3,
                     dst_array_element: 0,
                     descriptor_count: 1,
                     descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
-                    p_image_info: ptr::null(),
+
                     p_buffer_info: index_buffer_infos.as_ptr(),
-                    p_texel_buffer_view: ptr::null(),
+                    ..Default::default()
                 },
                 vk::WriteDescriptorSet {
                     // vertex buffer
-                    s_type: vk::StructureType::WRITE_DESCRIPTOR_SET,
-                    p_next: ptr::null(),
                     dst_set: descriptor_set.set,
                     dst_binding: 4,
                     dst_array_element: 0,
                     descriptor_count: 1,
                     descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
-                    p_image_info: ptr::null(),
                     p_buffer_info: vertex_buffer_infos.as_ptr(),
-                    p_texel_buffer_view: ptr::null(),
+                    ..Default::default()
+                },
+                vk::WriteDescriptorSet {
+                    // vertex buffer
+                    dst_set: descriptor_set.set,
+                    dst_binding: 6,
+                    dst_array_element: 0,
+                    descriptor_count: 1,
+                    descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
+                    p_buffer_info: indirect_draw_array_buffer_infos.as_ptr(),
+                    ..Default::default()
                 },
             ];
 
@@ -271,6 +270,14 @@ pub fn create_descriptor_set_layout(device: &ash::Device) -> vk::DescriptorSetLa
             descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
             descriptor_count: 1,
             stage_flags: vk::ShaderStageFlags::MESH_EXT | vk::ShaderStageFlags::TASK_EXT,
+            p_immutable_samplers: ptr::null(),
+        },
+        vk::DescriptorSetLayoutBinding {
+            // indirect draw params buffer array
+            binding: 6,
+            descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
+            descriptor_count: 1,
+            stage_flags: vk::ShaderStageFlags::TASK_EXT,
             p_immutable_samplers: ptr::null(),
         },
     ];

@@ -1,4 +1,4 @@
-use crate::components::transform::Transform;
+use crate::{components::transform::Transform, resources::time::Time};
 use bevy_ecs::prelude::*;
 use glam::{Quat, Vec2, Vec3};
 use winit::{
@@ -80,35 +80,37 @@ pub fn camera_handle_input(
     }
 }
 
-pub fn update_camera(mut q: Query<(&mut CameraController, &mut Transform)>) {
+pub fn update_camera(mut q: Query<(&mut CameraController, &mut Transform)>, time: Res<Time>) {
     for (mut controller, mut transform) in q.iter_mut() {
+        let speed = controller.speed * time.delta_time;
+
         let forward = transform.forward();
 
         // Prevents glitching when camera gets too close to the
         // center of the scene.
         if controller.is_forward_pressed {
-            transform.translate(forward * controller.speed);
+            transform.translate(forward * speed);
         }
         if controller.is_backward_pressed {
-            transform.translate(-forward * controller.speed);
+            transform.translate(-forward * speed);
         }
 
         let left = transform.left();
 
         if controller.is_right_pressed {
-            transform.translate(-left * controller.speed);
+            transform.translate(-left * speed);
         }
         if controller.is_left_pressed {
-            transform.translate(left * controller.speed);
+            transform.translate(left * speed);
         }
 
         let up = transform.up();
 
         if controller.is_down_pressed {
-            transform.translate(-up * controller.speed);
+            transform.translate(-up * speed);
         }
         if controller.is_up_pressed {
-            transform.translate(up * controller.speed);
+            transform.translate(up * speed);
         }
 
         // rotate camera

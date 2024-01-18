@@ -53,12 +53,12 @@ impl ClusterData {
 }
 
 pub trait MultiResData {
-    fn cluster_data(&self) -> Vec<ClusterData>;
+    fn generate_cluster_data(&self) -> Vec<ClusterData>;
     fn indices_partitions_groups(&self) -> (Vec<u32>, Vec<i32>, Vec<i32>);
 }
 
 impl MultiResData for MultiResMesh {
-    fn cluster_data(&self) -> Vec<ClusterData> {
+    fn generate_cluster_data(&self) -> Vec<ClusterData> {
         let mut all_clusters_data_real_error = Vec::new();
 
         let mut dag = petgraph::Graph::new();
@@ -151,8 +151,8 @@ impl MultiResData for MultiResMesh {
             match parents[..] {
                 [p0, p1] => {
                     // Set co-parent pointers to each other. This work will be duplicated a lot of times, but it's convenient
-                    let id0 = p0.index();
-                    let id1 = p1.index();
+                    let id0 = p0.index().min(p1.index());
+                    let id1 = p0.index().max(p1.index());
 
                     all_clusters_data_real_error[id0].co_parent = id1 as _;
                     all_clusters_data_real_error[id1].co_parent = id0 as _;
@@ -237,10 +237,12 @@ mod tests {
     fn test_co_parents() {
         let mesh = MultiResMesh::load_from_cargo_manifest_dir().unwrap();
 
-        let clusters = mesh.cluster_data();
+        let clusters = mesh.generate_cluster_data();
 
         for c in &clusters {
             if let Some((p0id, p1id)) = c.get_parents() {
+                assert!(p0id < p1id);
+
                 let p0 = &clusters[p0id];
                 let p1 = &clusters[p1id];
 
@@ -254,7 +256,7 @@ mod tests {
     fn test_max_children() {
         let mesh = MultiResMesh::load_from_cargo_manifest_dir().unwrap();
 
-        let clusters = mesh.cluster_data();
+        let clusters = mesh.generate_cluster_data();
 
         for i in 0..clusters.len() {
             if let Some((p0id, p1id)) = clusters[i].get_parents() {

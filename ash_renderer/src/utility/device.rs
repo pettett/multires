@@ -4,14 +4,17 @@ use std::{
     sync::Arc,
 };
 
-use ash::vk::{self, PhysicalDeviceMaintenance4Features, PhysicalDeviceMeshShaderFeaturesEXT};
+use ash::vk::{
+    self, PhysicalDeviceMaintenance4Features, PhysicalDeviceMeshShaderFeaturesEXT,
+    PhysicalDeviceShaderDrawParameterFeatures,
+};
 use winapi::ctypes::c_char;
 
 use crate::{VkDeviceOwned, VkHandle};
 
 use super::{
     instance::Instance,
-    physical_device::PhysicalDevice,
+    physical_device::{self, PhysicalDevice},
     structures::{DeviceExtension, QueueFamilyIndices},
     surface::Surface,
 };
@@ -24,6 +27,7 @@ pub struct Device {
     pub fn_swapchain: ash::extensions::khr::Swapchain,
     pub handle: ash::Device,
 }
+
 impl Drop for Device {
     fn drop(&mut self) {
         unsafe {
@@ -59,20 +63,14 @@ impl Device {
         let mut queue_create_infos = vec![];
         for &queue_family in unique_queue_families.iter() {
             let queue_create_info = vk::DeviceQueueCreateInfo {
-                s_type: vk::StructureType::DEVICE_QUEUE_CREATE_INFO,
-                p_next: ptr::null(),
                 flags: vk::DeviceQueueCreateFlags::empty(),
                 queue_family_index: queue_family,
                 p_queue_priorities: queue_priorities.as_ptr(),
                 queue_count: queue_priorities.len() as u32,
+                ..Default::default()
             };
             queue_create_infos.push(queue_create_info);
         }
-
-        let physical_device_features = vk::PhysicalDeviceFeatures {
-            sampler_anisotropy: vk::TRUE, // enable anisotropy device feature from Chapter-24.
-            ..Default::default()
-        };
 
         let requred_validation_layer_raw_names: Vec<CString> = validation
             .required_validation_layers
@@ -86,6 +84,13 @@ impl Device {
 
         let enable_extension_names = device_extensions.get_extensions_raw_names();
 
+        // Just go ahead and enable everything we have
+        let mut physical_device_features = physical_device.get_features();
+
+        let mut shader_draw_params = PhysicalDeviceShaderDrawParameterFeatures::builder()
+            .shader_draw_parameters(true)
+            .build();
+
         let mut mesh_shader = PhysicalDeviceMeshShaderFeaturesEXT::builder()
             .mesh_shader(true)
             .task_shader(true)
@@ -95,20 +100,14 @@ impl Device {
             .maintenance4(true)
             .build();
 
-        man4.p_next = &mut mesh_shader as *mut _ as *mut c_void;
-
-        let device_create_info = vk::DeviceCreateInfo {
-            s_type: vk::StructureType::DEVICE_CREATE_INFO,
-            p_next: &man4 as *const _ as *const c_void,
-            flags: vk::DeviceCreateFlags::empty(),
-            queue_create_info_count: queue_create_infos.len() as u32,
-            p_queue_create_infos: queue_create_infos.as_ptr(),
-
-            enabled_extension_count: enable_extension_names.len() as u32,
-            pp_enabled_extension_names: enable_extension_names.as_ptr(),
-            p_enabled_features: &physical_device_features,
-            ..Default::default()
-        };
+        let device_create_info = vk::DeviceCreateInfo::builder()
+            .push_next(&mut physical_device_features)
+            .push_next(&mut shader_draw_params)
+            .push_next(&mut mesh_shader)
+            .push_next(&mut man4)
+            .queue_create_infos(&queue_create_infos)
+            .enabled_extension_names(&enable_extension_names)
+            .build();
 
         let device: ash::Device = unsafe {
             instance
