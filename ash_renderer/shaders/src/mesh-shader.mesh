@@ -1,7 +1,8 @@
 #version 460
 
 #extension GL_EXT_mesh_shader: require
-
+#extension GL_GOOGLE_include_directive : enable
+#extension GL_EXT_control_flow_attributes: require
 #extension GL_ARB_separate_shader_objects: enable
 
 #include "shaders/src/mesh_task_payload.glsl"
@@ -9,6 +10,7 @@
 
 const uint MAX_PRIMITIVES = 126;
 const uint MAX_VERTS = 64;
+const uint GROUP_SIZE = 16;
 
 
 struct Vertex {
@@ -21,9 +23,9 @@ struct Vertex {
 struct s_meshlet
 {
     uint vertices[MAX_VERTS]; // 64
-    uint indices[MAX_PRIMITIVES * 3]; // 126 triangles => 378 indices
+    uint indices[MAX_PRIMITIVES]; // 126 triangles, packed into bytes
     uint vertex_count;
-    uint index_count;
+    uint tri_count;
 };
 
 layout (binding = 0) readonly buffer ModelUniformBufferObject {
@@ -48,7 +50,7 @@ layout (std430, binding = 4) readonly buffer InputBufferV {
 
 
 
-layout (local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+layout (local_size_x = GROUP_SIZE, local_size_y = 1, local_size_z = 1) in;
 layout (triangles, max_vertices = MAX_VERTS, max_primitives = MAX_PRIMITIVES) out;
 
 layout (location = 0) out Interpolants {
@@ -66,17 +68,11 @@ vec3 integer_to_rgb(float integer) {
     return vec3(red, green, blue);
 }
 
-void vert(uint v, uint meshlet_index) {
-    // gl_MeshVerticesEXT[v].gl_Position = ubo.view_proj * ubo.model * p;
-    uint vert_idx = indices.meshlets[meshlet_index].vertices[v];
-    gl_MeshVerticesEXT[v].gl_Position = ubo.view_proj * model.models[payload.instance] * vec4(sourceData.verts[vert_idx].pos.xyz, 1);
-    OUT[v].fragColor = integer_to_rgb(meshlet_index);
-    OUT[v].fragTexCoord = vec2(1, 1);
-}
 
 void main() {
-    uint thread_id = gl_GlobalInvocationID.x;
-    uint cluster_id = gl_GlobalInvocationID.y;
+    uint thread_id = gl_WorkGroupID.x;
+    uint local_id = gl_LocalInvocationID.x;
+    uint cluster_id = gl_WorkGroupID.y;
 
 	if (thread_id >= payload.meshlet_count[cluster_id]){
     	SetMeshOutputsEXT(0, 0);
@@ -85,19 +81,34 @@ void main() {
 
     uint meshlet_index = payload.meshlet_start[cluster_id] + thread_id;
 
-    s_meshlet meshlet = indices.meshlets[meshlet_index];
+	vec3 colour = integer_to_rgb(meshlet_index);
 
-	const uint vertex_count = min(MAX_VERTS, meshlet.vertex_count);
-	const uint primitive_count = min(MAX_PRIMITIVES, meshlet.index_count / 3);
+	const uint vertex_count = min(MAX_VERTS, indices.meshlets[meshlet_index].vertex_count);
+	const uint primitive_count = min(MAX_PRIMITIVES, indices.meshlets[meshlet_index].tri_count);
 
     SetMeshOutputsEXT(vertex_count, primitive_count);
 
     // pub const RECT_TEX_COORD_INDICES_DATA: [u32; 12] = [0, 1, 2, 2, 3, 0, 4, 5, 6, 6, 7, 4];
-    for (uint i = 0; i < vertex_count; i++) {
-        vert(i, meshlet_index);
+	[[unroll]]
+    for (uint i = local_id; i < vertex_count; i += GROUP_SIZE) {
+
+		uint vert_idx = indices.meshlets[meshlet_index].vertices[i];
+		
+		gl_MeshVerticesEXT[i].gl_Position = ubo.view_proj * model.models[payload.instance] * vec4(sourceData.verts[vert_idx].pos.xyz, 1);
+		
+		OUT[i].fragColor = colour;
+		
+		OUT[i].fragTexCoord = vec2(1, 1);
     }
 
-    for (uint i = 0; i < primitive_count; i++) {
-        gl_PrimitiveTriangleIndicesEXT[i] = uvec3(meshlet.indices[i * 3], meshlet.indices[i * 3 + 1], meshlet.indices[i * 3 + 2]);
+	[[unroll]]
+    for (uint i = local_id; i < primitive_count; i += GROUP_SIZE) {
+		uint tri = indices.meshlets[meshlet_index].indices[i];
+
+		uint a = (tri >> 0) & 255;
+		uint b = (tri >> 8) & 255;
+		uint c = (tri >> 16) & 255;
+
+        gl_PrimitiveTriangleIndicesEXT[i] = uvec3(a, b, c);
     }
 }

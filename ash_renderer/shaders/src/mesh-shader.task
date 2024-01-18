@@ -1,7 +1,7 @@
 #version 460
 #extension GL_EXT_mesh_shader: require
-
 #extension GL_ARB_separate_shader_objects: enable
+#extension GL_GOOGLE_include_directive : enable
 #extension GL_ARB_shader_draw_parameters: require
 
 #extension GL_KHR_shader_subgroup_arithmetic: enable

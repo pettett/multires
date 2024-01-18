@@ -286,7 +286,7 @@ impl App {
         let mut task_indirect_data = Vec::new();
 
         for i in 0..100 {
-            for j in 0..25 {
+            for j in 0..50 {
                 uniform_transforms.push(ModelUniformBufferObject {
                     model: Mat4::from_translation(
                         glam::Vec3::X * i as f32 * 40.0 + glam::Vec3::Y * j as f32 * 40.0,

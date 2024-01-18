@@ -6,9 +6,9 @@ use crate::{utility::buffer::Buffer, ModelUniformBufferObject};
 #[derive(Debug, Copy, Clone)]
 pub struct GpuMeshlet {
     pub vertices: [u32; 64],
-    pub indices: [u32; 378], // 126 triangles => 378 indices
+    pub indices: [u32; 126], // 126 triangles => 378 indices
     pub vertex_count: u32,
-    pub index_count: u32,
+    pub tri_count: u32,
 }
 
 unsafe impl bytemuck::Zeroable for GpuMeshlet {}
@@ -63,10 +63,22 @@ pub fn generate_meshlets(mesh: &common::MultiResMesh) -> (Vec<GpuSubmesh>, Vec<G
                         m.vertex_count - 1
                     };
 
-                    m.indices[m.index_count as usize] = idx;
+                    // Use byte addressing within the vertex array
+                    assert!(idx < 1 << 8);
 
-                    m.index_count += 1;
+                    // Pack triangles into a single uint
+                    let tri_idx = (m.tri_count as usize) / 3;
+                    let offset = ((m.tri_count) % 3) * 8;
+
+                    m.indices[tri_idx] += idx << offset;
+
+                    assert_eq!(((m.indices[tri_idx] >> offset) & 255), idx);
+
+                    m.tri_count += 1;
                 }
+
+                assert_eq!(m.tri_count % 3, 0);
+                m.tri_count /= 3;
 
                 meshlets.push(m);
             }
