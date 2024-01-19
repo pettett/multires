@@ -34,7 +34,7 @@ use common_renderer::{
 };
 use glam::{Mat4, Quat, Vec3A};
 use gpu_allocator::vulkan::*;
-use gui::gpu_allocator::GpuAllocator;
+use gui::gui::Gui;
 use utility::{
     buffer::{AsBuffer, Buffer, TypedBuffer},
     descriptor_pool::DescriptorSet,
@@ -66,7 +66,7 @@ pub trait VkHandle {
 pub trait VkDeviceOwned: VkHandle<VkItem = vk::Device> {}
 
 pub struct App {
-    window: winit::window::Window,
+    window: Arc<winit::window::Window>,
     world: bevy_ecs::world::World,
     schedule: bevy_ecs::schedule::Schedule,
     camera: Entity,
@@ -77,7 +77,6 @@ pub struct App {
     debug_messenger: vk::DebugUtilsMessengerEXT,
 
     allocator: Arc<Mutex<Allocator>>,
-    integration: egui_winit_ash_integration::Integration<GpuAllocator>,
 
     physical_device: Arc<PhysicalDevice>,
     memory_properties: vk::PhysicalDeviceMemoryProperties,
@@ -112,9 +111,7 @@ pub struct App {
 
     mesh_command_buffers: Vec<vk::CommandBuffer>,
 
-    ui_command_buffers: Vec<vk::CommandBuffer>,
-    visualizer: AllocatorVisualizer,
-    visualizer_open: bool,
+    gui: Gui,
 
     sync_objects: SyncObjects,
 
@@ -127,7 +124,7 @@ pub struct App {
 
 impl App {
     pub fn input(&mut self, event: &WindowEvent) -> bool {
-        if self.integration.handle_event(event).consumed {
+        if self.gui.handle_event(event) {
             return true;
         }
 
@@ -386,8 +383,6 @@ impl App {
             &indirect_task_buffer,
         );
 
-        let ui_command_buffers = command_pool.allocate_group(swapchain_framebuffers.len() as u32);
-
         let sync_objects: SyncObjects = SyncObjects::new(device.clone(), MAX_FRAMES_IN_FLIGHT);
 
         println!("Generated App");
@@ -415,20 +410,15 @@ impl App {
         let mut schedule = Schedule::default();
         schedule.add_systems((camera_handle_input, update_camera));
 
-        let integration = egui_winit_ash_integration::Integration::<GpuAllocator>::new(
-            &event_loop,
-            swapchain.extent.width,
-            swapchain.extent.height,
-            1.0,
-            egui::FontDefinitions::default(),
-            egui::Style::default(),
-            device.handle.clone(),
-            GpuAllocator(allocator.clone()),
-            queue_family.graphics_family.unwrap(),
+        let gui = Gui::new(
+            device.clone(),
+            window.clone(),
+            event_loop,
+            allocator.clone(),
+            &command_pool,
+            &queue_family,
             graphics_queue,
-            device.fn_swapchain.clone(),
-            swapchain.handle,
-            swapchain.surface_format,
+            &swapchain,
         );
 
         // cleanup(); the 'drop' function will take care of it.
@@ -446,7 +436,7 @@ impl App {
             debug_messenger,
 
             allocator,
-            integration,
+            gui,
 
             physical_device,
             memory_properties: physical_device_memory_properties,
@@ -480,9 +470,6 @@ impl App {
 
             command_pool,
             mesh_command_buffers,
-            ui_command_buffers,
-            visualizer: AllocatorVisualizer::new(),
-            visualizer_open: true,
 
             sync_objects,
             current_frame: 0,
@@ -768,45 +755,10 @@ impl App {
         let wait_stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
         let signal_semaphores = [self.sync_objects.render_finished_semaphores[self.current_frame]];
 
-        let cmd = self.ui_command_buffers[image_index as usize];
-
-        let command_buffer_begin_info = vk::CommandBufferBeginInfo::builder();
-
-        unsafe {
-            self.device
-                .handle
-                .begin_command_buffer(cmd, &command_buffer_begin_info)
-                .expect("Failed to begin recording Command Buffer at beginning!")
-        };
-
-        // //FIXME: this can be offloaded to a different thread
-        self.integration.begin_frame(&self.window);
-
-        self.visualizer.render_breakdown_window(
-            &self.integration.context(),
-            &self.allocator.lock().unwrap(),
-            &mut self.visualizer_open,
-        );
-
-        let output = self.integration.end_frame(&self.window);
-
-        let clipped_meshes = self.integration.context().tessellate(output.shapes);
-        self.integration.paint(
-            cmd,
-            image_index as usize,
-            clipped_meshes,
-            output.textures_delta,
-        );
-
-        unsafe {
-            self.device
-                .handle
-                .end_command_buffer(cmd)
-                .expect("Failed to record Command Buffer at Ending!");
-        }
+        let ui_cmd = self.gui.draw(image_index as usize);
 
         let submit_infos = [vk::SubmitInfo::builder()
-            .command_buffers(&[self.mesh_command_buffers[image_index as usize], cmd])
+            .command_buffers(&[self.mesh_command_buffers[image_index as usize], ui_cmd])
             .wait_dst_stage_mask(&wait_stages)
             .signal_semaphores(&signal_semaphores)
             .wait_semaphores(&wait_semaphores)
@@ -922,12 +874,7 @@ impl App {
         );
 
         // Egui Integration
-        self.integration.update_swapchain(
-            self.swapchain.extent.width,
-            self.swapchain.extent.height,
-            self.swapchain.handle,
-            self.swapchain.surface_format,
-        );
+        self.gui.update_swapchain(&self.swapchain);
     }
 
     fn cleanup_swapchain(&self) {
@@ -967,8 +914,6 @@ impl Drop for App {
             self.device
                 .handle
                 .destroy_descriptor_set_layout(self.ubo_layout, None);
-
-            self.integration.destroy();
 
             if VALIDATION.is_enable {
                 self.debug_utils_loader

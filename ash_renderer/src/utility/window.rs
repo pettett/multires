@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use common_renderer::resources::time::Time;
 use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
@@ -11,12 +13,14 @@ pub fn init_window(
     title: &str,
     width: u32,
     height: u32,
-) -> winit::window::Window {
-    winit::window::WindowBuilder::new()
-        .with_title(title)
-        .with_inner_size(winit::dpi::LogicalSize::new(width, height))
-        .build(event_loop)
-        .expect("Failed to create window.")
+) -> Arc<winit::window::Window> {
+    Arc::new(
+        winit::window::WindowBuilder::new()
+            .with_title(title)
+            .with_inner_size(winit::dpi::LogicalSize::new(width, height))
+            .build(event_loop)
+            .expect("Failed to create window."),
+    )
 }
 
 pub struct ProgramProc {

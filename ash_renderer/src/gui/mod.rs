@@ -1,1 +1,2 @@
-pub mod gpu_allocator;
+mod gpu_allocator;
+pub mod gui;
