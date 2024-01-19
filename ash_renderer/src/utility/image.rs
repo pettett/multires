@@ -1,6 +1,12 @@
-use std::{cmp::max, path::Path, ptr, sync::Arc};
+use std::{
+    cmp::max,
+    path::Path,
+    ptr,
+    sync::{Arc, Mutex},
+};
 
 use ash::vk;
+use gpu_allocator::vulkan::Allocator;
 
 use super::{
     buffer::{AsBuffer, Buffer},
@@ -112,6 +118,8 @@ impl Image {
 
     pub fn create_texture_image(
         device: Arc<Device>,
+
+        allocator: Arc<Mutex<Allocator>>,
         command_pool: &Arc<CommandPool>,
         submit_queue: vk::Queue,
         device_memory_properties: &vk::PhysicalDeviceMemoryProperties,
@@ -142,26 +150,31 @@ impl Image {
 
         let staging_buffer = Buffer::new(
             device.clone(),
+            allocator.clone(),
             image_size,
             vk::BufferUsageFlags::TRANSFER_SRC,
-            vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-            device_memory_properties,
+            gpu_allocator::MemoryLocation::CpuToGpu,
         );
 
         unsafe {
-            let data_ptr = device
-                .handle
-                .map_memory(
-                    staging_buffer.memory(),
-                    0,
-                    image_size,
-                    vk::MemoryMapFlags::empty(),
-                )
-                .expect("Failed to Map Memory") as *mut u8;
+            // let data_ptr = device
+            //     .handle
+            //     .map_memory(
+            //         staging_buffer.memory(),
+            //         0,
+            //         image_size,
+            //         vk::MemoryMapFlags::empty(),
+            //     )
+            //     .expect("Failed to Map Memory") as *mut u8;
+            let data_ptr = staging_buffer
+                .allocation()
+                .mapped_ptr()
+                .expect("Failed to Map Memory")
+                .as_ptr() as *mut u8;
 
             data_ptr.copy_from_nonoverlapping(image_data.as_ptr(), image_data.len());
 
-            device.handle.unmap_memory(staging_buffer.memory());
+            //device.handle.unmap_memory(staging_buffer.memory());
         }
 
         let texture_image = Self::create_image(

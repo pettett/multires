@@ -1,6 +1,14 @@
-use std::{marker::PhantomData, mem, ptr, sync::Arc};
+use std::{
+    marker::PhantomData,
+    mem, ptr,
+    sync::{Arc, Mutex},
+};
 
 use ash::vk::{self, BufferUsageFlags};
+use gpu_allocator::{
+    vulkan::{self, Allocation, AllocationCreateDesc, AllocationScheme, Allocator},
+    MemoryLocation,
+};
 
 use crate::VkHandle;
 
@@ -9,7 +17,7 @@ use super::{command_pool::CommandPool, device::Device, image::find_memory_type};
 pub trait AsBuffer {
     fn buffer(&self) -> vk::Buffer;
 
-    fn memory(&self) -> vk::DeviceMemory;
+    fn allocation(&self) -> &Allocation;
 
     fn size(&self) -> vk::DeviceSize;
 
@@ -21,7 +29,7 @@ pub trait AsBuffer {
         }
     }
 }
-
+#[repr(transparent)]
 pub struct TypedBuffer<T> {
     pub buffer: Arc<Buffer>,
     _p: PhantomData<T>,
@@ -37,21 +45,22 @@ impl<T> TypedBuffer<T> {
 }
 impl<T> AsBuffer for TypedBuffer<T> {
     fn buffer(&self) -> vk::Buffer {
-        self.buffer.handle
+        self.buffer.handle()
     }
 
-    fn memory(&self) -> vk::DeviceMemory {
-        self.buffer.memory
+    fn allocation(&self) -> &Allocation {
+        self.buffer.allocation()
     }
 
     fn size(&self) -> vk::DeviceSize {
-        self.buffer.size
+        self.buffer.size()
     }
 }
 impl<T> TypedBuffer<T> {
     pub fn new_per_swapchain(
         device: Arc<Device>,
-        device_memory_properties: &vk::PhysicalDeviceMemoryProperties,
+        allocator: Arc<Mutex<Allocator>>,
+        location: MemoryLocation,
         swapchain_image_count: usize,
     ) -> Vec<Self> {
         let buffer_size = ::std::mem::size_of::<T>();
@@ -61,10 +70,10 @@ impl<T> TypedBuffer<T> {
         for _ in 0..swapchain_image_count {
             let uniform_buffer = Buffer::new(
                 device.clone(),
+                allocator.clone(),
                 buffer_size as u64,
                 vk::BufferUsageFlags::UNIFORM_BUFFER,
-                vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-                device_memory_properties,
+                MemoryLocation::CpuToGpu,
             );
             uniform_buffers.push(TypedBuffer::new(Arc::new(uniform_buffer)));
         }
@@ -74,7 +83,7 @@ impl<T> TypedBuffer<T> {
 
     pub fn new_with_data(
         device: Arc<Device>,
-        device_memory_properties: &vk::PhysicalDeviceMemoryProperties,
+        allocator: Arc<Mutex<Allocator>>,
         data: Vec<T>,
     ) -> Vec<Self> {
         let buffer_size = ::std::mem::size_of::<T>();
@@ -84,10 +93,10 @@ impl<T> TypedBuffer<T> {
         for datum in data {
             let uniform_buffer = Buffer::new(
                 device.clone(),
+                allocator.clone(),
                 buffer_size as u64,
                 vk::BufferUsageFlags::UNIFORM_BUFFER,
-                vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-                device_memory_properties,
+                MemoryLocation::CpuToGpu,
             );
             let buf = TypedBuffer::new(Arc::new(uniform_buffer));
 
@@ -103,29 +112,34 @@ impl<T> TypedBuffer<T> {
         unsafe {
             let ubos = [data];
 
-            let buffer_size = (std::mem::size_of::<T>() * ubos.len()) as u64;
+            //let buffer_size = (std::mem::size_of::<T>() * ubos.len()) as u64;
 
+            // let data_ptr = self
+            //     .buffer
+            //     .device
+            //     .handle
+            //     .map_memory(
+            //         self.buffer.memory(),
+            //         0,
+            //         buffer_size,
+            //         vk::MemoryMapFlags::empty(),
+            //     )
+            //     .expect("Failed to Map Memory") as *mut T;
             let data_ptr = self
                 .buffer
-                .device
-                .handle
-                .map_memory(
-                    self.buffer.memory(),
-                    0,
-                    buffer_size,
-                    vk::MemoryMapFlags::empty(),
-                )
-                .expect("Failed to Map Memory") as *mut T;
-
+                .allocation
+                .mapped_ptr()
+                .expect("Failed to Map Memory")
+                .as_ptr() as *mut T;
             data_ptr.copy_from_nonoverlapping(ubos.as_ptr(), ubos.len());
 
-            self.buffer.device.handle.unmap_memory(self.buffer.memory());
+            //    self.buffer.device.handle.unmap_memory(self.buffer.memory());
         }
     }
 
     pub fn new_filled(
         device: Arc<Device>,
-        device_memory_properties: &vk::PhysicalDeviceMemoryProperties,
+        allocator: Arc<Mutex<Allocator>>,
         command_pool: &Arc<CommandPool>,
         submit_queue: vk::Queue,
         usage: vk::BufferUsageFlags,
@@ -134,7 +148,7 @@ impl<T> TypedBuffer<T> {
         Arc::new(Self {
             buffer: Buffer::new_filled(
                 device,
-                device_memory_properties,
+                allocator.clone(),
                 command_pool,
                 submit_queue,
                 usage,
@@ -154,8 +168,9 @@ impl<T> TypedBuffer<T> {
 pub struct Buffer {
     // exists to allow drop
     device: Arc<Device>,
+    allocator: Arc<Mutex<Allocator>>,
+    allocation: Allocation,
     handle: vk::Buffer,
-    memory: vk::DeviceMemory,
     size: vk::DeviceSize,
     usage: vk::BufferUsageFlags,
 }
@@ -165,8 +180,8 @@ impl AsBuffer for Buffer {
         self.handle
     }
 
-    fn memory(&self) -> vk::DeviceMemory {
-        self.memory
+    fn allocation(&self) -> &Allocation {
+        &self.allocation
     }
 
     fn size(&self) -> vk::DeviceSize {
@@ -177,7 +192,11 @@ impl Drop for Buffer {
     fn drop(&mut self) {
         unsafe {
             self.device.handle.destroy_buffer(self.handle, None);
-            self.device.handle.free_memory(self.memory, None);
+
+            let mut allocation = Allocation::default();
+            mem::swap(&mut self.allocation, &mut allocation);
+
+            self.allocator.lock().unwrap().free(allocation).unwrap();
         }
     }
 }
@@ -193,10 +212,10 @@ impl VkHandle for Buffer {
 impl Buffer {
     pub fn new(
         device: Arc<Device>,
+        allocator: Arc<Mutex<Allocator>>,
         size: vk::DeviceSize,
         usage: vk::BufferUsageFlags,
-        required_memory_properties: vk::MemoryPropertyFlags,
-        device_memory_properties: &vk::PhysicalDeviceMemoryProperties,
+        location: MemoryLocation,
     ) -> Buffer {
         let buffer_create_info = vk::BufferCreateInfo {
             s_type: vk::StructureType::BUFFER_CREATE_INFO,
@@ -216,30 +235,24 @@ impl Buffer {
                 .expect("Failed to create Vertex Buffer")
         };
 
-        let mem_requirements = unsafe { device.handle.get_buffer_memory_requirements(buffer) };
-        let memory_type = find_memory_type(
-            mem_requirements.memory_type_bits,
-            required_memory_properties,
-            device_memory_properties,
-        );
+        let requirements = unsafe { device.handle.get_buffer_memory_requirements(buffer) };
 
-        let allocate_info = vk::MemoryAllocateInfo {
-            s_type: vk::StructureType::MEMORY_ALLOCATE_INFO,
-            p_next: ptr::null(),
-            allocation_size: mem_requirements.size,
-            memory_type_index: memory_type,
-        };
+        let allocation = allocator
+            .lock()
+            .unwrap()
+            .allocate(&AllocationCreateDesc {
+                name: "Example allocation",
+                requirements,
+                location,
+                linear: true, // Buffers are always linear
+                allocation_scheme: AllocationScheme::GpuAllocatorManaged,
+            })
+            .unwrap();
 
-        let memory = unsafe {
-            device
-                .handle
-                .allocate_memory(&allocate_info, None)
-                .expect("Failed to allocate vertex buffer memory!")
-        };
         unsafe {
             device
                 .handle
-                .bind_buffer_memory(buffer, memory, 0)
+                .bind_buffer_memory(buffer, allocation.memory(), allocation.offset())
                 .expect("Failed to bind Buffer");
         }
 
@@ -247,21 +260,22 @@ impl Buffer {
             device,
             handle: buffer,
             size,
-            memory,
+            allocator,
+            allocation,
             usage,
         }
     }
 
     pub fn new_storage_filled<T: bytemuck::Pod>(
         device: Arc<Device>,
-        device_memory_properties: &vk::PhysicalDeviceMemoryProperties,
+        allocator: Arc<Mutex<Allocator>>,
         command_pool: &Arc<CommandPool>,
         submit_queue: vk::Queue,
         data: &[T],
     ) -> Arc<Buffer> {
         Self::new_filled(
             device,
-            device_memory_properties,
+            allocator,
             command_pool,
             submit_queue,
             vk::BufferUsageFlags::STORAGE_BUFFER,
@@ -272,7 +286,7 @@ impl Buffer {
     /// Create a new buffer and fill it with initial data copied in from a staging buffer
     pub fn new_filled<T>(
         device: Arc<Device>,
-        device_memory_properties: &vk::PhysicalDeviceMemoryProperties,
+        allocator: Arc<Mutex<Allocator>>,
         command_pool: &Arc<CommandPool>,
         submit_queue: vk::Queue,
         usage: vk::BufferUsageFlags,
@@ -282,34 +296,40 @@ impl Buffer {
 
         let staging_buffer = Self::new(
             device.clone(),
+            allocator.clone(),
             buffer_size,
             vk::BufferUsageFlags::TRANSFER_SRC,
-            vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-            &device_memory_properties,
+            MemoryLocation::CpuToGpu,
         );
 
         unsafe {
-            let data_ptr = device
-                .handle
-                .map_memory(
-                    staging_buffer.memory,
-                    0,
-                    buffer_size,
-                    vk::MemoryMapFlags::empty(),
-                )
-                .expect("Failed to Map Memory") as *mut T;
+            //let data_ptr = device
+            //    .handle
+            //    .map_memory(
+            //        staging_buffer.memory(),
+            //        0,
+            //        buffer_size,
+            //        vk::MemoryMapFlags::empty(),
+            //    )
+            //    .expect("Failed to Map Memory") as *mut T;
+
+            let data_ptr = staging_buffer
+                .allocation
+                .mapped_ptr()
+                .expect("Failed to Map Memory")
+                .as_ptr() as *mut T;
 
             data_ptr.copy_from_nonoverlapping(data.as_ptr(), data.len());
 
-            device.handle.unmap_memory(staging_buffer.memory);
+            //device.handle.unmap_memory(staging_buffer.memory());
         }
         //THIS is not actually a vertex buffer, but a storage buffer that can be accessed from the mesh shader
         let buffer = Self::new(
             device.clone(),
+            allocator,
             buffer_size,
             vk::BufferUsageFlags::TRANSFER_DST | usage,
-            vk::MemoryPropertyFlags::DEVICE_LOCAL,
-            &device_memory_properties,
+            MemoryLocation::GpuOnly,
         );
 
         staging_buffer.copy_to_other(submit_queue, command_pool, &buffer, buffer_size);

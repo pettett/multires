@@ -257,6 +257,7 @@ impl App {
         println!("Loading texture");
         let texture_image = Image::create_texture_image(
             device.clone(),
+            allocator.clone(),
             &command_pool,
             graphics_queue,
             &physical_device_memory_properties,
@@ -282,7 +283,7 @@ impl App {
 
         let vertex_buffer = Buffer::new_storage_filled(
             device.clone(),
-            &physical_device_memory_properties,
+            allocator.clone(),
             &command_pool,
             graphics_queue,
             &data.verts,
@@ -290,7 +291,7 @@ impl App {
 
         let meshlet_buffer = Buffer::new_storage_filled(
             device.clone(),
-            &physical_device_memory_properties,
+            allocator.clone(),
             &command_pool,
             graphics_queue,
             &meshlets,
@@ -298,7 +299,7 @@ impl App {
 
         let submesh_buffer = Buffer::new_storage_filled(
             device.clone(),
-            &physical_device_memory_properties,
+            allocator.clone(),
             &command_pool,
             graphics_queue,
             &cluster_data,
@@ -329,7 +330,7 @@ impl App {
 
         let uniform_transform_buffer = Buffer::new_storage_filled(
             device.clone(),
-            &physical_device_memory_properties,
+            allocator.clone(),
             &command_pool,
             graphics_queue,
             &uniform_transforms,
@@ -337,7 +338,7 @@ impl App {
 
         let indirect_task_buffer = TypedBuffer::new_filled(
             device.clone(),
-            &physical_device_memory_properties,
+            allocator.clone(),
             &command_pool,
             graphics_queue,
             vk::BufferUsageFlags::INDIRECT_BUFFER | vk::BufferUsageFlags::STORAGE_BUFFER,
@@ -346,7 +347,8 @@ impl App {
 
         let uniform_camera_buffers = TypedBuffer::<CameraUniformBufferObject>::new_per_swapchain(
             device.clone(),
-            &physical_device_memory_properties,
+            allocator.clone(),
+            gpu_allocator::MemoryLocation::CpuToGpu,
             swapchain.images.len(),
         );
 
