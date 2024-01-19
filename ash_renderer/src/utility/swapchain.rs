@@ -5,7 +5,7 @@ use ash::vk::{self};
 use crate::VkHandle;
 
 use super::{
-    device::Device, instance::Instance, physical_device::PhysicalDevice,
+    device::Device, image::Image, instance::Instance, physical_device::PhysicalDevice,
     structures::QueueFamilyIndices, surface::Surface,
 };
 pub struct SwapChainSupportDetail {
@@ -134,7 +134,6 @@ impl Swapchain {
                 .get_swapchain_images(swapchain)
                 .expect("Failed to get Swapchain Images.")
         };
-
         Swapchain {
             surface,
             device,
@@ -189,12 +188,12 @@ impl Swapchain {
             vk::Extent2D {
                 width: clamp(
                     window_size.width as u32,
-                    capabilities.min_image_extent.width,
+                    capabilities.min_image_extent.width.max(1),
                     capabilities.max_image_extent.width,
                 ),
                 height: clamp(
                     window_size.height as u32,
-                    capabilities.min_image_extent.height,
+                    capabilities.min_image_extent.height.max(1),
                     capabilities.max_image_extent.height,
                 ),
             }

@@ -1,12 +1,16 @@
 use std::{
     cmp::max,
+    mem,
     path::Path,
     ptr,
     sync::{Arc, Mutex},
 };
 
 use ash::vk;
-use gpu_allocator::vulkan::Allocator;
+use gpu_allocator::{
+    vulkan::{Allocation, AllocationCreateDesc, AllocationScheme, Allocator},
+    MemoryLocation,
+};
 
 use super::{
     buffer::{AsBuffer, Buffer},
@@ -18,7 +22,9 @@ use super::{
 pub struct Image {
     device: Arc<Device>,
     image: vk::Image,
-    image_memory: vk::DeviceMemory,
+    image_memory: Allocation,
+    format: vk::Format,
+    allocator: Arc<Mutex<Allocator>>,
     image_view: Option<vk::ImageView>,
     sampler: Option<vk::Sampler>,
 }
@@ -33,7 +39,12 @@ impl Drop for Image {
                 self.device.handle.destroy_image_view(image_view, None);
             }
             self.device.handle.destroy_image(self.image, None);
-            self.device.handle.free_memory(self.image_memory, None);
+
+            let mut allocation = Default::default();
+
+            mem::swap(&mut self.image_memory, &mut allocation);
+
+            self.allocator.lock().unwrap().free(allocation).unwrap();
         }
     }
 }
@@ -48,8 +59,8 @@ impl Image {
         format: vk::Format,
         tiling: vk::ImageTiling,
         usage: vk::ImageUsageFlags,
-        required_memory_properties: vk::MemoryPropertyFlags,
-        device_memory_properties: &vk::PhysicalDeviceMemoryProperties,
+        location: MemoryLocation,
+        allocator: Arc<Mutex<Allocator>>,
     ) -> Image {
         let image_create_info = vk::ImageCreateInfo {
             s_type: vk::StructureType::IMAGE_CREATE_INFO,
@@ -80,37 +91,33 @@ impl Image {
                 .expect("Failed to create Texture Image!")
         };
 
-        let image_memory_requirement =
-            unsafe { device.handle.get_image_memory_requirements(image) };
-        let memory_allocate_info = vk::MemoryAllocateInfo {
-            s_type: vk::StructureType::MEMORY_ALLOCATE_INFO,
-            p_next: ptr::null(),
-            allocation_size: image_memory_requirement.size,
-            memory_type_index: find_memory_type(
-                image_memory_requirement.memory_type_bits,
-                required_memory_properties,
-                device_memory_properties,
-            ),
-        };
+        let requirements = unsafe { device.handle.get_image_memory_requirements(image) };
 
-        let image_memory = unsafe {
-            device
-                .handle
-                .allocate_memory(&memory_allocate_info, None)
-                .expect("Failed to allocate Texture Image memory!")
-        };
+        let allocation = allocator
+            .lock()
+            .unwrap()
+            .allocate(&AllocationCreateDesc {
+                name: "Image Allocation",
+                requirements,
+                location,
+                linear: true, // Buffers are always linear
+                allocation_scheme: AllocationScheme::GpuAllocatorManaged,
+            })
+            .unwrap();
 
         unsafe {
             device
                 .handle
-                .bind_image_memory(image, image_memory, 0)
+                .bind_image_memory(image, allocation.memory(), allocation.offset())
                 .expect("Failed to bind Image Memmory!");
         }
 
         Image {
             device,
             image,
-            image_memory,
+            image_memory: allocation,
+            allocator,
+            format,
             image_view: None,
             sampler: None,
         }
@@ -122,7 +129,6 @@ impl Image {
         allocator: Arc<Mutex<Allocator>>,
         command_pool: &Arc<CommandPool>,
         submit_queue: vk::Queue,
-        device_memory_properties: &vk::PhysicalDeviceMemoryProperties,
         image_path: &Path,
     ) -> Self {
         // let mut image_object = image::open(image_path).unwrap(); // this function is slow in debug mode.
@@ -186,8 +192,8 @@ impl Image {
             vk::Format::R8G8B8A8_SRGB,
             vk::ImageTiling::OPTIMAL,
             vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
-            vk::MemoryPropertyFlags::DEVICE_LOCAL,
-            device_memory_properties,
+            MemoryLocation::GpuOnly,
+            allocator,
         );
 
         Self::transition_image_layout(
@@ -346,7 +352,7 @@ impl Image {
         device: Arc<Device>,
         physical_device: vk::PhysicalDevice,
         swapchain_extent: vk::Extent2D,
-        device_memory_properties: &vk::PhysicalDeviceMemoryProperties,
+        allocator: Arc<Mutex<Allocator>>,
         msaa_samples: vk::SampleCountFlags,
     ) -> Self {
         let depth_format = instance.find_depth_format(physical_device);
@@ -359,8 +365,8 @@ impl Image {
             depth_format,
             vk::ImageTiling::OPTIMAL,
             vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
-            vk::MemoryPropertyFlags::DEVICE_LOCAL,
-            device_memory_properties,
+            MemoryLocation::GpuOnly,
+            allocator,
         )
         .create_image_view(depth_format, vk::ImageAspectFlags::DEPTH, 1)
     }
@@ -537,9 +543,6 @@ impl Image {
         mip_levels: u32,
     ) -> vk::ImageView {
         let imageview_create_info = vk::ImageViewCreateInfo {
-            s_type: vk::StructureType::IMAGE_VIEW_CREATE_INFO,
-            p_next: ptr::null(),
-            flags: vk::ImageViewCreateFlags::empty(),
             view_type: vk::ImageViewType::TYPE_2D,
             format,
             components: vk::ComponentMapping {
@@ -555,7 +558,8 @@ impl Image {
                 base_array_layer: 0,
                 layer_count: 1,
             },
-            image: image,
+            image,
+            ..Default::default()
         };
 
         unsafe {
@@ -586,6 +590,10 @@ impl Image {
 
     pub fn image(&self) -> vk::Image {
         self.image
+    }
+
+    pub fn format(&self) -> vk::Format {
+        self.format
     }
 }
 

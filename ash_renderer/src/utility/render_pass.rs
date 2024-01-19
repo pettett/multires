@@ -11,6 +11,7 @@ pub fn create_render_pass(
     device: &ash::Device,
     physical_device: &PhysicalDevice,
     surface_format: vk::Format,
+    depth_format: vk::Format,
 ) -> vk::RenderPass {
     let color_attachment = vk::AttachmentDescription {
         flags: vk::AttachmentDescriptionFlags::empty(),
@@ -27,7 +28,7 @@ pub fn create_render_pass(
 
     let depth_attachment = vk::AttachmentDescription {
         flags: vk::AttachmentDescriptionFlags::empty(),
-        format: App::find_depth_format(instance, physical_device),
+        format: depth_format,
         samples: vk::SampleCountFlags::TYPE_1,
         load_op: vk::AttachmentLoadOp::CLEAR,
         store_op: vk::AttachmentStoreOp::DONT_CARE,
@@ -74,15 +75,13 @@ pub fn create_render_pass(
     }];
 
     let renderpass_create_info = vk::RenderPassCreateInfo {
-        s_type: vk::StructureType::RENDER_PASS_CREATE_INFO,
-        flags: vk::RenderPassCreateFlags::empty(),
-        p_next: ptr::null(),
         attachment_count: render_pass_attachments.len() as u32,
         p_attachments: render_pass_attachments.as_ptr(),
         subpass_count: subpasses.len() as u32,
         p_subpasses: subpasses.as_ptr(),
         dependency_count: subpass_dependencies.len() as u32,
         p_dependencies: subpass_dependencies.as_ptr(),
+        ..Default::default()
     };
 
     unsafe {

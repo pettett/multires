@@ -1,6 +1,6 @@
 use std::{ptr, sync::Arc};
 
-use ash::vk;
+use ash::vk::{self, DescriptorSetLayoutCreateInfo};
 
 use crate::{CameraUniformBufferObject, VkHandle};
 
@@ -61,9 +61,20 @@ pub struct DescriptorSet {
     device: Arc<Device>,
     buffers: Vec<Arc<Buffer>>,
 }
-
 impl VkHandle for DescriptorSet {
     type VkItem = vk::DescriptorSet;
+
+    fn handle(&self) -> Self::VkItem {
+        self.handle
+    }
+}
+pub struct DescriptorSetLayout {
+    handle: vk::DescriptorSetLayout,
+    device: Arc<Device>,
+}
+
+impl VkHandle for DescriptorSetLayout {
+    type VkItem = vk::DescriptorSetLayout;
 
     fn handle(&self) -> Self::VkItem {
         self.handle
@@ -74,19 +85,19 @@ impl DescriptorSet {
     pub fn create_descriptor_sets(
         device: &Arc<Device>,
         descriptor_pool: &Arc<DescriptorPool>,
-        descriptor_set_layout: vk::DescriptorSetLayout,
+        descriptor_set_layout: &Arc<DescriptorSetLayout>,
         uniform_transform_buffer: &Arc<Buffer>,
         uniform_camera_buffers: &[impl AsBuffer],
         vertex_buffer: &Arc<Buffer>,
         meshlet_buffer: &Arc<Buffer>,
         submesh_buffer: &Arc<Buffer>,
         indirect_draw_array_buffer: &Arc<impl AsBuffer>,
-        texture: &Image,
+        //texture: &Image,
         swapchain_images_size: usize,
     ) -> Vec<DescriptorSet> {
         let mut layouts: Vec<vk::DescriptorSetLayout> = vec![];
         for _ in 0..swapchain_images_size {
-            layouts.push(descriptor_set_layout);
+            layouts.push(descriptor_set_layout.handle());
         }
 
         let descriptor_set_allocate_info = vk::DescriptorSetAllocateInfo::builder()
@@ -127,11 +138,11 @@ impl DescriptorSet {
             let indirect_draw_array_buffer_infos =
                 [indirect_draw_array_buffer.full_range_descriptor()];
 
-            let descriptor_image_infos = [vk::DescriptorImageInfo {
-                sampler: texture.sampler(),
-                image_view: texture.image_view(),
-                image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-            }];
+            // let descriptor_image_infos = [vk::DescriptorImageInfo {
+            //     sampler: texture.sampler(),
+            //     image_view: texture.image_view(),
+            //     image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            // }];
 
             let descriptor_write_sets = [
                 vk::WriteDescriptorSet {
@@ -156,16 +167,16 @@ impl DescriptorSet {
                     p_buffer_info: descriptor_camera_buffer_infos.as_ptr(),
                     ..Default::default()
                 },
-                vk::WriteDescriptorSet {
-                    // sampler uniform
-                    dst_set: descriptor_set.handle,
-                    dst_binding: 1,
-                    dst_array_element: 0,
-                    descriptor_count: 1,
-                    descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-                    p_image_info: descriptor_image_infos.as_ptr(),
-                    ..Default::default()
-                },
+                // vk::WriteDescriptorSet {
+                //     // sampler uniform
+                //     dst_set: descriptor_set.handle,
+                //     dst_binding: 1,
+                //     dst_array_element: 0,
+                //     descriptor_count: 1,
+                //     descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+                //     p_image_info: descriptor_image_infos.as_ptr(),
+                //     ..Default::default()
+                // },
                 vk::WriteDescriptorSet {
                     // submesh info buffer
                     dst_set: descriptor_set.handle,
@@ -220,78 +231,21 @@ impl DescriptorSet {
         descriptor_sets
     }
 }
-pub fn create_descriptor_set_layout(device: &ash::Device) -> vk::DescriptorSetLayout {
-    let ubo_layout_bindings = [
-        vk::DescriptorSetLayoutBinding {
-            // transform uniform
-            binding: 0,
-            descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
-            descriptor_count: 1,
-            stage_flags: vk::ShaderStageFlags::MESH_EXT | vk::ShaderStageFlags::TASK_EXT,
-            p_immutable_samplers: ptr::null(),
-        },
-        vk::DescriptorSetLayoutBinding {
-            // sampler uniform
-            binding: 1,
-            descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-            descriptor_count: 1,
-            stage_flags: vk::ShaderStageFlags::FRAGMENT,
-            p_immutable_samplers: ptr::null(),
-        },
-        vk::DescriptorSetLayoutBinding {
-            // sampler uniform
-            binding: 2,
-            descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
-            descriptor_count: 1,
-            stage_flags: vk::ShaderStageFlags::TASK_EXT,
-            p_immutable_samplers: ptr::null(),
-        },
-        vk::DescriptorSetLayoutBinding {
-            // verts buffer
-            binding: 3,
-            descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
-            descriptor_count: 1,
-            stage_flags: vk::ShaderStageFlags::MESH_EXT,
-            p_immutable_samplers: ptr::null(),
-        },
-        vk::DescriptorSetLayoutBinding {
-            // verts buffer
-            binding: 4,
-            descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
-            descriptor_count: 1,
-            stage_flags: vk::ShaderStageFlags::MESH_EXT,
-            p_immutable_samplers: ptr::null(),
-        },
-        vk::DescriptorSetLayoutBinding {
-            // camera uniform
-            binding: 5,
-            descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
-            descriptor_count: 1,
-            stage_flags: vk::ShaderStageFlags::MESH_EXT | vk::ShaderStageFlags::TASK_EXT,
-            p_immutable_samplers: ptr::null(),
-        },
-        vk::DescriptorSetLayoutBinding {
-            // indirect draw params buffer array
-            binding: 6,
-            descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
-            descriptor_count: 1,
-            stage_flags: vk::ShaderStageFlags::TASK_EXT,
-            p_immutable_samplers: ptr::null(),
-        },
-    ];
 
-    let ubo_layout_create_info = vk::DescriptorSetLayoutCreateInfo {
-        s_type: vk::StructureType::DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-        p_next: ptr::null(),
-        flags: vk::DescriptorSetLayoutCreateFlags::empty(),
-        binding_count: ubo_layout_bindings.len() as u32,
-        p_bindings: ubo_layout_bindings.as_ptr(),
-    };
-
-    unsafe {
-        device
-            .create_descriptor_set_layout(&ubo_layout_create_info, None)
-            .expect("Failed to create Descriptor Set Layout!")
+impl DescriptorSetLayout {
+    pub fn new(device: Arc<Device>, bindings: &[vk::DescriptorSetLayoutBinding]) -> Self {
+        Self {
+            handle: unsafe {
+                device
+                    .handle
+                    .create_descriptor_set_layout(
+                        &DescriptorSetLayoutCreateInfo::builder().bindings(bindings),
+                        None,
+                    )
+                    .expect("Failed to create Descriptor Set Layout!")
+            },
+            device,
+        }
     }
 }
 
@@ -301,6 +255,16 @@ impl Drop for DescriptorPool {
             self.device
                 .handle
                 .destroy_descriptor_pool(self.handle, None);
+        }
+    }
+}
+
+impl Drop for DescriptorSetLayout {
+    fn drop(&mut self) {
+        unsafe {
+            self.device
+                .handle
+                .destroy_descriptor_set_layout(self.handle, None);
         }
     }
 }

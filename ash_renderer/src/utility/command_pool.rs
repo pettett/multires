@@ -90,6 +90,13 @@ pub struct CommandPool {
     device: Arc<Device>,
     pub handle: vk::CommandPool,
 }
+impl VkHandle for CommandPool {
+    type VkItem = vk::CommandPool;
+
+    fn handle(&self) -> Self::VkItem {
+        self.handle
+    }
+}
 
 impl CommandPool {
     pub fn new(device: Arc<Device>, queue_family_index: u32) -> Arc<Self> {
