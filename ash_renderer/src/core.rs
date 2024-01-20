@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use crate::{
     utility::{
@@ -10,12 +10,16 @@ use crate::{
         structures::*,
         window::init_window,
     },
-    TASK_GROUP_SIZE, WINDOW_TITLE,
+    VkHandle, TASK_GROUP_SIZE, WINDOW_TITLE,
 };
 
 use crate::utility::{device::Device, physical_device::PhysicalDevice, surface::Surface};
 use ash::vk;
 
+use gpu_allocator::{
+    vulkan::{Allocator, AllocatorCreateDesc},
+    AllocationSizes,
+};
 use winit::event_loop::EventLoop;
 
 pub struct Core {
@@ -26,6 +30,7 @@ pub struct Core {
     pub surface: Arc<Surface>,
     pub queue_family: QueueFamilyIndices,
     pub command_pool: Arc<CommandPool>,
+    pub allocator: Arc<Mutex<Allocator>>,
 
     debug_utils_loader: ash::extensions::ext::DebugUtils,
     debug_messenger: vk::DebugUtilsMessengerEXT,
@@ -80,7 +85,17 @@ impl Core {
         );
 
         let command_pool = CommandPool::new(device.clone(), queue_family.graphics_family.unwrap());
-
+        let allocator = Arc::new(Mutex::new(
+            Allocator::new(&AllocatorCreateDesc {
+                instance: instance.handle.clone(),
+                device: device.handle.clone(),
+                physical_device: physical_device.handle(),
+                debug_settings: Default::default(),
+                buffer_device_address: true, // Ideally, check the BufferDeviceAddressFeatures struct.
+                allocation_sizes: AllocationSizes::new(1 << 24, 1 << 24), // 16 MB for both
+            })
+            .unwrap(),
+        ));
         Arc::new(Core {
             window,
             device,
@@ -91,7 +106,12 @@ impl Core {
             command_pool,
             debug_utils_loader,
             debug_messenger,
+            allocator,
         })
+    }
+
+    pub fn get_allocator(&self) -> MutexGuard<Allocator> {
+        self.allocator.lock().unwrap()
     }
 }
 impl Drop for Core {

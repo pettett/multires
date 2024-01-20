@@ -23,6 +23,5 @@ pub trait DrawPipeline {
         submesh_count: u32,
         instance_count: u32,
         render_pass: &RenderPass,
-        indirect_task_buffer: &TypedBuffer<vk::DrawMeshTasksIndirectCommandEXT>,
     );
 }

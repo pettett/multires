@@ -4,18 +4,28 @@ use glam::{Mat4, Quat, Vec3, Vec3A};
 #[derive(Debug, Copy, Clone, Default, bytemuck::Zeroable, Component)]
 pub struct Transform {
     pos: Vec3A,
+    scale: Vec3A,
     rot: Quat,
 }
 
 impl Transform {
+    pub fn new_scaled(pos: Vec3A, rot: Quat, scale: Vec3A) -> Self {
+        Self { pos, rot, scale }
+    }
+
     pub fn new(pos: Vec3A, rot: Quat) -> Self {
-        Self { pos, rot }
+        Self {
+            pos,
+            rot,
+            scale: Vec3A::ONE,
+        }
     }
 
     pub fn new_pos(pos: Vec3A) -> Self {
         Self {
             pos,
             rot: Quat::IDENTITY,
+            scale: Vec3A::ONE,
         }
     }
 
@@ -54,6 +64,10 @@ impl Transform {
         &mut self.rot
     }
     pub fn get_local_to_world(&self) -> Mat4 {
-        Mat4::from_rotation_translation(self.rot, self.pos.into())
+        Mat4::from_scale_rotation_translation(self.scale.into(), self.rot, self.pos.into())
+    }
+
+    pub fn scale_mut(&mut self) -> &mut Vec3A {
+        &mut self.scale
     }
 }

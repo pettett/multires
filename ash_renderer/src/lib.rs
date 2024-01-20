@@ -70,14 +70,10 @@ pub struct App {
     schedule: bevy_ecs::schedule::Schedule,
     camera: Entity,
 
-    allocator: Arc<Mutex<Allocator>>,
-
     graphics_queue: vk::Queue,
     present_queue: vk::Queue,
 
     //texture_image: Image,
-    indirect_task_buffer: Arc<TypedBuffer<vk::DrawMeshTasksIndirectCommandEXT>>,
-
     uniform_transforms: Vec<ModelUniformBufferObject>,
     uniform_transform_buffer: Arc<Buffer>,
     uniform_camera: CameraUniformBufferObject,
@@ -129,18 +125,7 @@ impl App {
         let window = &core.window;
         let queue_family = &core.queue_family;
         let surface = &core.surface;
-
-        let allocator = Arc::new(Mutex::new(
-            Allocator::new(&AllocatorCreateDesc {
-                instance: instance.handle.clone(),
-                device: device.handle.clone(),
-                physical_device: physical_device.handle(),
-                debug_settings: Default::default(),
-                buffer_device_address: true, // Ideally, check the BufferDeviceAddressFeatures struct.
-                allocation_sizes: AllocationSizes::new(1 << 24, 1 << 24), // 16 MB for both
-            })
-            .unwrap(),
-        ));
+        let allocator = &core.allocator;
 
         println!("Loading queues");
         let graphics_queue = unsafe {
@@ -166,8 +151,6 @@ impl App {
         let render_pass = RenderPass::new(device.clone(), surface_format, depth_format);
 
         screen.remake_swapchain(graphics_queue, &render_pass, allocator.clone());
-
-        let ubo_layout = create_descriptor_set_layout(device.clone());
 
         // println!("Loading texture");
         // let texture_image = Image::create_texture_image(
@@ -221,25 +204,23 @@ impl App {
         );
 
         let mut uniform_transforms = Vec::new();
-        let mut task_indirect_data = Vec::new();
 
+        let mut world: World = World::new();
         for i in 0..100 {
             for j in 0..50 {
-                let mut model = Mat4::from_translation(
-                    glam::Vec3::X * i as f32 * 40.0 + glam::Vec3::Y * j as f32 * 40.0,
+                let mut transform = Transform::new_pos(
+                    glam::Vec3A::X * i as f32 * 40.0 + glam::Vec3A::Y * j as f32 * 40.0,
                 );
 
                 if i == 10 && j == 10 {
-                    model *= Mat4::from_scale(glam::Vec3::ONE * 20.0)
+                    *transform.scale_mut() *= 20.0
                 };
 
-                uniform_transforms.push(ModelUniformBufferObject { model });
-
-                task_indirect_data.push(vk::DrawMeshTasksIndirectCommandEXT {
-                    group_count_x: (cluster_data.len() as u32).div_ceil(TASK_GROUP_SIZE) / 4,
-                    group_count_y: 1,
-                    group_count_z: 1,
+                uniform_transforms.push(ModelUniformBufferObject {
+                    model: transform.get_local_to_world(),
                 });
+
+                world.spawn(transform);
             }
         }
 
@@ -249,15 +230,6 @@ impl App {
             &core.command_pool,
             graphics_queue,
             &uniform_transforms,
-        );
-
-        let indirect_task_buffer = TypedBuffer::new_filled(
-            device.clone(),
-            allocator.clone(),
-            &core.command_pool,
-            graphics_queue,
-            vk::BufferUsageFlags::INDIRECT_BUFFER | vk::BufferUsageFlags::STORAGE_BUFFER,
-            &task_indirect_data,
         );
 
         let uniform_camera_buffers = TypedBuffer::<CameraUniformBufferObject>::new_per_swapchain(
@@ -271,28 +243,22 @@ impl App {
         let descriptor_pool =
             DescriptorPool::new(device.clone(), screen.swapchain().images.len() as u32);
 
-        let descriptor_sets = DescriptorSet::create_descriptor_sets(
-            &device,
-            &descriptor_pool,
-            &ubo_layout,
-            &uniform_transform_buffer,
-            &uniform_camera_buffers,
-            &vertex_buffer,
-            &meshlet_buffer,
-            &submesh_buffer,
-            &indirect_task_buffer,
-            //&texture_image,
-            screen.swapchain().images.len(),
-        );
-
         println!("Loading command buffers");
 
         let mut mesh_draw = IndirectTasks::new(
-            device.clone(),
+            core.clone(),
+            &screen,
+            &mut world,
             &render_pass,
             screen.swapchain().extent,
-            ubo_layout.clone(),
-            descriptor_sets,
+            graphics_queue,
+            descriptor_pool.clone(),
+            uniform_transform_buffer.clone(),
+            &uniform_camera_buffers,
+            vertex_buffer,
+            meshlet_buffer,
+            submesh_buffer,
+            cluster_data.len() as _,
         );
 
         mesh_draw.init_swapchain(
@@ -301,7 +267,6 @@ impl App {
             cluster_data.len() as _,
             uniform_transforms.len() as _,
             &render_pass,
-            &indirect_task_buffer,
         );
 
         let sync_objects: SyncObjects = SyncObjects::new(device.clone(), MAX_FRAMES_IN_FLIGHT);
@@ -316,8 +281,6 @@ impl App {
             cam_pos: (*transform.get_pos()).into(),
             target_error: 0.3,
         };
-
-        let mut world: World = World::new();
 
         world.insert_resource(Events::<MouseIn>::default());
         world.insert_resource(Events::<MouseMv>::default());
@@ -352,14 +315,12 @@ impl App {
             camera,
 
             // vulkan stuff
-            allocator,
             gui,
 
             graphics_queue,
             present_queue,
             uniform_camera,
 
-            indirect_task_buffer,
             render_pass,
 
             draw: Box::new(mesh_draw),
@@ -510,7 +471,7 @@ impl App {
         self.screen.remake_swapchain(
             self.graphics_queue,
             &self.render_pass,
-            self.allocator.clone(),
+            self.core.allocator.clone(),
         );
 
         self.draw.init_swapchain(
@@ -519,7 +480,6 @@ impl App {
             self.submesh_count,
             self.uniform_transforms.len() as _,
             &self.render_pass,
-            &self.indirect_task_buffer,
         );
 
         // Egui Integration

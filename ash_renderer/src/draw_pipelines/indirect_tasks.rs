@@ -1,19 +1,21 @@
 use std::{ffi::CString, ptr, sync::Arc};
 
 use ash::vk::{self};
+use bevy_ecs::world::World;
+use common_renderer::components::transform::Transform;
 
 use crate::{
     core::Core,
     screen::Screen,
     utility::{
-        buffer::{AsBuffer, TypedBuffer},
+        buffer::{AsBuffer, Buffer, TypedBuffer},
         command_pool::CommandPool,
-        descriptor_pool::{DescriptorSet, DescriptorSetLayout},
+        descriptor_pool::{DescriptorPool, DescriptorSet, DescriptorSetLayout},
         device::Device,
         pipeline::{Pipeline, ShaderModule},
         render_pass::RenderPass,
     },
-    VkHandle,
+    VkHandle, TASK_GROUP_SIZE,
 };
 
 use super::DrawPipeline;
@@ -22,27 +24,70 @@ pub struct IndirectTasks {
     graphics_pipeline: Pipeline,
     descriptor_sets: Vec<DescriptorSet>,
     screen: Option<IndirectTasksScreen>,
+    indirect_task_buffer: Arc<TypedBuffer<vk::DrawMeshTasksIndirectCommandEXT>>,
 }
 
 impl IndirectTasks {
     pub fn new(
-        device: Arc<Device>,
+        core: Arc<Core>,
+        screen: &Screen,
+        world: &mut World,
         render_pass: &RenderPass,
         swapchain_extent: vk::Extent2D,
-        ubo_set_layout: Arc<DescriptorSetLayout>,
-        descriptor_sets: Vec<DescriptorSet>,
+        graphics_queue: vk::Queue,
+        descriptor_pool: Arc<DescriptorPool>,
+        uniform_transform_buffer: Arc<Buffer>,
+        uniform_camera_buffers: &[impl AsBuffer],
+        vertex_buffer: Arc<Buffer>,
+        meshlet_buffer: Arc<Buffer>,
+        submesh_buffer: Arc<Buffer>,
+        cluster_count: u32,
     ) -> Self {
+        let ubo_layout = create_descriptor_set_layout(core.device.clone());
+
         let graphics_pipeline = create_graphics_pipeline(
-            device.clone(),
+            core.device.clone(),
             render_pass,
             swapchain_extent,
-            ubo_set_layout,
+            ubo_layout.clone(),
+        );
+        let mut task_indirect_data = Vec::new();
+
+        for e in world.query::<&Transform>().iter(world) {
+            task_indirect_data.push(vk::DrawMeshTasksIndirectCommandEXT {
+                group_count_x: cluster_count.div_ceil(TASK_GROUP_SIZE) / 4,
+                group_count_y: 1,
+                group_count_z: 1,
+            });
+        }
+        let indirect_task_buffer = TypedBuffer::new_filled(
+            core.device.clone(),
+            core.allocator.clone(),
+            &core.command_pool,
+            graphics_queue,
+            vk::BufferUsageFlags::INDIRECT_BUFFER | vk::BufferUsageFlags::STORAGE_BUFFER,
+            &task_indirect_data,
+        );
+
+        let descriptor_sets = DescriptorSet::create_descriptor_sets(
+            &core.device,
+            &descriptor_pool,
+            &ubo_layout,
+            &uniform_transform_buffer,
+            &uniform_camera_buffers,
+            &vertex_buffer,
+            &meshlet_buffer,
+            &submesh_buffer,
+            &indirect_task_buffer,
+            //&texture_image,
+            screen.swapchain().images.len(),
         );
 
         Self {
             graphics_pipeline,
             descriptor_sets,
             screen: None,
+            indirect_task_buffer,
         }
     }
 }
@@ -58,7 +103,6 @@ impl DrawPipeline for IndirectTasks {
         submesh_count: u32,
         instance_count: u32,
         render_pass: &RenderPass,
-        indirect_task_buffer: &TypedBuffer<vk::DrawMeshTasksIndirectCommandEXT>,
     ) {
         self.screen = Some(IndirectTasksScreen::create_command_buffers(
             &self,
@@ -67,7 +111,7 @@ impl DrawPipeline for IndirectTasks {
             submesh_count,
             instance_count,
             render_pass,
-            indirect_task_buffer,
+            &self.indirect_task_buffer,
         ));
     }
 }
