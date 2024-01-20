@@ -7,6 +7,7 @@
 
 #include "mesh_task_payload.glsl"
 #include "mesh_frag_payload.glsl"
+#include "transforms.glsl"
 
 
 const uint MAX_PRIMITIVES = 126;
@@ -34,10 +35,8 @@ layout (binding = 0) readonly buffer ModelUniformBufferObject {
 } model;
 
 layout (binding = 5) uniform CameraUniformBufferObject {
-    mat4 view_proj;
-	vec3 camera_pos;
-	float target_error;
-} ubo;
+    CameraUniformObject ubo; 
+};
 
 layout (std430, binding = 3) readonly buffer InputBufferI {
     s_meshlet meshlets[];

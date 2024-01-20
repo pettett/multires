@@ -1,0 +1,117 @@
+#version 460
+
+#extension GL_ARB_separate_shader_objects: enable
+#extension GL_GOOGLE_include_directive : enable
+#extension GL_ARB_shader_draw_parameters: require
+
+#extension GL_KHR_shader_subgroup_arithmetic: enable
+
+#include "cluster_data.glsl"
+#include "transforms.glsl"
+
+struct DrawData {
+	mat4 model;
+	uint current_count;
+};
+
+
+struct CameraUniform {
+ 	mat4 view_proj;
+    vec3 camera_pos;
+    int part_highlight;
+    float error;
+    uint mode;
+};
+
+
+//@group(0) @binding(0) var<storage, write> result_indicies: array<i32>;
+
+
+layout(binding = 0) writeonly buffer  ResultIndicies {
+    uint result[];
+} result_indicies;
+
+layout(binding = 1) writeonly buffer  DrawIndirectParams {
+    DrawIndexedIndirect result[];
+} draw_indirect_params; 
+
+layout(binding = 2) readonly buffer  Indicies {
+    uint result[];
+} indices;
+
+layout(binding = 3) readonly buffer  Clusters {
+    ClusterData result[];
+} clusters;
+
+layout(binding = 4) writeonly buffer  ShouldDraw {
+    uint result[];
+} should_draw;
+
+layout(binding = 4) readonly buffer ModelUniformBufferObject {
+    mat4 models[];
+} model;
+
+layout (binding = 5) uniform CameraUniformBufferObject {
+    CameraUniformObject ubo; 
+} ;
+
+
+const float LARGE_ERROR = 100000000000000000.0;
+
+float cluster_error(uint idx, uint i) {
+    bool out_of_range = false;
+    if (out_of_range) {
+        return LARGE_ERROR;
+    } else {
+        return clusters.result[idx].error * (clusters.result[idx].radius / distance((model.models[i] * vec4(clusters.result[idx].center, 1.0)).xyz, ubo.camera_pos));
+    }
+}
+
+layout (local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+ 
+void main(  ) {
+	uvec3 id = gl_GlobalInvocationID;
+    uint i = id.x;
+    uint len = indices.result.length();
+    uint offset = 0u;// len * id.y;
+
+    if (i == 0) {
+        should_draw.result[offset + 0] = len;
+    }
+
+    if (i >= len) {
+        return;
+    }
+    // should_draw[i] = i32(clusters[i].index_offset);
+
+    uint start = clusters.result[i].index_offset;
+    uint end = start + clusters.result[i].index_count;
+
+	// Calculate if this cluster should be drawn:
+	// draw_error >= min(self.error, self.co-parent.error) 
+	// draw_error < min(parent0.error, parent1.error)
+
+	// lots of negative zeros
+    float this_error = -LARGE_ERROR;
+
+    if (clusters.result[i].co_parent >= 0) {
+        this_error = min(cluster_error(i, 0), cluster_error(clusters.result[i].co_parent, 0));
+    }
+
+	// lots of zeros
+    float parent_error = LARGE_ERROR;
+
+    if (clusters.result[i].parent0 >= 0) { // If we have one parent, we are guarenteed to have another.
+        parent_error = min(cluster_error(clusters.result[i].parent0, 0), cluster_error(clusters.result[i].parent1, 0));
+    }
+
+    bool cull = ubo.target_error >= this_error && ubo.target_error < parent_error;
+
+    should_draw.result[offset + i + 1] = cull ? 1 : 0;
+	
+	// Ideally, compute this in a step after writing cull to a buffer and compacting it down
+
+    //for (var ind: u32 = start; ind < end; ind++) {
+    //    result_indicies[ind] = indices[ind] * cull;
+    //}
+}
