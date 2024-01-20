@@ -8,13 +8,16 @@ pub mod utility;
 use crate::{
     core::Core,
     draw_pipelines::indirect_tasks::{
-        create_command_buffers, create_descriptor_set_layout, create_graphics_pipeline,
+        create_descriptor_set_layout, create_graphics_pipeline, IndirectTasksScreen,
     },
+    screen::find_depth_format,
     utility::{
         // the mod define some fixed functions that have been learned before.
         constants::*,
         descriptor_pool::DescriptorPool,
+        render_pass::RenderPass,
         structures::*,
+        swapchain::{SwapChainSupportDetail, Swapchain},
         sync::SyncObjects,
     },
 };
@@ -33,6 +36,7 @@ use common_renderer::{
     },
     resources::time::Time,
 };
+use draw_pipelines::{indirect_tasks::IndirectTasks, DrawPipeline};
 use glam::{Mat4, Quat, Vec3A};
 use gpu_allocator::{vulkan::*, AllocationSizes};
 use gui::gui::Gui;
@@ -44,8 +48,8 @@ use utility::{
 };
 use winit::event::WindowEvent;
 
-use std::sync::Arc;
 use std::sync::Mutex;
+use std::{any::Any, sync::Arc};
 
 // Constants
 const WINDOW_TITLE: &'static str = "26.Depth Buffering";
@@ -71,8 +75,6 @@ pub struct App {
     graphics_queue: vk::Queue,
     present_queue: vk::Queue,
 
-    graphics_pipeline: Pipeline,
-
     //texture_image: Image,
     indirect_task_buffer: Arc<TypedBuffer<vk::DrawMeshTasksIndirectCommandEXT>>,
 
@@ -81,10 +83,11 @@ pub struct App {
     uniform_camera: CameraUniformBufferObject,
     uniform_camera_buffers: Vec<TypedBuffer<CameraUniformBufferObject>>,
 
-    mesh_command_buffers: Vec<vk::CommandBuffer>,
-    descriptor_pool: Arc<DescriptorPool>,
+    render_pass: RenderPass,
 
-    descriptor_sets: Vec<DescriptorSet>,
+    draw: Box<dyn DrawPipeline>,
+
+    descriptor_pool: Arc<DescriptorPool>,
 
     gui: Gui,
 
@@ -154,16 +157,17 @@ impl App {
         println!("Loading swapchain");
 
         let mut screen = Screen::new(core.clone());
-        screen.remake_swapchain(graphics_queue, allocator.clone());
+
+        let swapchain_support = SwapChainSupportDetail::query(physical_device.handle(), &surface);
+
+        let surface_format = swapchain_support.choose_swapchain_format().format;
+        let depth_format = find_depth_format(&instance.handle, physical_device);
+
+        let render_pass = RenderPass::new(device.clone(), surface_format, depth_format);
+
+        screen.remake_swapchain(graphics_queue, &render_pass, allocator.clone());
 
         let ubo_layout = create_descriptor_set_layout(device.clone());
-
-        let graphics_pipeline = create_graphics_pipeline(
-            device.clone(),
-            screen.render_pass,
-            screen.swapchain().extent,
-            ubo_layout.clone(),
-        );
 
         // println!("Loading texture");
         // let texture_image = Image::create_texture_image(
@@ -283,17 +287,20 @@ impl App {
 
         println!("Loading command buffers");
 
-        let mesh_command_buffers = create_command_buffers(
+        let mut mesh_draw = IndirectTasks::new(
+            device.clone(),
+            &render_pass,
+            screen.swapchain().extent,
+            ubo_layout.clone(),
+            descriptor_sets,
+        );
+
+        mesh_draw.init_swapchain(
+            &core,
+            &screen,
             cluster_data.len() as _,
             uniform_transforms.len() as _,
-            &core.device,
-            &core.command_pool,
-            graphics_pipeline.pipeline(),
-            &screen.swapchain_framebuffers,
-            screen.render_pass,
-            screen.swapchain().extent,
-            graphics_pipeline.layout(),
-            &descriptor_sets,
+            &render_pass,
             &indirect_task_buffer,
         );
 
@@ -353,18 +360,16 @@ impl App {
             uniform_camera,
 
             indirect_task_buffer,
+            render_pass,
 
-            mesh_command_buffers,
+            draw: Box::new(mesh_draw),
 
             uniform_transforms,
             uniform_transform_buffer,
             uniform_camera_buffers,
 
-            graphics_pipeline,
-
             //texture_image,
             descriptor_pool,
-            descriptor_sets,
 
             sync_objects,
             current_frame: 0,
@@ -443,7 +448,7 @@ impl App {
         let ui_cmd = self.gui.draw(image_index as usize);
 
         let submit_infos = [vk::SubmitInfo::builder()
-            .command_buffers(&[self.mesh_command_buffers[image_index as usize], ui_cmd])
+            .command_buffers(&[self.draw.draw(image_index as usize), ui_cmd])
             .wait_dst_stage_mask(&wait_stages)
             .signal_semaphores(&signal_semaphores)
             .wait_semaphores(&wait_semaphores)
@@ -502,36 +507,18 @@ impl App {
 
         //self.cleanup_swapchain();
 
-        self.screen
-            .remake_swapchain(self.graphics_queue, self.allocator.clone());
-
-        let graphics_pipeline = create_graphics_pipeline(
-            self.core.device.clone(),
-            self.screen.render_pass,
-            self.screen.swapchain().extent,
-            self.graphics_pipeline.ubo_layout.clone(),
+        self.screen.remake_swapchain(
+            self.graphics_queue,
+            &self.render_pass,
+            self.allocator.clone(),
         );
-        self.graphics_pipeline = graphics_pipeline;
 
-        //TODO: better lifetime management for these command buffers
-        unsafe {
-            self.core
-                .device
-                .handle
-                .free_command_buffers(self.core.command_pool.handle, &self.mesh_command_buffers);
-        }
-
-        self.mesh_command_buffers = create_command_buffers(
+        self.draw.init_swapchain(
+            &self.core,
+            &self.screen,
             self.submesh_count,
             self.uniform_transforms.len() as _,
-            &self.core.device,
-            &self.core.command_pool,
-            self.graphics_pipeline.pipeline(),
-            &self.screen.swapchain_framebuffers,
-            self.screen.render_pass,
-            self.screen.swapchain().extent,
-            self.graphics_pipeline.layout(),
-            &self.descriptor_sets,
+            &self.render_pass,
             &self.indirect_task_buffer,
         );
 

@@ -11,6 +11,8 @@ fn main() {
 fn main() {
     // Tell Cargo that if any shaders change, to rerun this build script.
 
+    use std::{path::PathBuf, str::FromStr};
+
     println!("cargo:rerun-if-changed=shaders/src");
 
     // Compile all shaders to spirv::1.6
@@ -21,9 +23,23 @@ fn main() {
     options.add_macro_definition("EP", Some("main"));
     options.set_include_callback(
         |requested_source, type_, requesting_source, include_depth| {
+            if include_depth > 8 {
+                panic!("Include depth too high, likely loop detected")
+            }
+
+            let content = match type_ {
+                shaderc::IncludeType::Relative => {
+                    let mut path = PathBuf::from_str(requesting_source).unwrap();
+                    path.pop(); // Remove file name
+                    path.push(requested_source); // Push requested name;
+                    fs::read_to_string(path).unwrap()
+                }
+                shaderc::IncludeType::Standard => fs::read_to_string(requested_source).unwrap(),
+            };
+
             Ok(shaderc::ResolvedInclude {
                 resolved_name: requested_source.to_owned(),
-                content: fs::read_to_string(&requested_source).unwrap(),
+                content,
             })
         },
     );
@@ -51,12 +67,13 @@ fn main() {
             }
         };
 
-        let name = entry.file_name().to_str().unwrap().to_owned();
+        let local_name = path.to_str().unwrap().to_owned();
+        let name = path.file_name().unwrap().to_str().unwrap().to_owned();
 
         let shader = compiler.compile_into_spirv(
             &fs::read_to_string(&path).unwrap(),
             kind,
-            &name,
+            &local_name,
             "main",
             Some(&options),
         );

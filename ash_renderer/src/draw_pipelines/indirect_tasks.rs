@@ -3,125 +3,225 @@ use std::{ffi::CString, ptr, sync::Arc};
 use ash::vk::{self};
 
 use crate::{
+    core::Core,
+    screen::Screen,
     utility::{
         buffer::{AsBuffer, TypedBuffer},
         command_pool::CommandPool,
         descriptor_pool::{DescriptorSet, DescriptorSetLayout},
         device::Device,
         pipeline::{Pipeline, ShaderModule},
+        render_pass::RenderPass,
     },
     VkHandle,
 };
 
-pub fn create_command_buffers(
-    submesh_count: u32,
-    instance_count: u32,
-    device: &Device,
-    command_pool: &Arc<CommandPool>,
-    graphics_pipeline: vk::Pipeline,
-    framebuffers: &Vec<vk::Framebuffer>,
-    render_pass: vk::RenderPass,
-    surface_extent: vk::Extent2D,
-    pipeline_layout: vk::PipelineLayout,
-    descriptor_sets: &Vec<DescriptorSet>,
-    indirect_task_buffer: &TypedBuffer<vk::DrawMeshTasksIndirectCommandEXT>,
-) -> Vec<vk::CommandBuffer> {
-    let command_buffers = command_pool.allocate_group(framebuffers.len() as u32);
+use super::DrawPipeline;
 
-    for (i, &command_buffer) in command_buffers.iter().enumerate() {
-        let command_buffer_begin_info = vk::CommandBufferBeginInfo::builder()
-            .flags(vk::CommandBufferUsageFlags::SIMULTANEOUS_USE);
+pub struct IndirectTasks {
+    graphics_pipeline: Pipeline,
+    descriptor_sets: Vec<DescriptorSet>,
+    screen: Option<IndirectTasksScreen>,
+}
 
-        unsafe {
-            device
-                .handle
-                .begin_command_buffer(command_buffer, &command_buffer_begin_info)
-                .expect("Failed to begin recording Command Buffer at beginning!");
-        }
+impl IndirectTasks {
+    pub fn new(
+        device: Arc<Device>,
+        render_pass: &RenderPass,
+        swapchain_extent: vk::Extent2D,
+        ubo_set_layout: Arc<DescriptorSetLayout>,
+        descriptor_sets: Vec<DescriptorSet>,
+    ) -> Self {
+        let graphics_pipeline = create_graphics_pipeline(
+            device.clone(),
+            render_pass,
+            swapchain_extent,
+            ubo_set_layout,
+        );
 
-        let clear_values = [
-            vk::ClearValue {
-                // clear value for color buffer
-                color: vk::ClearColorValue {
-                    float32: [0.0, 0.0, 0.0, 1.0],
-                },
-            },
-            vk::ClearValue {
-                // clear value for depth buffer
-                depth_stencil: vk::ClearDepthStencilValue {
-                    depth: 1.0,
-                    stencil: 0,
-                },
-            },
-        ];
-
-        let render_pass_begin_info = vk::RenderPassBeginInfo::builder()
-            .render_pass(render_pass)
-            .framebuffer(framebuffers[i])
-            .render_area(vk::Rect2D {
-                offset: vk::Offset2D { x: 0, y: 0 },
-                extent: surface_extent,
-            })
-            .clear_values(&clear_values);
-
-        unsafe {
-            device.handle.cmd_begin_render_pass(
-                command_buffer,
-                &render_pass_begin_info,
-                vk::SubpassContents::INLINE,
-            );
-            device.handle.cmd_bind_pipeline(
-                command_buffer,
-                vk::PipelineBindPoint::GRAPHICS,
-                graphics_pipeline,
-            );
-
-            //let vertex_buffers = [vertex_buffer];
-            //let offsets = [0_u64];
-            let descriptor_sets_to_bind = [descriptor_sets[i].handle()];
-
-            //device.cmd_bind_vertex_buffers(command_buffer, 0, &vertex_buffers, &offsets);
-            //device.cmd_bind_index_buffer(
-            //    command_buffer,
-            //    index_buffer,
-            //    0,
-            //    vk::IndexType::UINT32,
-            //);
-            device.handle.cmd_bind_descriptor_sets(
-                command_buffer,
-                vk::PipelineBindPoint::GRAPHICS,
-                pipeline_layout,
-                0,
-                &descriptor_sets_to_bind,
-                &[],
-            );
-
-            device.fn_mesh_shader.cmd_draw_mesh_tasks_indirect(
-                command_buffer,
-                indirect_task_buffer.buffer(),
-                0,
-                instance_count,
-                indirect_task_buffer.stride() as _,
-            );
-            // device.cmd_draw_indexed(
-            //     command_buffer,
-            //     RECT_TEX_COORD_INDICES_DATA.len() as u32,
-            //     1,
-            //     0,
-            //     0,
-            //     0,
-            // );
-
-            device.handle.cmd_end_render_pass(command_buffer);
-
-            device
-                .handle
-                .end_command_buffer(command_buffer)
-                .expect("Failed to record Command Buffer at Ending!");
+        Self {
+            graphics_pipeline,
+            descriptor_sets,
+            screen: None,
         }
     }
+}
 
-    command_buffers
+impl DrawPipeline for IndirectTasks {
+    fn draw(&self, frame_index: usize) -> vk::CommandBuffer {
+        self.screen.as_ref().unwrap().command_buffers[frame_index]
+    }
+    fn init_swapchain(
+        &mut self,
+        core: &Core,
+        screen: &Screen,
+        submesh_count: u32,
+        instance_count: u32,
+        render_pass: &RenderPass,
+        indirect_task_buffer: &TypedBuffer<vk::DrawMeshTasksIndirectCommandEXT>,
+    ) {
+        self.screen = Some(IndirectTasksScreen::create_command_buffers(
+            &self,
+            core,
+            screen,
+            submesh_count,
+            instance_count,
+            render_pass,
+            indirect_task_buffer,
+        ));
+    }
+}
+
+pub struct IndirectTasksScreen {
+    device: Arc<Device>,
+    command_pool: Arc<CommandPool>,
+    command_buffers: Vec<vk::CommandBuffer>,
+}
+impl Drop for IndirectTasksScreen {
+    fn drop(&mut self) {
+        unsafe {
+            self.device
+                .handle
+                .free_command_buffers(self.command_pool.handle, &self.command_buffers);
+        }
+    }
+}
+impl IndirectTasksScreen {
+    pub fn create_command_buffers(
+        core_draw: &IndirectTasks,
+        core: &Core,
+        screen: &Screen,
+        submesh_count: u32,
+        instance_count: u32,
+        render_pass: &RenderPass,
+        indirect_task_buffer: &TypedBuffer<vk::DrawMeshTasksIndirectCommandEXT>,
+    ) -> Self {
+        let device = core.device.clone();
+        let command_buffers = core
+            .command_pool
+            .allocate_group(screen.swapchain_framebuffers.len() as _);
+
+        for (i, &command_buffer) in command_buffers.iter().enumerate() {
+            let command_buffer_begin_info = vk::CommandBufferBeginInfo::builder()
+                .flags(vk::CommandBufferUsageFlags::SIMULTANEOUS_USE);
+
+            unsafe {
+                device
+                    .handle
+                    .begin_command_buffer(command_buffer, &command_buffer_begin_info)
+                    .expect("Failed to begin recording Command Buffer at beginning!");
+            }
+
+            let clear_values = [
+                vk::ClearValue {
+                    // clear value for color buffer
+                    color: vk::ClearColorValue {
+                        float32: [0.0, 0.0, 0.0, 1.0],
+                    },
+                },
+                vk::ClearValue {
+                    // clear value for depth buffer
+                    depth_stencil: vk::ClearDepthStencilValue {
+                        depth: 1.0,
+                        stencil: 0,
+                    },
+                },
+            ];
+
+            let render_pass_begin_info = vk::RenderPassBeginInfo::builder()
+                .render_pass(render_pass.handle())
+                .framebuffer(screen.swapchain_framebuffers[i])
+                .render_area(vk::Rect2D {
+                    offset: vk::Offset2D { x: 0, y: 0 },
+                    extent: screen.swapchain().extent,
+                })
+                .clear_values(&clear_values);
+
+            unsafe {
+                device.handle.cmd_begin_render_pass(
+                    command_buffer,
+                    &render_pass_begin_info,
+                    vk::SubpassContents::INLINE,
+                );
+
+                device.handle.cmd_set_scissor(
+                    command_buffer,
+                    0,
+                    &[vk::Rect2D {
+                        offset: vk::Offset2D { x: 0, y: 0 },
+                        extent: screen.swapchain().extent,
+                    }],
+                );
+                device.handle.cmd_set_viewport(
+                    command_buffer,
+                    0,
+                    &[vk::Viewport {
+                        x: 0.0,
+                        y: 0.0,
+                        width: screen.swapchain().extent.width as _,
+                        height: screen.swapchain().extent.height as _,
+                        min_depth: 0.0,
+                        max_depth: 1.0,
+                    }],
+                );
+
+                device.handle.cmd_bind_pipeline(
+                    command_buffer,
+                    vk::PipelineBindPoint::GRAPHICS,
+                    core_draw.graphics_pipeline.handle(),
+                );
+
+                //let vertex_buffers = [vertex_buffer];
+                //let offsets = [0_u64];
+                let descriptor_sets_to_bind = [core_draw.descriptor_sets[i].handle()];
+
+                //device.cmd_bind_vertex_buffers(command_buffer, 0, &vertex_buffers, &offsets);
+                //device.cmd_bind_index_buffer(
+                //    command_buffer,
+                //    index_buffer,
+                //    0,
+                //    vk::IndexType::UINT32,
+                //);
+                device.handle.cmd_bind_descriptor_sets(
+                    command_buffer,
+                    vk::PipelineBindPoint::GRAPHICS,
+                    core_draw.graphics_pipeline.layout(),
+                    0,
+                    &descriptor_sets_to_bind,
+                    &[],
+                );
+
+                device.fn_mesh_shader.cmd_draw_mesh_tasks_indirect(
+                    command_buffer,
+                    indirect_task_buffer.buffer(),
+                    0,
+                    instance_count,
+                    indirect_task_buffer.stride() as _,
+                );
+                // device.cmd_draw_indexed(
+                //     command_buffer,
+                //     RECT_TEX_COORD_INDICES_DATA.len() as u32,
+                //     1,
+                //     0,
+                //     0,
+                //     0,
+                // );
+
+                device.handle.cmd_end_render_pass(command_buffer);
+
+                device
+                    .handle
+                    .end_command_buffer(command_buffer)
+                    .expect("Failed to record Command Buffer at Ending!");
+            }
+        }
+
+        Self {
+            command_buffers,
+            device,
+            command_pool: core.command_pool.clone(),
+        }
+    }
 }
 
 pub fn create_descriptor_set_layout(device: Arc<Device>) -> Arc<DescriptorSetLayout> {
@@ -189,7 +289,7 @@ pub fn create_descriptor_set_layout(device: Arc<Device>) -> Arc<DescriptorSetLay
 
 pub fn create_graphics_pipeline(
     device: Arc<Device>,
-    render_pass: vk::RenderPass,
+    render_pass: &RenderPass,
     swapchain_extent: vk::Extent2D,
     ubo_set_layout: Arc<DescriptorSetLayout>,
 ) -> Pipeline {
@@ -341,6 +441,9 @@ pub fn create_graphics_pipeline(
         ..Default::default()
     };
 
+    let dynamic_state_info = vk::PipelineDynamicStateCreateInfo::builder()
+        .dynamic_states(&[vk::DynamicState::SCISSOR, vk::DynamicState::VIEWPORT]);
+
     let pipeline_layout = unsafe {
         device
             .handle
@@ -348,21 +451,33 @@ pub fn create_graphics_pipeline(
             .expect("Failed to create pipeline layout!")
     };
 
-    let graphic_pipeline_create_infos = [vk::GraphicsPipelineCreateInfo {
-        stage_count: shader_stages.len() as u32,
-        p_stages: shader_stages.as_ptr(),
-        p_viewport_state: &viewport_state_create_info,
-        p_rasterization_state: &rasterization_statue_create_info,
-        p_multisample_state: &multisample_state_create_info,
-        p_depth_stencil_state: &depth_state_create_info,
-        p_color_blend_state: &color_blend_state,
-        layout: pipeline_layout,
-        render_pass,
-        subpass: 0,
-        base_pipeline_handle: vk::Pipeline::null(),
-        base_pipeline_index: -1,
-        ..Default::default()
-    }];
+    let graphic_pipeline_create_infos = [vk::GraphicsPipelineCreateInfo::builder()
+        .stages(&shader_stages)
+        .rasterization_state(&rasterization_statue_create_info)
+        .viewport_state(&viewport_state_create_info)
+        .multisample_state(&multisample_state_create_info)
+        .depth_stencil_state(&depth_state_create_info)
+        .color_blend_state(&color_blend_state)
+        .dynamic_state(&dynamic_state_info)
+        .layout(pipeline_layout)
+        .render_pass(render_pass.handle())
+        .build()];
+
+    //  {
+    //     stage_count: shader_stages.len() as u32,
+    //     p_stages: shader_stages.as_ptr(),
+    //     p_viewport_state: &viewport_state_create_info,
+    //     p_rasterization_state: &rasterization_statue_create_info,
+    //     p_multisample_state: &multisample_state_create_info,
+    //     p_depth_stencil_state: &depth_state_create_info,
+    //     p_color_blend_state: &color_blend_state,
+    //     layout: pipeline_layout,
+    //     render_pass,
+    //     subpass: 0,
+    //     base_pipeline_handle: vk::Pipeline::null(),
+    //     base_pipeline_index: -1,
+    //     ..Default::default()
+    // };
 
     let graphics_pipelines = unsafe {
         device

@@ -5,7 +5,8 @@
 #extension GL_EXT_control_flow_attributes: require
 #extension GL_ARB_separate_shader_objects: enable
 
-#include "shaders/src/mesh_task_payload.glsl"
+#include "mesh_task_payload.glsl"
+#include "mesh_frag_payload.glsl"
 
 
 const uint MAX_PRIMITIVES = 126;
@@ -53,10 +54,7 @@ layout (std430, binding = 4) readonly buffer InputBufferV {
 layout (local_size_x = GROUP_SIZE, local_size_y = 1, local_size_z = 1) in;
 layout (triangles, max_vertices = MAX_VERTS, max_primitives = MAX_PRIMITIVES) out;
 
-layout (location = 0) out Interpolants {
-    vec3 fragColor;
-    vec2 fragTexCoord;
-} OUT[];
+layout (location = 0) out Interpolants OUT[];
 
 
 taskPayloadSharedEXT MeshTaskPayload payload;

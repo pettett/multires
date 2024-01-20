@@ -6,8 +6,8 @@ use gpu_allocator::vulkan::Allocator;
 use crate::{
     core::Core,
     utility::{
-        device::Device, image::Image, physical_device::PhysicalDevice,
-        render_pass::create_render_pass, swapchain::Swapchain,
+        device::Device, image::Image, physical_device::PhysicalDevice, render_pass::RenderPass,
+        swapchain::Swapchain,
     },
     VkHandle,
 };
@@ -17,7 +17,6 @@ pub struct Screen {
     core: Arc<Core>,
     swapchain: Option<Swapchain>,
     depth: Option<Arc<Image>>,
-    pub render_pass: vk::RenderPass,
     pub swapchain_framebuffers: Vec<vk::Framebuffer>,
     pub swapchain_image_views: Vec<vk::ImageView>,
 }
@@ -28,12 +27,15 @@ impl Screen {
         self.swapchain.as_ref().unwrap()
     }
 
+    pub fn depth(&self) -> &Image {
+        self.depth.as_ref().unwrap()
+    }
+
     pub fn new(core: Arc<Core>) -> Self {
         Screen {
             core,
             swapchain: None,
             depth: None,
-            render_pass: vk::RenderPass::null(),
             swapchain_image_views: Vec::new(),
             swapchain_framebuffers: Vec::new(),
         }
@@ -42,11 +44,11 @@ impl Screen {
     pub fn remake_swapchain(
         &mut self,
         graphics_queue: vk::Queue,
+        render_pass: &RenderPass,
         allocator: Arc<Mutex<Allocator>>,
     ) {
         // Cleanup old swapchain
 
-        println!("Remaking swapchain");
         self.swapchain = None;
         self.cleanup();
 
@@ -69,14 +71,6 @@ impl Screen {
             allocator.clone(),
         ));
 
-        self.render_pass = create_render_pass(
-            &self.core.instance.handle,
-            &self.core.device.handle,
-            &self.core.physical_device,
-            self.swapchain().surface_format.format,
-            self.depth.as_ref().unwrap().format(),
-        );
-
         self.swapchain_image_views = Image::create_image_views(
             &self.core.device,
             self.swapchain().surface_format.format,
@@ -85,16 +79,15 @@ impl Screen {
 
         self.swapchain_framebuffers = create_framebuffers(
             &self.core.device.handle,
-            self.render_pass,
+            render_pass.handle(),
             &self.swapchain_image_views,
-            self.depth.as_ref().unwrap().image_view(),
+            self.depth().image_view(),
             self.swapchain().extent,
         );
     }
 
     fn cleanup(&mut self) {
         unsafe {
-            println!("Cleaning up old screen data");
             for &framebuffer in self.swapchain_framebuffers.iter() {
                 self.core
                     .device
@@ -105,11 +98,6 @@ impl Screen {
             for &image_view in self.swapchain_image_views.iter() {
                 self.core.device.handle.destroy_image_view(image_view, None);
             }
-
-            self.core
-                .device
-                .handle
-                .destroy_render_pass(self.render_pass, None);
         }
     }
 }
@@ -147,7 +135,7 @@ fn create_depth_resources(
     )
 }
 
-fn find_depth_format(instance: &ash::Instance, physical_device: &PhysicalDevice) -> vk::Format {
+pub fn find_depth_format(instance: &ash::Instance, physical_device: &PhysicalDevice) -> vk::Format {
     find_supported_format(
         instance,
         physical_device,

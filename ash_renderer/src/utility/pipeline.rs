@@ -28,14 +28,19 @@ impl Pipeline {
         }
     }
 
-    pub fn pipeline(&self) -> vk::Pipeline {
-        self.handle
-    }
-
     pub fn layout(&self) -> vk::PipelineLayout {
         self.layout
     }
 }
+
+impl VkHandle for Pipeline {
+    type VkItem = vk::Pipeline;
+
+    fn handle(&self) -> Self::VkItem {
+        self.handle
+    }
+}
+
 impl Drop for Pipeline {
     fn drop(&mut self) {
         unsafe {

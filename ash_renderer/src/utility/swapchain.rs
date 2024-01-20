@@ -40,6 +40,17 @@ impl SwapChainSupportDetail {
             }
         }
     }
+    pub fn choose_swapchain_format(&self) -> vk::SurfaceFormatKHR {
+        for available_format in &self.formats {
+            if available_format.format == vk::Format::B8G8R8A8_SRGB
+                && available_format.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR
+            {
+                return available_format.clone();
+            }
+        }
+
+        return self.formats.first().unwrap().clone();
+    }
 }
 
 pub struct Swapchain {
@@ -73,7 +84,7 @@ impl Swapchain {
     ) -> Swapchain {
         let swapchain_support = SwapChainSupportDetail::query(physical_device.handle(), &surface);
 
-        let surface_format = Self::choose_swapchain_format(&swapchain_support.formats);
+        let surface_format = swapchain_support.choose_swapchain_format();
         let present_mode = Self::choose_swapchain_present_mode(&swapchain_support.present_modes);
         let extent = Self::choose_swapchain_extent(&swapchain_support.capabilities, window);
 
@@ -142,20 +153,6 @@ impl Swapchain {
             extent,
             images,
         }
-    }
-
-    fn choose_swapchain_format(
-        available_formats: &Vec<vk::SurfaceFormatKHR>,
-    ) -> vk::SurfaceFormatKHR {
-        for available_format in available_formats {
-            if available_format.format == vk::Format::B8G8R8A8_SRGB
-                && available_format.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR
-            {
-                return available_format.clone();
-            }
-        }
-
-        return available_formats.first().unwrap().clone();
     }
 
     fn choose_swapchain_present_mode(
