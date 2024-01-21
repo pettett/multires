@@ -12,7 +12,7 @@ use gpu_allocator::{
 
 use crate::VkHandle;
 
-use super::{command_pool::CommandPool, device::Device, image::find_memory_type};
+use super::{command_pool::CommandPool, device::Device};
 
 pub trait AsBuffer {
     fn buffer(&self) -> vk::Buffer;
@@ -112,19 +112,6 @@ impl<T> TypedBuffer<T> {
         unsafe {
             let ubos = [data];
 
-            //let buffer_size = (std::mem::size_of::<T>() * ubos.len()) as u64;
-
-            // let data_ptr = self
-            //     .buffer
-            //     .device
-            //     .handle
-            //     .map_memory(
-            //         self.buffer.memory(),
-            //         0,
-            //         buffer_size,
-            //         vk::MemoryMapFlags::empty(),
-            //     )
-            //     .expect("Failed to Map Memory") as *mut T;
             let data_ptr = self
                 .buffer
                 .allocation
@@ -132,8 +119,6 @@ impl<T> TypedBuffer<T> {
                 .expect("Failed to Map Memory")
                 .as_ptr() as *mut T;
             data_ptr.copy_from_nonoverlapping(ubos.as_ptr(), ubos.len());
-
-            //    self.buffer.device.handle.unmap_memory(self.buffer.memory());
         }
     }
 
@@ -303,16 +288,6 @@ impl Buffer {
         );
 
         unsafe {
-            //let data_ptr = device
-            //    .handle
-            //    .map_memory(
-            //        staging_buffer.memory(),
-            //        0,
-            //        buffer_size,
-            //        vk::MemoryMapFlags::empty(),
-            //    )
-            //    .expect("Failed to Map Memory") as *mut T;
-
             let data_ptr = staging_buffer
                 .allocation
                 .mapped_ptr()
@@ -320,8 +295,6 @@ impl Buffer {
                 .as_ptr() as *mut T;
 
             data_ptr.copy_from_nonoverlapping(data.as_ptr(), data.len());
-
-            //device.handle.unmap_memory(staging_buffer.memory());
         }
         //THIS is not actually a vertex buffer, but a storage buffer that can be accessed from the mesh shader
         let buffer = Self::new(

@@ -38,7 +38,7 @@ use draw_pipelines::{
     compute_culled_mesh::ComputeCulledMesh, indirect_tasks::IndirectTasks, stub::Stub, DrawPipeline,
 };
 use glam::{Mat4, Quat, Vec3A};
-use gpu_allocator::{vulkan::*, AllocationSizes};
+use gpu_allocator::{vulkan::*, AllocationSizes, AllocatorDebugSettings};
 use gui::{gui::Gui, window::GuiWindow};
 use screen::Screen;
 use utility::{
@@ -70,8 +70,6 @@ pub enum SwitchPipeline {
 }
 
 pub struct App {
-    core: Arc<Core>,
-    screen: Screen,
     world: bevy_ecs::world::World,
     schedule: bevy_ecs::schedule::Schedule,
     camera: Entity,
@@ -108,6 +106,10 @@ pub struct App {
 
     submesh_count: u32,
     app_info_open: bool,
+
+    // Make sure to drop the core last
+    screen: Screen,
+    core: Arc<Core>,
 }
 
 impl App {
@@ -144,7 +146,14 @@ impl App {
                 instance: instance.handle.clone(),
                 device: device.handle.clone(),
                 physical_device: physical_device.handle(),
-                debug_settings: Default::default(),
+                debug_settings: AllocatorDebugSettings {
+                    log_memory_information: false,
+                    log_leaks_on_shutdown: true,
+                    store_stack_traces: false,
+                    log_allocations: false,
+                    log_frees: false,
+                    log_stack_traces: false,
+                },
                 buffer_device_address: true, // Ideally, check the BufferDeviceAddressFeatures struct.
                 allocation_sizes: AllocationSizes::new(1 << 24, 1 << 24), // 16 MB for both
             })
@@ -230,8 +239,8 @@ impl App {
         let mut uniform_transforms = Vec::new();
 
         let mut world: World = World::new();
-        for i in 0..100 {
-            for j in 0..50 {
+        for i in 0..1 {
+            for j in 0..1 {
                 let mut transform = Transform::new_pos(
                     glam::Vec3A::X * i as f32 * 40.0 + glam::Vec3A::Y * j as f32 * 40.0,
                 );

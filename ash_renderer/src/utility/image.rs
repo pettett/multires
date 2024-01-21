@@ -163,15 +163,6 @@ impl Image {
         );
 
         unsafe {
-            // let data_ptr = device
-            //     .handle
-            //     .map_memory(
-            //         staging_buffer.memory(),
-            //         0,
-            //         image_size,
-            //         vk::MemoryMapFlags::empty(),
-            //     )
-            //     .expect("Failed to Map Memory") as *mut u8;
             let data_ptr = staging_buffer
                 .allocation()
                 .mapped_ptr()
@@ -179,8 +170,6 @@ impl Image {
                 .as_ptr() as *mut u8;
 
             data_ptr.copy_from_nonoverlapping(image_data.as_ptr(), image_data.len());
-
-            //device.handle.unmap_memory(staging_buffer.memory());
         }
 
         let texture_image = Self::create_image(
@@ -635,21 +624,6 @@ pub fn copy_buffer_to_image(
             &buffer_image_regions,
         );
     }
-}
-
-pub fn find_memory_type(
-    type_filter: u32,
-    required_properties: vk::MemoryPropertyFlags,
-    mem_properties: &vk::PhysicalDeviceMemoryProperties,
-) -> u32 {
-    for (i, memory_type) in mem_properties.memory_types.iter().enumerate() {
-        if (type_filter & (1 << i)) > 0 && memory_type.property_flags.contains(required_properties)
-        {
-            return i as u32;
-        }
-    }
-
-    panic!("Failed to find suitable memory type!")
 }
 
 pub fn has_stencil_component(format: vk::Format) -> bool {
