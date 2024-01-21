@@ -81,6 +81,20 @@ impl VkHandle for DescriptorSetLayout {
 }
 
 impl DescriptorSet {
+    pub fn new(
+        handle: vk::DescriptorSet,
+        pool: Arc<DescriptorPool>,
+        device: Arc<Device>,
+        buffers: Vec<Arc<Buffer>>,
+    ) -> Self {
+        Self {
+            handle,
+            pool,
+            device,
+            buffers,
+        }
+    }
+
     pub fn create_descriptor_sets(
         device: &Arc<Device>,
         descriptor_pool: &Arc<DescriptorPool>,

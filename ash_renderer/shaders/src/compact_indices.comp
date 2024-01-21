@@ -6,7 +6,7 @@
 
 #extension GL_KHR_shader_subgroup_arithmetic: enable
 
-#include "cluster_data.glsl"
+#include "structs\cluster_data.glsl"
 
 layout(binding = 0) writeonly buffer  ResultIndicies {
     uint result[];

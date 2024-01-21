@@ -201,11 +201,11 @@ impl App {
 
         let data = MultiResMesh::load().unwrap();
 
-        let (submeshs, meshlets) = multires::generate_meshlets(&data);
+        let (clusters, meshlets) = multires::generate_meshlets(&data);
 
         let mut cluster_data = data.generate_cluster_data();
 
-        for (i, submesh) in submeshs.into_iter().enumerate() {
+        for (i, submesh) in clusters.into_iter().enumerate() {
             cluster_data[i].meshlet_start = submesh.meshlet_start;
             cluster_data[i].meshlet_count = submesh.meshlet_count;
         }
@@ -278,7 +278,7 @@ impl App {
 
         println!("Loading command buffers");
 
-        let mut mesh_draw = Stub;
+        let mesh_draw = Stub;
 
         let sync_objects: SyncObjects = SyncObjects::new(device.clone(), MAX_FRAMES_IN_FLIGHT);
 
@@ -341,7 +341,7 @@ impl App {
             render_pass,
 
             draw: Box::new(mesh_draw),
-            switch_pipeline: SwitchPipeline::IndirectTasks,
+            switch_pipeline: SwitchPipeline::ComputeCulledMesh,
 
             uniform_transforms,
             uniform_transform_buffer,

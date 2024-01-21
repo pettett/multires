@@ -5,34 +5,19 @@
 #extension GL_EXT_control_flow_attributes: require
 #extension GL_ARB_separate_shader_objects: enable
 
-#include "mesh_task_payload.glsl"
-#include "mesh_frag_payload.glsl"
-#include "transforms.glsl"
+#include "structs\mesh_task_payload.glsl"
+#include "structs\mesh_frag_payload.glsl"
+#include "structs\camera.glsl" // CameraUniformObject 
+#include "structs\vertex.glsl" // Vertex
+#include "structs\meshlet.glsl" // s_meshlet
 
-
-const uint MAX_PRIMITIVES = 126;
-const uint MAX_VERTS = 64;
+ 
 const uint GROUP_SIZE = 16;
 
 
-struct Vertex {
-    vec4 pos;
-    vec4 normal;
-};
-
-
-// https://github.com/KhronosGroup/Vulkan-Samples/blob/26eb94f79f9c2377cbaa28db2fbd7dd6efb55ffe/framework/api_vulkan_sample.h#L89
-struct s_meshlet
-{
-    uint vertices[MAX_VERTS]; // 64
-    uint indices[MAX_PRIMITIVES]; // 126 triangles, packed into bytes
-    uint vertex_count;
-    uint tri_count;
-};
-
 layout (binding = 0) readonly buffer ModelUniformBufferObject {
     mat4 models[];
-} model;
+};
 
 layout (binding = 5) uniform CameraUniformBufferObject {
     CameraUniformObject ubo; 
@@ -40,12 +25,12 @@ layout (binding = 5) uniform CameraUniformBufferObject {
 
 layout (std430, binding = 3) readonly buffer InputBufferI {
     s_meshlet meshlets[];
-} indices;
+};
 
 // std430 is **really** important
 layout (std430, binding = 4) readonly buffer InputBufferV {
     Vertex verts[];
-} sourceData;
+};
 
 
 
@@ -80,8 +65,8 @@ void main() {
 
 	vec3 colour = integer_to_rgb(meshlet_index);
 
-	const uint vertex_count = min(MAX_VERTS, indices.meshlets[meshlet_index].vertex_count);
-	const uint primitive_count = min(MAX_PRIMITIVES, indices.meshlets[meshlet_index].tri_count);
+	const uint vertex_count = min(MAX_VERTS, meshlets[meshlet_index].vertex_count);
+	const uint primitive_count = min(MAX_PRIMITIVES, meshlets[meshlet_index].tri_count);
 
     SetMeshOutputsEXT(vertex_count, primitive_count);
 
@@ -89,11 +74,11 @@ void main() {
 	[[unroll]]
     for (uint i = local_id; i < vertex_count; i += GROUP_SIZE) {
 
-		uint vert_idx = indices.meshlets[meshlet_index].vertices[i];
+		uint vert_idx = meshlets[meshlet_index].vertices[i];
 		
-		gl_MeshVerticesEXT[i].gl_Position = ubo.view_proj * model.models[payload.instance] * vec4(sourceData.verts[vert_idx].pos.xyz, 1);
+		gl_MeshVerticesEXT[i].gl_Position = ubo.view_proj * models[payload.instance] * vec4(verts[vert_idx].pos.xyz, 1);
 		
-		OUT[i].world_normal = (model.models[payload.instance] * vec4(sourceData.verts[vert_idx].normal.xyz, 0)).xyz;
+		OUT[i].world_normal = (models[payload.instance] * vec4(verts[vert_idx].normal.xyz, 0)).xyz;
 		
 		OUT[i].fragColor = colour;
 		
@@ -102,7 +87,7 @@ void main() {
 
 	[[unroll]]
     for (uint i = local_id; i < primitive_count; i += GROUP_SIZE) {
-		uint tri = indices.meshlets[meshlet_index].indices[i];
+		uint tri = meshlets[meshlet_index].indices[i];
 
 		uint a = (tri >> 0) & 255;
 		uint b = (tri >> 8) & 255;

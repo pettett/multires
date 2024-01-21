@@ -59,7 +59,7 @@ pub trait MultiResData {
 
 impl MultiResData for MultiResMesh {
     fn generate_cluster_data(&self) -> Vec<ClusterData> {
-        let mut all_clusters_data_real_error = Vec::new();
+        let mut clusters = Vec::new();
 
         let mut dag = petgraph::Graph::new();
         let mut clusters_per_lod = vec![Vec::new(); self.lods.len()];
@@ -75,7 +75,7 @@ impl MultiResData for MultiResMesh {
 
                 let index_count = submesh.index_count() as u32;
 
-                all_clusters_data_real_error.push(ClusterData {
+                clusters.push(ClusterData {
                     index_offset: index_sum,
                     index_count,
                     error: submesh.error,
@@ -140,7 +140,7 @@ impl MultiResData for MultiResMesh {
         // .unwrap();
 
         // Search for Co-parents
-        for i in 0..all_clusters_data_real_error.len() {
+        for i in 0..clusters.len() {
             let parents = dag
                 .neighbors_directed(
                     petgraph::graph::node_index(i),
@@ -154,12 +154,12 @@ impl MultiResData for MultiResMesh {
                     let id0 = p0.index().min(p1.index());
                     let id1 = p0.index().max(p1.index());
 
-                    all_clusters_data_real_error[id0].co_parent = id1 as _;
-                    all_clusters_data_real_error[id1].co_parent = id0 as _;
+                    clusters[id0].co_parent = id1 as _;
+                    clusters[id1].co_parent = id0 as _;
 
                     // Set parent pointers for ourself
-                    all_clusters_data_real_error[i].parent0 = (id0 as i32).min(id1 as i32);
-                    all_clusters_data_real_error[i].parent1 = (id0 as i32).max(id1 as i32);
+                    clusters[i].parent0 = (id0 as i32).min(id1 as i32);
+                    clusters[i].parent1 = (id0 as i32).max(id1 as i32);
                 }
                 [] => (), // No parents is allowed. Indexes are already -1 by default.
                 _ => {
@@ -180,10 +180,10 @@ impl MultiResData for MultiResMesh {
                 .map(|x| x.index() as i32)
                 .unwrap_or(-1);
 
-            all_clusters_data_real_error[i].max_child_index = max_child_idx;
+            clusters[i].max_child_index = max_child_idx;
         }
 
-        all_clusters_data_real_error
+        clusters
     }
 
     fn indices_partitions_groups(&self) -> (Vec<u32>, Vec<i32>, Vec<i32>) {

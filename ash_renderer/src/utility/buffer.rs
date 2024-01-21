@@ -31,7 +31,7 @@ pub trait AsBuffer {
 }
 #[repr(transparent)]
 pub struct TypedBuffer<T> {
-    pub buffer: Arc<Buffer>,
+    buffer: Arc<Buffer>,
     _p: PhantomData<T>,
 }
 

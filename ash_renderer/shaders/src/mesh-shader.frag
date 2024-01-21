@@ -4,7 +4,7 @@
 
 #extension GL_GOOGLE_include_directive : enable
 
-#include "mesh_frag_payload.glsl"
+#include "structs\mesh_frag_payload.glsl"
 
 layout (binding = 1) uniform sampler2D texSampler;
 
