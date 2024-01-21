@@ -21,12 +21,12 @@ impl DescriptorPool {
             vk::DescriptorPoolSize {
                 // transform descriptor pool
                 ty: vk::DescriptorType::UNIFORM_BUFFER,
-                descriptor_count: swapchain_images_size * 2,
+                descriptor_count: swapchain_images_size * 4,
             },
             vk::DescriptorPoolSize {
                 // SSBO pool
                 ty: vk::DescriptorType::STORAGE_BUFFER,
-                descriptor_count: 3,
+                descriptor_count: 8,
             },
             vk::DescriptorPoolSize {
                 // sampler descriptor pool
@@ -38,8 +38,7 @@ impl DescriptorPool {
         let descriptor_pool_create_info = vk::DescriptorPoolCreateInfo::builder()
             .pool_sizes(&pool_sizes)
             .max_sets(swapchain_images_size as u32)
-            //.flags(vk::DescriptorPoolCreateFlags::FREE_DESCRIPTOR_SET)
-			;
+            .flags(vk::DescriptorPoolCreateFlags::FREE_DESCRIPTOR_SET);
 
         let pool = unsafe {
             device
@@ -269,13 +268,13 @@ impl Drop for DescriptorSetLayout {
     }
 }
 //FIXME:
-// impl Drop for DescriptorSet {
-//     fn drop(&mut self) {
-//         unsafe {
-//             self.device
-//                 .handle
-//                 .free_descriptor_sets(self.pool.handle, &[self.handle])
-//                 .unwrap();
-//         }
-//     }
-// }
+impl Drop for DescriptorSet {
+    fn drop(&mut self) {
+        unsafe {
+            self.device
+                .handle
+                .free_descriptor_sets(self.pool.handle, &[self.handle])
+                .unwrap();
+        }
+    }
+}

@@ -20,9 +20,6 @@ pub struct Gui {
     window: Arc<winit::window::Window>,
     integration: egui_winit_ash_integration::Integration<GpuAllocator>,
     ui_command_buffers: Vec<vk::CommandBuffer>,
-    allocator: Arc<Mutex<Allocator>>,
-    visualizer: AllocatorVisualizer,
-    visualizer_open: bool,
 }
 
 impl Gui {
@@ -55,15 +52,16 @@ impl Gui {
         Self {
             device,
             integration,
-            allocator,
             window,
             ui_command_buffers,
-            visualizer: AllocatorVisualizer::new(),
-            visualizer_open: true,
         }
     }
 
-    pub fn draw(&mut self, image_index: usize) -> vk::CommandBuffer {
+    pub fn draw(
+        &mut self,
+        image_index: usize,
+        draw_windows: impl FnOnce(&egui::Context),
+    ) -> vk::CommandBuffer {
         let cmd = self.ui_command_buffers[image_index as usize];
 
         let command_buffer_begin_info = vk::CommandBufferBeginInfo::builder();
@@ -78,11 +76,7 @@ impl Gui {
         // //FIXME: this can be offloaded to a different thread
         self.integration.begin_frame(&self.window);
 
-        self.visualizer.render_breakdown_window(
-            &self.integration.context(),
-            &self.allocator.lock().unwrap(),
-            &mut self.visualizer_open,
-        );
+        draw_windows(&self.integration.context());
 
         let output = self.integration.end_frame(&self.window);
 

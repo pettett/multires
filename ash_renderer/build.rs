@@ -61,6 +61,7 @@ fn main() {
             Some("frag") => shaderc::ShaderKind::Fragment,
             Some("mesh") => shaderc::ShaderKind::Mesh,
             Some("task") => shaderc::ShaderKind::Task,
+            Some("comp") => shaderc::ShaderKind::Compute,
             x => {
                 println!("Cannot read shader {:?}", x);
                 continue;

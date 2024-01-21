@@ -30,7 +30,6 @@ pub struct Core {
     pub surface: Arc<Surface>,
     pub queue_family: QueueFamilyIndices,
     pub command_pool: Arc<CommandPool>,
-    pub allocator: Arc<Mutex<Allocator>>,
 
     debug_utils_loader: ash::extensions::ext::DebugUtils,
     debug_messenger: vk::DebugUtilsMessengerEXT,
@@ -85,17 +84,7 @@ impl Core {
         );
 
         let command_pool = CommandPool::new(device.clone(), queue_family.graphics_family.unwrap());
-        let allocator = Arc::new(Mutex::new(
-            Allocator::new(&AllocatorCreateDesc {
-                instance: instance.handle.clone(),
-                device: device.handle.clone(),
-                physical_device: physical_device.handle(),
-                debug_settings: Default::default(),
-                buffer_device_address: true, // Ideally, check the BufferDeviceAddressFeatures struct.
-                allocation_sizes: AllocationSizes::new(1 << 24, 1 << 24), // 16 MB for both
-            })
-            .unwrap(),
-        ));
+
         Arc::new(Core {
             window,
             device,
@@ -106,12 +95,7 @@ impl Core {
             command_pool,
             debug_utils_loader,
             debug_messenger,
-            allocator,
         })
-    }
-
-    pub fn get_allocator(&self) -> MutexGuard<Allocator> {
-        self.allocator.lock().unwrap()
     }
 }
 impl Drop for Core {

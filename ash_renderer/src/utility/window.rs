@@ -71,6 +71,8 @@ impl ProgramProc {
                 Event::MainEventsCleared => {
                     vulkan_app.schedule.run(&mut vulkan_app.world);
 
+                    vulkan_app.update_pipeline();
+
                     vulkan_app.window_ref().request_redraw();
                 }
                 Event::RedrawRequested(_window_id) => {

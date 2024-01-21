@@ -7,9 +7,7 @@ pub mod utility;
 
 use crate::{
     core::Core,
-    draw_pipelines::indirect_tasks::{
-        create_descriptor_set_layout, create_graphics_pipeline, IndirectTasksScreen,
-    },
+    gui::allocator_visualiser_window::AllocatorVisualiserWindow,
     screen::find_depth_format,
     utility::{
         // the mod define some fixed functions that have been learned before.
@@ -36,10 +34,12 @@ use common_renderer::{
     },
     resources::time::Time,
 };
-use draw_pipelines::{indirect_tasks::IndirectTasks, DrawPipeline};
+use draw_pipelines::{
+    compute_culled_mesh::ComputeCulledMesh, indirect_tasks::IndirectTasks, stub::Stub, DrawPipeline,
+};
 use glam::{Mat4, Quat, Vec3A};
 use gpu_allocator::{vulkan::*, AllocationSizes};
-use gui::gui::Gui;
+use gui::{gui::Gui, window::GuiWindow};
 use screen::Screen;
 use utility::{
     buffer::{Buffer, TypedBuffer},
@@ -48,7 +48,7 @@ use utility::{
 };
 use winit::event::WindowEvent;
 
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 use std::{any::Any, sync::Arc};
 
 // Constants
@@ -63,6 +63,12 @@ pub trait VkHandle {
 }
 pub trait VkDeviceOwned: VkHandle<VkItem = vk::Device> {}
 
+pub enum SwitchPipeline {
+    IndirectTasks,
+    ComputeCulledMesh,
+    None,
+}
+
 pub struct App {
     core: Arc<Core>,
     screen: Screen,
@@ -70,6 +76,7 @@ pub struct App {
     schedule: bevy_ecs::schedule::Schedule,
     camera: Entity,
 
+    pub allocator: Arc<Mutex<Allocator>>,
     graphics_queue: vk::Queue,
     present_queue: vk::Queue,
 
@@ -86,14 +93,21 @@ pub struct App {
     descriptor_pool: Arc<DescriptorPool>,
 
     gui: Gui,
+    windows: Vec<Box<dyn GuiWindow>>,
+    switch_pipeline: SwitchPipeline,
 
     sync_objects: SyncObjects,
 
     current_frame: usize,
 
+    vertex_buffer: Arc<Buffer>,
+    meshlet_buffer: Arc<Buffer>,
+    submesh_buffer: Arc<Buffer>,
+
     is_framebuffer_resized: bool,
 
     submesh_count: u32,
+    app_info_open: bool,
 }
 
 impl App {
@@ -125,7 +139,17 @@ impl App {
         let window = &core.window;
         let queue_family = &core.queue_family;
         let surface = &core.surface;
-        let allocator = &core.allocator;
+        let allocator = Arc::new(Mutex::new(
+            Allocator::new(&AllocatorCreateDesc {
+                instance: instance.handle.clone(),
+                device: device.handle.clone(),
+                physical_device: physical_device.handle(),
+                debug_settings: Default::default(),
+                buffer_device_address: true, // Ideally, check the BufferDeviceAddressFeatures struct.
+                allocation_sizes: AllocationSizes::new(1 << 24, 1 << 24), // 16 MB for both
+            })
+            .unwrap(),
+        ));
 
         println!("Loading queues");
         let graphics_queue = unsafe {
@@ -245,29 +269,7 @@ impl App {
 
         println!("Loading command buffers");
 
-        let mut mesh_draw = IndirectTasks::new(
-            core.clone(),
-            &screen,
-            &mut world,
-            &render_pass,
-            screen.swapchain().extent,
-            graphics_queue,
-            descriptor_pool.clone(),
-            uniform_transform_buffer.clone(),
-            &uniform_camera_buffers,
-            vertex_buffer,
-            meshlet_buffer,
-            submesh_buffer,
-            cluster_data.len() as _,
-        );
-
-        mesh_draw.init_swapchain(
-            &core,
-            &screen,
-            cluster_data.len() as _,
-            uniform_transforms.len() as _,
-            &render_pass,
-        );
+        let mut mesh_draw = Stub;
 
         let sync_objects: SyncObjects = SyncObjects::new(device.clone(), MAX_FRAMES_IN_FLIGHT);
 
@@ -307,23 +309,30 @@ impl App {
 
         // cleanup(); the 'drop' function will take care of it.
         App {
+            gui,
+            windows: vec![Box::new(AllocatorVisualiserWindow::new(allocator.clone()))],
+
             core,
             screen,
 
             world,
             schedule,
             camera,
+            allocator,
 
             // vulkan stuff
-            gui,
-
             graphics_queue,
             present_queue,
             uniform_camera,
 
+            vertex_buffer,
+            submesh_buffer,
+            meshlet_buffer,
+
             render_pass,
 
             draw: Box::new(mesh_draw),
+            switch_pipeline: SwitchPipeline::IndirectTasks,
 
             uniform_transforms,
             uniform_transform_buffer,
@@ -338,6 +347,7 @@ impl App {
             is_framebuffer_resized: false,
 
             submesh_count: cluster_data.len() as u32,
+            app_info_open: true,
         }
     }
 }
@@ -406,7 +416,7 @@ impl App {
         let wait_stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
         let signal_semaphores = [self.sync_objects.render_finished_semaphores[self.current_frame]];
 
-        let ui_cmd = self.gui.draw(image_index as usize);
+        let ui_cmd = self.draw_gui(image_index as usize);
 
         let submit_infos = [vk::SubmitInfo::builder()
             .command_buffers(&[self.draw.draw(image_index as usize), ui_cmd])
@@ -463,6 +473,63 @@ impl App {
         self.current_frame = (self.current_frame + 1) % MAX_FRAMES_IN_FLIGHT;
     }
 
+    pub fn update_pipeline(&mut self) {
+        match self.switch_pipeline {
+            SwitchPipeline::None => return,
+            _ => self.core.device.wait_device_idle(),
+        }
+
+        self.draw = Box::new(Stub);
+
+        match self.switch_pipeline {
+            SwitchPipeline::IndirectTasks => {
+                self.draw = Box::new(IndirectTasks::new(
+                    self.core.clone(),
+                    &self.screen,
+                    &mut self.world,
+                    self.allocator.clone(),
+                    &self.render_pass,
+                    self.graphics_queue,
+                    self.descriptor_pool.clone(),
+                    self.uniform_transform_buffer.clone(),
+                    &self.uniform_camera_buffers,
+                    self.vertex_buffer.clone(),
+                    self.meshlet_buffer.clone(),
+                    self.submesh_buffer.clone(),
+                    self.submesh_count,
+                ));
+            }
+            SwitchPipeline::ComputeCulledMesh => {
+                self.draw = Box::new(ComputeCulledMesh::new(
+                    self.core.clone(),
+                    &self.screen,
+                    &mut self.world,
+                    self.allocator.clone(),
+                    &self.render_pass,
+                    self.graphics_queue,
+                    self.descriptor_pool.clone(),
+                    self.uniform_transform_buffer.clone(),
+                    &self.uniform_camera_buffers,
+                    self.vertex_buffer.clone(),
+                    self.meshlet_buffer.clone(),
+                    self.submesh_buffer.clone(),
+                    self.submesh_count,
+                ));
+            }
+            SwitchPipeline::None => (),
+        }
+
+        self.draw.init_swapchain(
+            &self.core,
+            &self.screen,
+            self.submesh_count,
+            self.uniform_transforms.len() as _,
+            &self.render_pass,
+        );
+
+        self.switch_pipeline = SwitchPipeline::None
+    }
+
     fn recreate_swapchain(&mut self) {
         self.core.device.wait_device_idle();
 
@@ -471,7 +538,7 @@ impl App {
         self.screen.remake_swapchain(
             self.graphics_queue,
             &self.render_pass,
-            self.core.allocator.clone(),
+            self.allocator.clone(),
         );
 
         self.draw.init_swapchain(
@@ -492,5 +559,35 @@ impl App {
 
     fn window_ref(&self) -> &winit::window::Window {
         &self.core.window
+    }
+    pub fn get_allocator(&self) -> MutexGuard<Allocator> {
+        self.allocator.lock().unwrap()
+    }
+    fn draw_gui(&mut self, image_index: usize) -> vk::CommandBuffer {
+        self.gui.draw(image_index, |ctx| {
+            for w in &mut self.windows {
+                w.draw(ctx);
+            }
+            egui::Window::new("App Config")
+                .open(&mut self.app_info_open)
+                .show(ctx, |ui| {
+                    if ui.button("Indirect Tasks").clicked() {
+                        self.switch_pipeline = SwitchPipeline::IndirectTasks;
+                    }
+                    if ui.button("Compute Culled Mesh").clicked() {
+                        self.switch_pipeline = SwitchPipeline::ComputeCulledMesh;
+                    }
+                });
+
+            egui::TopBottomPanel::top("test").show(ctx, |ui| {
+                egui::menu::bar(ui, |ui| {
+                    for w in &mut self.windows {
+                        let (open, name) = w.state();
+                        ui.checkbox(open, name);
+                    }
+                    ui.checkbox(&mut self.app_info_open, "App Info");
+                });
+            });
+        })
     }
 }

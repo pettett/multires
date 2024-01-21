@@ -28,7 +28,7 @@ use super::{
     init_multisample_state_create_info, init_rasterization_statue_create_info, DrawPipeline,
 };
 
-pub struct IndirectTasks {
+pub struct ComputeCulledMesh {
     graphics_pipeline: Pipeline,
     descriptor_sets: Vec<DescriptorSet>,
     screen: Option<ScreenData>,
@@ -37,7 +37,7 @@ pub struct IndirectTasks {
     indirect_task_buffer: Arc<TypedBuffer<vk::DrawMeshTasksIndirectCommandEXT>>,
 }
 
-impl IndirectTasks {
+impl ComputeCulledMesh {
     pub fn new(
         core: Arc<Core>,
         screen: &Screen,
@@ -96,15 +96,15 @@ impl IndirectTasks {
         Self {
             graphics_pipeline,
             descriptor_sets,
-            descriptor_pool,
             screen: None,
-            indirect_task_buffer,
             core,
+            descriptor_pool,
+            indirect_task_buffer,
         }
     }
 }
 
-impl DrawPipeline for IndirectTasks {
+impl DrawPipeline for ComputeCulledMesh {
     fn draw(&self, frame_index: usize) -> vk::CommandBuffer {
         self.screen.as_ref().unwrap().command_buffers[frame_index]
     }
@@ -133,18 +133,10 @@ struct ScreenData {
     command_pool: Arc<CommandPool>,
     command_buffers: Vec<vk::CommandBuffer>,
 }
-impl Drop for ScreenData {
-    fn drop(&mut self) {
-        unsafe {
-            self.device
-                .handle
-                .free_command_buffers(self.command_pool.handle, &self.command_buffers);
-        }
-    }
-}
+
 impl ScreenData {
     pub fn create_command_buffers(
-        core_draw: &IndirectTasks,
+        core_draw: &ComputeCulledMesh,
         core: &Core,
         screen: &Screen,
         submesh_count: u32,
@@ -351,15 +343,21 @@ fn create_graphics_pipeline(
 ) -> Pipeline {
     let task_shader_module = ShaderModule::new(
         device.clone(),
-        bytemuck::cast_slice(include_bytes!("../../shaders/spv/mesh-shader.task")),
+        bytemuck::cast_slice(include_bytes!(
+            "../../shaders/spv/mesh_shader_compute_cull.task"
+        )),
     );
     let mesh_shader_module = ShaderModule::new(
         device.clone(),
-        bytemuck::cast_slice(include_bytes!("../../shaders/spv/mesh-shader.mesh")),
+        bytemuck::cast_slice(include_bytes!(
+            "../../shaders/spv/mesh_shader_compute_cull.mesh"
+        )),
     );
     let frag_shader_module = ShaderModule::new(
         device.clone(),
-        bytemuck::cast_slice(include_bytes!("../../shaders/spv/mesh-shader.frag")),
+        bytemuck::cast_slice(include_bytes!(
+            "../../shaders/spv/mesh_shader_compute_cull.frag"
+        )),
     );
 
     let main_function_name = CString::new("main").unwrap(); // the beginning function name in shader code.

@@ -1,0 +1,153 @@
+#version 460
+#extension GL_EXT_mesh_shader: require
+#extension GL_ARB_separate_shader_objects: enable
+#extension GL_GOOGLE_include_directive : enable
+#extension GL_ARB_shader_draw_parameters: require
+
+#extension GL_KHR_shader_subgroup_arithmetic: enable
+
+#include "mesh_task_payload.glsl"
+#include "cluster_data.glsl"
+
+const float LARGE_ERROR = 100000000000000000.0;
+
+struct IndirectDrawData {
+    uint group_size_x;
+	uint group_size_y;
+	uint group_size_z;
+};
+// Bindings and layout
+
+
+layout (binding = 0) readonly buffer ModelUniformBufferObject {
+    mat4 models[];
+} model;
+
+layout (std430, binding = 2) readonly buffer InputBufferC {
+    ClusterData clusters[];
+} cluster_data;
+
+layout (binding = 5) uniform CameraUniformBufferObject {
+    mat4 view_proj;
+	vec3 camera_pos;
+	float target_error;
+} ubo;
+
+// Access to the indirect draw params for the next frame
+layout (std430, binding = 6) buffer IndirectDrawBuffer {
+    IndirectDrawData data[]; 
+} indirect_draw;
+
+layout (local_size_x = TASK_GROUP_SIZE, local_size_y = 1, local_size_z = 1) in;
+
+
+// Workgroup Shared memory
+//shared uint max_count;
+taskPayloadSharedEXT MeshTaskPayload payload;
+
+uint max_cluster(){
+	return min(cluster_data.clusters.length(), gl_NumWorkGroups.x * TASK_GROUP_SIZE);
+}
+
+float cluster_error(uint idx, uint idy) {
+    bool out_of_range = idx >= max_cluster();
+    if (out_of_range) {
+        return LARGE_ERROR;
+    } else {
+		vec3 vec = cluster_data.clusters[idx].center - (inverse(model.models[idy]) * vec4(ubo.camera_pos, 1.0)).xyz;
+		float inv_center_distance = inversesqrt(dot(vec, vec));
+        return cluster_data.clusters[idx].error * (cluster_data.clusters[idx].radius * inv_center_distance);
+		//return cluster_data.clusters[idx].error;
+	}
+}
+
+void main() {
+    uint cluster_index = gl_GlobalInvocationID.x;
+    uint local_index = gl_LocalInvocationID.x;
+    uint instance_index = gl_DrawID;
+	
+	if (cluster_index == 0){
+		// Agressively lower the amount of tasks being invoked, and allow atomic max function below to pick it up
+		indirect_draw.data[instance_index].group_size_x -= 1;
+	}
+	memoryBarrierBuffer();
+
+    if (cluster_index >= max_cluster()) {
+    	payload.meshlet_start[local_index] = -1;
+    	payload.meshlet_count[local_index] = -1;
+        return;
+    }
+
+
+	// Calculate if this cluster should be drawn:
+	// draw_error >= min(self.error, self.co-parent.error) 
+	// draw_error < min(parent0.error, parent1.error)
+
+	// lots of negative zeros
+    float this_error = -LARGE_ERROR;
+
+    if (cluster_data.clusters[cluster_index].co_parent >= 0) {
+        this_error = min(
+			cluster_error(cluster_index, instance_index), 
+			cluster_error(uint(cluster_data.clusters[cluster_index].co_parent), instance_index)
+			);
+    }
+
+	// lots of zeros
+    float parent_error = LARGE_ERROR;
+
+	int parent0 = cluster_data.clusters[cluster_index].parent0;
+	int parent1 = cluster_data.clusters[cluster_index].parent1;
+
+    if (parent0 >= 0) { // If we have one parent, we are guarenteed to have another.
+        parent_error = min(
+			cluster_error(uint(parent0), instance_index), 
+			cluster_error(uint(parent1), instance_index)
+			);
+    }
+
+	float error =  ubo.target_error;
+
+    bool draw = error >= this_error && error < parent_error;
+
+    payload.meshlet_start[local_index] = draw ? cluster_data.clusters[cluster_index].meshlet_start : -1;
+    payload.meshlet_count[local_index] = draw ? cluster_data.clusters[cluster_index].meshlet_count : 0;
+    payload.instance = instance_index;
+	
+	// Calculate the largest possible index for the purpose of narrowing down the number of tasks dispatched.
+	// May cause empty spots if the camera moves through more than 1 LOD per frame (highly unlikely)
+	
+	// (if not -1) parent0 < parent1 < cluster_index < max_child_index
+	// (if root)   -1 <= -1 < cluster_index < max_child_index
+	// (if leaf)   -1 < parent0 < parent1 < cluster_index 
+
+	uint max_needed_workgroups = (draw ? 
+				cluster_index :  // Perfect error, continue doing this
+				(error < this_error ? 
+					max(cluster_data.clusters[cluster_index].max_child_index, cluster_index)  : // Error is lower then ours, draw a child if we have one
+					parent1 == -1 ? cluster_index : parent1  // Error is higher then ours, only need to draw the parent (parent1 > parent0)
+				)
+			) / TASK_GROUP_SIZE + 2;												
+
+	//max_needed_workgroups = min(max_needed_workgroups, max_cluster() / TASK_GROUP_SIZE + 1);
+
+	//max_count = 0;
+
+	//barrier();
+
+	//if (local_index % 2 == 0){
+	//	atomicMax(max_count, max(payload.meshlet_count[local_index], payload.meshlet_count[local_index+1]) );
+	//}
+
+	uint max_count = subgroupMax(payload.meshlet_count[local_index]);
+	
+	uint subroup_max_needed_workgroups = subgroupMax(max_needed_workgroups);
+
+	if (subgroupElect()){
+		atomicMax(indirect_draw.data[instance_index].group_size_x, subroup_max_needed_workgroups);
+    	EmitMeshTasksEXT(max_count, TASK_GROUP_SIZE, 1);
+	}
+
+	
+
+} 
