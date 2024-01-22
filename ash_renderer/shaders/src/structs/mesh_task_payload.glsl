@@ -1,6 +1,6 @@
 // This must be equal to or less than subgroup size
 
-const uint TASK_GROUP_SIZE = 16;
+const uint TASK_GROUP_SIZE = 4;
 
 struct MeshTaskPayload {
     uint instance;

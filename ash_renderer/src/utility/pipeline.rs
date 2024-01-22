@@ -6,14 +6,17 @@ use crate::VkHandle;
 
 use super::{descriptor_pool::DescriptorSetLayout, device::Device};
 
-pub struct Pipeline {
+pub struct Pipeline<const T: bool> {
     device: Arc<Device>,
     handle: vk::Pipeline,
     layout: vk::PipelineLayout,
     pub ubo_layout: Arc<DescriptorSetLayout>,
 }
 
-impl Pipeline {
+pub type GraphicsPipeline = Pipeline<true>;
+pub type ComputePipeline = Pipeline<false>;
+
+impl<const T: bool> Pipeline<T> {
     pub fn new(
         device: Arc<Device>,
         handle: vk::Pipeline,
@@ -32,8 +35,55 @@ impl Pipeline {
         self.layout
     }
 }
+impl ComputePipeline {
+    pub fn create_compute_pipeline(
+        device: Arc<Device>,
+        shader: &[u8],
+        ubo_layout: Arc<DescriptorSetLayout>,
+    ) -> ComputePipeline {
+        let comp_shader_module = ShaderModule::new(device.clone(), bytemuck::cast_slice(shader));
 
-impl VkHandle for Pipeline {
+        let main_function_name = CString::new("main").unwrap(); // the beginning function name in shader code.
+
+        let shader_stage = vk::PipelineShaderStageCreateInfo::builder()
+            .module(comp_shader_module.handle())
+            .name(&main_function_name)
+            .stage(vk::ShaderStageFlags::COMPUTE)
+            .build();
+
+        let set_layouts = [ubo_layout.handle()];
+
+        let pipeline_layout_create_info =
+            vk::PipelineLayoutCreateInfo::builder().set_layouts(&set_layouts);
+
+        let pipeline_layout = unsafe {
+            device
+                .handle
+                .create_pipeline_layout(&pipeline_layout_create_info, None)
+                .expect("Failed to create pipeline layout!")
+        };
+
+        let graphic_pipeline_create_infos = [vk::ComputePipelineCreateInfo::builder()
+            .stage(shader_stage)
+            .layout(pipeline_layout)
+            .build()];
+
+        let compute_pipelines = unsafe {
+            device
+                .handle
+                .create_compute_pipelines(
+                    vk::PipelineCache::null(),
+                    &graphic_pipeline_create_infos,
+                    None,
+                )
+                .expect("Failed to create Compute Pipeline!.")
+        };
+
+        ComputePipeline::new(device, compute_pipelines[0], pipeline_layout, ubo_layout)
+    }
+}
+
+impl<const T: bool> VkHandle for Pipeline<T> {
     type VkItem = vk::Pipeline;
 
     fn handle(&self) -> Self::VkItem {
@@ -41,7 +91,7 @@ impl VkHandle for Pipeline {
     }
 }
 
-impl Drop for Pipeline {
+impl<const T: bool> Drop for Pipeline<T> {
     fn drop(&mut self) {
         unsafe {
             self.device.handle.destroy_pipeline(self.handle, None);

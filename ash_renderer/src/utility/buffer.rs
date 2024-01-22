@@ -12,20 +12,40 @@ use gpu_allocator::{
 
 use crate::VkHandle;
 
-use super::{command_pool::CommandPool, device::Device};
+use super::{command_pool::CommandPool, descriptor_pool::DescriptorSet, device::Device};
 
-pub trait AsBuffer {
-    fn buffer(&self) -> vk::Buffer;
+pub trait AsBuffer: VkHandle<VkItem = vk::Buffer> {
+    fn buffer(self: &Arc<Self>) -> Arc<Buffer>;
 
     fn allocation(&self) -> &Allocation;
 
     fn size(&self) -> vk::DeviceSize;
 
+    fn usage(&self) -> vk::BufferUsageFlags;
+
     fn full_range_descriptor(&self) -> vk::DescriptorBufferInfo {
         vk::DescriptorBufferInfo {
-            buffer: self.buffer(),
+            buffer: self.handle(),
             offset: 0,
             range: self.size(),
+        }
+    }
+    fn write_descriptor_sets(
+        &self,
+        dst_set: vk::DescriptorSet,
+        descriptor_type: vk::DescriptorType,
+        info: &[vk::DescriptorBufferInfo; 1],
+        dst_binding: u32,
+    ) -> vk::WriteDescriptorSet {
+        vk::WriteDescriptorSet {
+            // transform uniform
+            dst_set,
+            dst_binding,
+            dst_array_element: 0,
+            descriptor_count: 1,
+            descriptor_type,
+            p_buffer_info: info.as_ptr(),
+            ..Default::default()
         }
     }
 }
@@ -43,9 +63,20 @@ impl<T> TypedBuffer<T> {
         }
     }
 }
+
+impl<T> VkHandle for TypedBuffer<T> {
+    type VkItem = vk::Buffer;
+
+    fn handle(&self) -> Self::VkItem {
+        assert_ne!(self.buffer.handle, vk::Buffer::null());
+
+        self.buffer.handle
+    }
+}
+
 impl<T> AsBuffer for TypedBuffer<T> {
-    fn buffer(&self) -> vk::Buffer {
-        self.buffer.handle()
+    fn buffer(self: &Arc<Self>) -> Arc<Buffer> {
+        self.buffer.clone()
     }
 
     fn allocation(&self) -> &Allocation {
@@ -55,6 +86,10 @@ impl<T> AsBuffer for TypedBuffer<T> {
     fn size(&self) -> vk::DeviceSize {
         self.buffer.size()
     }
+
+    fn usage(&self) -> vk::BufferUsageFlags {
+        self.buffer.usage
+    }
 }
 impl<T> TypedBuffer<T> {
     pub fn new_per_swapchain(
@@ -62,7 +97,7 @@ impl<T> TypedBuffer<T> {
         allocator: Arc<Mutex<Allocator>>,
         location: MemoryLocation,
         swapchain_image_count: usize,
-    ) -> Vec<Self> {
+    ) -> Vec<Arc<Self>> {
         let buffer_size = ::std::mem::size_of::<T>();
 
         let mut uniform_buffers = vec![];
@@ -75,7 +110,7 @@ impl<T> TypedBuffer<T> {
                 vk::BufferUsageFlags::UNIFORM_BUFFER,
                 MemoryLocation::CpuToGpu,
             );
-            uniform_buffers.push(TypedBuffer::new(Arc::new(uniform_buffer)));
+            uniform_buffers.push(Arc::new(TypedBuffer::new(Arc::new(uniform_buffer))));
         }
 
         uniform_buffers
@@ -161,8 +196,8 @@ pub struct Buffer {
 }
 
 impl AsBuffer for Buffer {
-    fn buffer(&self) -> vk::Buffer {
-        self.handle
+    fn buffer(self: &Arc<Self>) -> Arc<Buffer> {
+        self.clone()
     }
 
     fn allocation(&self) -> &Allocation {
@@ -171,6 +206,10 @@ impl AsBuffer for Buffer {
 
     fn size(&self) -> vk::DeviceSize {
         self.size
+    }
+
+    fn usage(&self) -> vk::BufferUsageFlags {
+        self.usage
     }
 }
 impl Drop for Buffer {

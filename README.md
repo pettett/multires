@@ -14,12 +14,14 @@ This format of mesh is perfect for the flexibility introduced by Mesh Shaders. `
 
 ### Ash-Renderer
 
-- Compute culling stage (CCS)
-   	- CCS -> Index compaction pipeline
-   	- CCS -> Mesh Shader output
+- [ ] Compute culling stage (CCS)
+   	- [ ] CCS -> Index compaction pipeline
+   	- [x] CCS -> Mesh Shader output
 
 - LOD viewer pipeline
 - Instanced renderer pipeline
+
+- Spacial locality for clusters in the same group
 
 - Investigations:
    	- 2 phase occlusion culling

@@ -1,6 +1,7 @@
 use std::{ptr, sync::Arc};
 
 use ash::vk::{self, DescriptorSetLayoutCreateInfo};
+use egui::ahash::HashMap;
 
 use crate::{CameraUniformBufferObject, VkHandle};
 
@@ -70,6 +71,7 @@ impl VkHandle for DescriptorSet {
 pub struct DescriptorSetLayout {
     handle: vk::DescriptorSetLayout,
     device: Arc<Device>,
+    types: HashMap<usize, vk::DescriptorType>,
 }
 
 impl VkHandle for DescriptorSetLayout {
@@ -80,168 +82,63 @@ impl VkHandle for DescriptorSetLayout {
     }
 }
 
+pub enum DescriptorWriteData {
+    Buffer { buf: Arc<Buffer> },
+    Empty,
+    //TODO:
+    Image,
+}
+
 impl DescriptorSet {
     pub fn new(
         handle: vk::DescriptorSet,
         pool: Arc<DescriptorPool>,
+        layout: Arc<DescriptorSetLayout>,
         device: Arc<Device>,
-        buffers: Vec<Arc<Buffer>>,
+        buffers: Vec<DescriptorWriteData>,
     ) -> Self {
+        let descriptor_info: Vec<_> = buffers
+            .iter()
+            .map(|w| match w {
+                DescriptorWriteData::Buffer { buf, .. } => Some([buf.full_range_descriptor()]),
+                _ => None,
+            })
+            .collect();
+
+        let descriptor_write_sets: Vec<_> = buffers
+            .iter()
+            .enumerate()
+            .filter_map(|(i, w)| match w {
+                DescriptorWriteData::Buffer { buf } => Some(buf.write_descriptor_sets(
+                    handle,
+                    layout.types[&i],
+                    descriptor_info[i].as_ref().unwrap(),
+                    i as _,
+                )),
+                _ => None,
+            })
+            .collect();
+
+        let buffers: Vec<_> = buffers
+            .into_iter()
+            .filter_map(|w| match w {
+                DescriptorWriteData::Buffer { buf, .. } => Some(buf),
+                _ => None,
+            })
+            .collect();
+
+        unsafe {
+            device
+                .handle
+                .update_descriptor_sets(&descriptor_write_sets, &[]);
+        }
+
         Self {
             handle,
             pool,
             device,
             buffers,
         }
-    }
-
-    pub fn create_descriptor_sets(
-        device: &Arc<Device>,
-        descriptor_pool: &Arc<DescriptorPool>,
-        descriptor_set_layout: &Arc<DescriptorSetLayout>,
-        uniform_transform_buffer: &Arc<Buffer>,
-        uniform_camera_buffers: &[impl AsBuffer],
-        vertex_buffer: &Arc<Buffer>,
-        meshlet_buffer: &Arc<Buffer>,
-        submesh_buffer: &Arc<Buffer>,
-        indirect_draw_array_buffer: &Arc<impl AsBuffer>,
-        //texture: &Image,
-        swapchain_images_size: usize,
-    ) -> Vec<DescriptorSet> {
-        let mut layouts: Vec<vk::DescriptorSetLayout> = vec![];
-        for _ in 0..swapchain_images_size {
-            layouts.push(descriptor_set_layout.handle());
-        }
-
-        let descriptor_set_allocate_info = vk::DescriptorSetAllocateInfo::builder()
-            .descriptor_pool(descriptor_pool.handle)
-            .set_layouts(&layouts);
-
-        let vk_descriptor_sets = unsafe {
-            device
-                .handle
-                .allocate_descriptor_sets(&descriptor_set_allocate_info)
-                .expect("Failed to allocate descriptor sets!")
-        };
-
-        let descriptor_sets: Vec<_> = vk_descriptor_sets
-            .into_iter()
-            .map(|set| DescriptorSet {
-                handle: set,
-                device: device.clone(),
-                buffers: vec![
-                    vertex_buffer.clone(),
-                    uniform_transform_buffer.clone(),
-                    meshlet_buffer.clone(),
-                    submesh_buffer.clone(),
-                ],
-                pool: descriptor_pool.clone(),
-            })
-            .collect();
-
-        for (i, descriptor_set) in descriptor_sets.iter().enumerate() {
-            let descriptor_transform_buffer_infos =
-                [uniform_transform_buffer.full_range_descriptor()];
-            let descriptor_camera_buffer_infos =
-                [uniform_camera_buffers[i].full_range_descriptor()];
-
-            let vertex_buffer_infos = [vertex_buffer.full_range_descriptor()];
-            let index_buffer_infos = [meshlet_buffer.full_range_descriptor()];
-            let submesh_buffer_infos = [submesh_buffer.full_range_descriptor()];
-            let indirect_draw_array_buffer_infos =
-                [indirect_draw_array_buffer.full_range_descriptor()];
-
-            // let descriptor_image_infos = [vk::DescriptorImageInfo {
-            //     sampler: texture.sampler(),
-            //     image_view: texture.image_view(),
-            //     image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-            // }];
-
-            let descriptor_write_sets = [
-                vk::WriteDescriptorSet {
-                    // transform uniform
-                    dst_set: descriptor_set.handle,
-                    dst_binding: 0,
-                    dst_array_element: 0,
-                    descriptor_count: 1,
-                    descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
-
-                    p_buffer_info: descriptor_transform_buffer_infos.as_ptr(),
-                    ..Default::default()
-                },
-                vk::WriteDescriptorSet {
-                    // transform uniform
-                    dst_set: descriptor_set.handle,
-                    dst_binding: 5,
-                    dst_array_element: 0,
-                    descriptor_count: 1,
-                    descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
-
-                    p_buffer_info: descriptor_camera_buffer_infos.as_ptr(),
-                    ..Default::default()
-                },
-                // vk::WriteDescriptorSet {
-                //     // sampler uniform
-                //     dst_set: descriptor_set.handle,
-                //     dst_binding: 1,
-                //     dst_array_element: 0,
-                //     descriptor_count: 1,
-                //     descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-                //     p_image_info: descriptor_image_infos.as_ptr(),
-                //     ..Default::default()
-                // },
-                vk::WriteDescriptorSet {
-                    // submesh info buffer
-                    dst_set: descriptor_set.handle,
-                    dst_binding: 2,
-                    dst_array_element: 0,
-                    descriptor_count: 1,
-                    descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
-
-                    p_buffer_info: submesh_buffer_infos.as_ptr(),
-                    ..Default::default()
-                },
-                vk::WriteDescriptorSet {
-                    // meshlet info buffer
-                    dst_set: descriptor_set.handle,
-                    dst_binding: 3,
-                    dst_array_element: 0,
-                    descriptor_count: 1,
-                    descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
-
-                    p_buffer_info: index_buffer_infos.as_ptr(),
-                    ..Default::default()
-                },
-                vk::WriteDescriptorSet {
-                    // vertex buffer
-                    dst_set: descriptor_set.handle,
-                    dst_binding: 4,
-                    dst_array_element: 0,
-                    descriptor_count: 1,
-                    descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
-                    p_buffer_info: vertex_buffer_infos.as_ptr(),
-                    ..Default::default()
-                },
-                vk::WriteDescriptorSet {
-                    // vertex buffer
-                    dst_set: descriptor_set.handle,
-                    dst_binding: 6,
-                    dst_array_element: 0,
-                    descriptor_count: 1,
-                    descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
-                    p_buffer_info: indirect_draw_array_buffer_infos.as_ptr(),
-                    ..Default::default()
-                },
-            ];
-
-            unsafe {
-                device
-                    .handle
-                    .update_descriptor_sets(&descriptor_write_sets, &[]);
-            }
-        }
-
-        descriptor_sets
     }
 }
 
@@ -257,7 +154,12 @@ impl DescriptorSetLayout {
                     )
                     .expect("Failed to create Descriptor Set Layout!")
             },
+
             device,
+            types: bindings
+                .iter()
+                .map(|b| (b.binding as _, b.descriptor_type))
+                .collect(),
         }
     }
 }

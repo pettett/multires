@@ -11,6 +11,7 @@ use crate::{
     utility::{buffer::TypedBuffer, render_pass::RenderPass},
 };
 
+pub mod compute_culled_indices;
 pub mod compute_culled_mesh;
 pub mod indirect_tasks;
 pub mod stub;

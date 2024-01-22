@@ -19,9 +19,6 @@ layout (binding = 0) readonly buffer ModelUniformBufferObject {
     mat4 models[];
 };
 
-layout (binding = 5) uniform CameraUniformBufferObject {
-    CameraUniformObject ubo; 
-};
 
 layout (std430, binding = 3) readonly buffer InputBufferI {
     s_meshlet meshlets[];
@@ -32,6 +29,9 @@ layout (std430, binding = 4) readonly buffer InputBufferV {
     Vertex verts[];
 };
 
+layout (binding = 5) uniform CameraUniformBufferObject {
+    CameraUniformObject ubo; 
+};
 
 
 

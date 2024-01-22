@@ -12,6 +12,8 @@ use gpu_allocator::{
     MemoryLocation,
 };
 
+use crate::VkHandle;
+
 use super::{
     buffer::{AsBuffer, Buffer},
     command_pool::CommandPool,
@@ -200,7 +202,7 @@ impl Image {
             &device,
             command_pool,
             submit_queue,
-            staging_buffer.buffer(),
+            staging_buffer.handle(),
             texture_image.image(),
             image_width,
             image_height,

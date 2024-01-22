@@ -35,7 +35,8 @@ use common_renderer::{
     resources::time::Time,
 };
 use draw_pipelines::{
-    compute_culled_mesh::ComputeCulledMesh, indirect_tasks::IndirectTasks, stub::Stub, DrawPipeline,
+    compute_culled_indices::ComputeCulledIndices, compute_culled_mesh::ComputeCulledMesh,
+    indirect_tasks::IndirectTasks, stub::Stub, DrawPipeline,
 };
 use glam::{Mat4, Quat, Vec3A};
 use gpu_allocator::{vulkan::*, AllocationSizes, AllocatorDebugSettings};
@@ -44,7 +45,6 @@ use screen::Screen;
 use utility::{
     buffer::{Buffer, TypedBuffer},
     descriptor_pool::DescriptorSet,
-    pipeline::Pipeline,
 };
 use winit::event::WindowEvent;
 
@@ -52,9 +52,8 @@ use std::sync::{Mutex, MutexGuard};
 use std::{any::Any, sync::Arc};
 
 // Constants
-const WINDOW_TITLE: &'static str = "26.Depth Buffering";
-const TEXTURE_PATH: &'static str = "../../../assets/vulkan.jpg";
-const TASK_GROUP_SIZE: u32 = 16;
+const WINDOW_TITLE: &'static str = "Multires Mesh Renderer";
+const TASK_GROUP_SIZE: u32 = 4;
 
 pub trait VkHandle {
     type VkItem;
@@ -63,9 +62,11 @@ pub trait VkHandle {
 }
 pub trait VkDeviceOwned: VkHandle<VkItem = vk::Device> {}
 
-pub enum SwitchPipeline {
+#[derive(Debug, Clone, Copy)]
+pub enum MeshDrawingPipelineType {
     IndirectTasks,
     ComputeCulledMesh,
+    ComputeCulledIndices,
     None,
 }
 
@@ -82,7 +83,7 @@ pub struct App {
     uniform_transforms: Vec<ModelUniformBufferObject>,
     uniform_transform_buffer: Arc<Buffer>,
     uniform_camera: CameraUniformBufferObject,
-    uniform_camera_buffers: Vec<TypedBuffer<CameraUniformBufferObject>>,
+    uniform_camera_buffers: Vec<Arc<TypedBuffer<CameraUniformBufferObject>>>,
 
     render_pass: RenderPass,
 
@@ -92,7 +93,8 @@ pub struct App {
 
     gui: Gui,
     windows: Vec<Box<dyn GuiWindow>>,
-    switch_pipeline: SwitchPipeline,
+    switch_pipeline: MeshDrawingPipelineType,
+    current_pipeline: MeshDrawingPipelineType,
 
     sync_objects: SyncObjects,
 
@@ -341,7 +343,8 @@ impl App {
             render_pass,
 
             draw: Box::new(mesh_draw),
-            switch_pipeline: SwitchPipeline::ComputeCulledMesh,
+            switch_pipeline: MeshDrawingPipelineType::ComputeCulledIndices,
+            current_pipeline: MeshDrawingPipelineType::None,
 
             uniform_transforms,
             uniform_transform_buffer,
@@ -484,14 +487,14 @@ impl App {
 
     pub fn update_pipeline(&mut self) {
         match self.switch_pipeline {
-            SwitchPipeline::None => return,
+            MeshDrawingPipelineType::None => return,
             _ => self.core.device.wait_device_idle(),
         }
 
         self.draw = Box::new(Stub);
 
         match self.switch_pipeline {
-            SwitchPipeline::IndirectTasks => {
+            MeshDrawingPipelineType::IndirectTasks => {
                 self.draw = Box::new(IndirectTasks::new(
                     self.core.clone(),
                     &self.screen,
@@ -508,7 +511,7 @@ impl App {
                     self.submesh_count,
                 ));
             }
-            SwitchPipeline::ComputeCulledMesh => {
+            MeshDrawingPipelineType::ComputeCulledMesh => {
                 self.draw = Box::new(ComputeCulledMesh::new(
                     self.core.clone(),
                     &self.screen,
@@ -525,7 +528,24 @@ impl App {
                     self.submesh_count,
                 ));
             }
-            SwitchPipeline::None => (),
+            MeshDrawingPipelineType::ComputeCulledIndices => {
+                self.draw = Box::new(ComputeCulledIndices::new(
+                    self.core.clone(),
+                    &self.screen,
+                    &mut self.world,
+                    self.allocator.clone(),
+                    &self.render_pass,
+                    self.graphics_queue,
+                    self.descriptor_pool.clone(),
+                    self.uniform_transform_buffer.clone(),
+                    &self.uniform_camera_buffers,
+                    self.vertex_buffer.clone(),
+                    self.meshlet_buffer.clone(),
+                    self.submesh_buffer.clone(),
+                    self.submesh_count,
+                ));
+            }
+            MeshDrawingPipelineType::None => (),
         }
 
         self.draw.init_swapchain(
@@ -536,7 +556,8 @@ impl App {
             &self.render_pass,
         );
 
-        self.switch_pipeline = SwitchPipeline::None
+        self.current_pipeline = self.switch_pipeline;
+        self.switch_pipeline = MeshDrawingPipelineType::None
     }
 
     fn recreate_swapchain(&mut self) {
@@ -580,11 +601,16 @@ impl App {
             egui::Window::new("App Config")
                 .open(&mut self.app_info_open)
                 .show(ctx, |ui| {
+                    ui.label(format!("Current Pipeline: {:?}", self.current_pipeline));
+
                     if ui.button("Indirect Tasks").clicked() {
-                        self.switch_pipeline = SwitchPipeline::IndirectTasks;
+                        self.switch_pipeline = MeshDrawingPipelineType::IndirectTasks;
                     }
                     if ui.button("Compute Culled Mesh").clicked() {
-                        self.switch_pipeline = SwitchPipeline::ComputeCulledMesh;
+                        self.switch_pipeline = MeshDrawingPipelineType::ComputeCulledMesh;
+                    }
+                    if ui.button("Compute Culled Indices").clicked() {
+                        self.switch_pipeline = MeshDrawingPipelineType::ComputeCulledIndices;
                     }
                 });
 
