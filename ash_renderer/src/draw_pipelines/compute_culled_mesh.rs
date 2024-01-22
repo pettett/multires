@@ -13,7 +13,7 @@ use crate::{
     core::Core,
     screen::Screen,
     utility::{
-        buffer::{AsBuffer, Buffer, TypedBuffer},
+        buffer::{AsBuffer, Buffer, TBuffer},
         command_pool::CommandPool,
         descriptor_pool::{
             DescriptorPool, DescriptorSet, DescriptorSetLayout, DescriptorWriteData,
@@ -37,7 +37,7 @@ pub struct ComputeCulledMesh {
     screen: Option<ScreenData>,
     descriptor_pool: Arc<DescriptorPool>,
     core: Arc<Core>,
-    should_cull_buffer: Arc<TypedBuffer<u32>>,
+    should_cull_buffer: Arc<TBuffer<u32>>,
 }
 
 impl ComputeCulledMesh {
@@ -71,7 +71,7 @@ impl ComputeCulledMesh {
             ubo_layout.clone(),
         );
 
-        let should_cull_buffer = TypedBuffer::new_filled(
+        let should_cull_buffer = TBuffer::new_filled(
             core.device.clone(),
             allocator.clone(),
             &core.command_pool,
@@ -311,9 +311,7 @@ fn create_graphics_pipeline(
     );
     let frag_shader_module = ShaderModule::new(
         device.clone(),
-        bytemuck::cast_slice(include_bytes!(
-            "../../shaders/spv/mesh_shader_compute_cull.frag"
-        )),
+        bytemuck::cast_slice(include_bytes!("../../shaders/spv/frag_colour.frag")),
     );
 
     let main_function_name = CString::new("main").unwrap(); // the beginning function name in shader code.

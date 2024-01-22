@@ -22,7 +22,7 @@ use crate::{
 
 use ash::vk;
 use bevy_ecs::{entity::Entity, event::Events, schedule::Schedule, world::World};
-use common::{asset::Asset, MultiResMesh};
+use common::{asset::Asset, MeshVert, MultiResMesh};
 use common_renderer::{
     components::{
         camera::Camera,
@@ -43,13 +43,16 @@ use gpu_allocator::{vulkan::*, AllocationSizes, AllocatorDebugSettings};
 use gui::{gui::Gui, window::GuiWindow};
 use screen::Screen;
 use utility::{
-    buffer::{Buffer, TypedBuffer},
+    buffer::{AsBuffer, Buffer, TBuffer},
     descriptor_pool::DescriptorSet,
 };
 use winit::event::WindowEvent;
 
-use std::sync::{Mutex, MutexGuard};
 use std::{any::Any, sync::Arc};
+use std::{
+    mem,
+    sync::{Mutex, MutexGuard},
+};
 
 // Constants
 const WINDOW_TITLE: &'static str = "Multires Mesh Renderer";
@@ -70,6 +73,38 @@ pub enum MeshDrawingPipelineType {
     None,
 }
 
+pub trait Vertex {
+    fn get_binding_descriptions() -> Vec<vk::VertexInputBindingDescription>;
+    fn get_attribute_descriptions() -> Vec<vk::VertexInputAttributeDescription>;
+}
+
+impl Vertex for MeshVert {
+    fn get_binding_descriptions() -> Vec<vk::VertexInputBindingDescription> {
+        vec![vk::VertexInputBindingDescription {
+            binding: 0,
+            stride: mem::size_of::<MeshVert>() as _,
+            input_rate: vk::VertexInputRate::VERTEX,
+        }]
+    }
+
+    fn get_attribute_descriptions() -> Vec<vk::VertexInputAttributeDescription> {
+        vec![
+            vk::VertexInputAttributeDescription {
+                location: 0,
+                binding: 0,
+                format: vk::Format::R32G32B32A32_SFLOAT,
+                offset: 0,
+            },
+            vk::VertexInputAttributeDescription {
+                location: 1,
+                binding: 0,
+                format: vk::Format::R32G32B32A32_SFLOAT,
+                offset: mem::size_of::<[f32; 4]>() as _,
+            },
+        ]
+    }
+}
+
 pub struct App {
     world: bevy_ecs::world::World,
     schedule: bevy_ecs::schedule::Schedule,
@@ -83,7 +118,7 @@ pub struct App {
     uniform_transforms: Vec<ModelUniformBufferObject>,
     uniform_transform_buffer: Arc<Buffer>,
     uniform_camera: CameraUniformBufferObject,
-    uniform_camera_buffers: Vec<Arc<TypedBuffer<CameraUniformBufferObject>>>,
+    uniform_camera_buffers: Vec<Arc<TBuffer<CameraUniformBufferObject>>>,
 
     render_pass: RenderPass,
 
@@ -100,9 +135,10 @@ pub struct App {
 
     current_frame: usize,
 
-    vertex_buffer: Arc<Buffer>,
+    vertex_buffer: Arc<TBuffer<MeshVert>>,
     meshlet_buffer: Arc<Buffer>,
     submesh_buffer: Arc<Buffer>,
+    indices_buffer: Arc<TBuffer<u32>>,
 
     is_framebuffer_resized: bool,
 
@@ -206,6 +242,7 @@ impl App {
         let (clusters, meshlets) = multires::generate_meshlets(&data);
 
         let mut cluster_data = data.generate_cluster_data();
+        let (indices, partitions, groups) = data.indices_partitions_groups();
 
         for (i, submesh) in clusters.into_iter().enumerate() {
             cluster_data[i].meshlet_start = submesh.meshlet_start;
@@ -214,11 +251,12 @@ impl App {
 
         println!("V: {:?} M: {:?}", data.verts.len(), meshlets.len());
 
-        let vertex_buffer = Buffer::new_storage_filled(
+        let vertex_buffer = TBuffer::new_filled(
             device.clone(),
             allocator.clone(),
             &core.command_pool,
             graphics_queue,
+            vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::VERTEX_BUFFER,
             &data.verts,
         );
 
@@ -236,6 +274,16 @@ impl App {
             &core.command_pool,
             graphics_queue,
             &cluster_data,
+        );
+
+        let indices_buffer = TBuffer::new_filled(
+            core.device.clone(),
+            allocator.clone(),
+            &core.command_pool,
+            graphics_queue,
+            // Allow index use for testing
+            vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::INDEX_BUFFER,
+            &indices,
         );
 
         let mut uniform_transforms = Vec::new();
@@ -267,7 +315,7 @@ impl App {
             &uniform_transforms,
         );
 
-        let uniform_camera_buffers = TypedBuffer::<CameraUniformBufferObject>::new_per_swapchain(
+        let uniform_camera_buffers = TBuffer::<CameraUniformBufferObject>::new_per_swapchain(
             device.clone(),
             allocator.clone(),
             gpu_allocator::MemoryLocation::CpuToGpu,
@@ -339,6 +387,7 @@ impl App {
             vertex_buffer,
             submesh_buffer,
             meshlet_buffer,
+            indices_buffer,
 
             render_pass,
 
@@ -505,7 +554,7 @@ impl App {
                     self.descriptor_pool.clone(),
                     self.uniform_transform_buffer.clone(),
                     &self.uniform_camera_buffers,
-                    self.vertex_buffer.clone(),
+                    self.vertex_buffer.buffer(),
                     self.meshlet_buffer.clone(),
                     self.submesh_buffer.clone(),
                     self.submesh_count,
@@ -522,7 +571,7 @@ impl App {
                     self.descriptor_pool.clone(),
                     self.uniform_transform_buffer.clone(),
                     &self.uniform_camera_buffers,
-                    self.vertex_buffer.clone(),
+                    self.vertex_buffer.buffer(),
                     self.meshlet_buffer.clone(),
                     self.submesh_buffer.clone(),
                     self.submesh_count,
@@ -542,6 +591,7 @@ impl App {
                     self.vertex_buffer.clone(),
                     self.meshlet_buffer.clone(),
                     self.submesh_buffer.clone(),
+                    self.indices_buffer.clone(),
                     self.submesh_count,
                 ));
             }

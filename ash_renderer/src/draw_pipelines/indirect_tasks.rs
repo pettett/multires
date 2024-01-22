@@ -13,7 +13,7 @@ use crate::{
     core::Core,
     screen::Screen,
     utility::{
-        buffer::{AsBuffer, Buffer, TypedBuffer},
+        buffer::{AsBuffer, Buffer, TBuffer},
         command_pool::CommandPool,
         descriptor_pool::{
             DescriptorPool, DescriptorSet, DescriptorSetLayout, DescriptorWriteData,
@@ -36,7 +36,7 @@ pub struct IndirectTasks {
     screen: Option<ScreenData>,
     descriptor_pool: Arc<DescriptorPool>,
     core: Arc<Core>,
-    indirect_task_buffer: Arc<TypedBuffer<vk::DrawMeshTasksIndirectCommandEXT>>,
+    indirect_task_buffer: Arc<TBuffer<vk::DrawMeshTasksIndirectCommandEXT>>,
 }
 
 impl IndirectTasks {
@@ -72,7 +72,7 @@ impl IndirectTasks {
                 group_count_z: 1,
             });
         }
-        let indirect_task_buffer = TypedBuffer::new_filled(
+        let indirect_task_buffer = TBuffer::new_filled(
             core.device.clone(),
             allocator.clone(),
             &core.command_pool,
@@ -152,7 +152,7 @@ impl ScreenData {
         submesh_count: u32,
         instance_count: u32,
         render_pass: &RenderPass,
-        indirect_task_buffer: &TypedBuffer<vk::DrawMeshTasksIndirectCommandEXT>,
+        indirect_task_buffer: &TBuffer<vk::DrawMeshTasksIndirectCommandEXT>,
     ) -> Self {
         let device = core.device.clone();
         let command_buffers = core
@@ -433,7 +433,7 @@ fn create_graphics_pipeline(
     );
     let frag_shader_module = ShaderModule::new(
         device.clone(),
-        bytemuck::cast_slice(include_bytes!("../../shaders/spv/mesh-shader.frag")),
+        bytemuck::cast_slice(include_bytes!("../../shaders/spv/frag_colour.frag")),
     );
 
     let main_function_name = CString::new("main").unwrap(); // the beginning function name in shader code.

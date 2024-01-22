@@ -8,143 +8,58 @@
 
 #include "structs\cluster_data.glsl"
 
-layout(binding = 0) writeonly buffer  ResultIndicies {
-    uint result[];
-} result_indicies;
+layout(binding = 1) readonly buffer Clusters {
+    ClusterData clusters[];
+};
 
-layout(binding = 1) writeonly buffer  DrawIndirectParams {
-    DrawIndexedIndirect result[];
-} draw_indirect_params; 
+layout(binding = 2) readonly buffer ShouldDraw {
+    uint should_draw[];
+};
 
-layout(binding = 2) readonly buffer  Indicies {
-    uint result[];
-} indices;
+layout(binding = 5) writeonly buffer ResultIndicies {
+    uint result_indicies[];
+};
 
-layout(binding = 3) readonly buffer  Clusters {
-    ClusterData result[];
-} clusters;
-
-layout(binding = 4) readonly buffer  ShouldDraw {
-    uint result[];
-} should_draw;
+layout(binding = 6) readonly buffer Indicies {
+    uint indices[];
+};
 
 
 
-const uint pre_workgroup_summing_threads = 4;
-shared uint workgroup_data[pre_workgroup_summing_threads];
-
-layout (local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+layout (local_size_x = 4, local_size_y = 1, local_size_z = 1) in;
 
 void main(  ) {
 	uvec3 id = gl_GlobalInvocationID;
-	uvec3 lid = gl_LocalInvocationID;
-    uint idx = id.x;
-    uint len = indices.result.length();
-    uint offset = 0;// len * id.y;
-	// For the end workgroup
-    if (idx >= should_draw.result[offset + 0u]) {
-        return;
-    }
+	uint lid = gl_LocalInvocationID.x;
+	uint gid = gl_WorkGroupID.x;
 
-    uint cull = should_draw.result[offset + idx + 1u];
+    uint idx = id.x;
+    uint len = indices.length();
+	
+	// For the end workgroup
+    // if (idx >= should_draw[offset]) {
+    //     return;
+    // }
+ 
 
 	// Initialise scan to list of sizes [2,0,0,3,1,0,0]
-    uint idx_val = cull * clusters.result[idx].index_count;
-    //prefix_sum[idx] = idx_val;
 
-    //storageBarrier(); 
-	// Very slowly compact down the indices
+	// Add workgroups before this workgroup
+	uint thread_sum = 0;
 
-    uint workgroup_start = idx - lid.x;
-
-    if (lid.x < pre_workgroup_summing_threads) {
-
-		// Sum everything before us in parallel
-        for (uint meshlet = lid.x; meshlet < workgroup_start; meshlet += pre_workgroup_summing_threads) {
-            workgroup_data[lid.x] += should_draw.result[offset + meshlet + 1] * clusters.result[meshlet].index_count;
-        }
+    for (uint group = 0; group < gid; group++) {
+		uint meshlet = group * 4 + lid;
+		if (should_draw[meshlet] > 0){
+    	    thread_sum += clusters[meshlet].index_count;
+		}
     }
 
-    barrier();
-
-    uint pre_workgroup_total = 0;
-
-    for (uint i = 0; i < pre_workgroup_summing_threads; i++) {
-        pre_workgroup_total += workgroup_data[i];
-    }
-
-    idx_val += pre_workgroup_total;
-
+    uint group_base = subgroupAdd(thread_sum);
+	
 	// Add things within this workgroup
-    for (uint meshlet = workgroup_start; meshlet < idx; meshlet ++) {
-        idx_val += should_draw.result[offset + meshlet + 1u] * clusters.result[offset + meshlet].index_count;
-    }
+	bool cull = should_draw[idx] > 0;
 
-
-
-    // for (var meshlet: u32 = u32(0); meshlet < idx; meshlet ++) {
-    //     idx_val += should_draw[meshlet] * clusters[meshlet].index_count;
-    // }
-
-
-
-    // let len = arrayLength(&clusters);
-
-    // for (var j = u32(1); j < len; j <<= u32(1)) {
-    //     if idx + j < len {
-    //         prefix_sum[idx + j] += prefix_sum[idx];
-    //     }
-    //     storageBarrier();
-    // }
-
-
-    //var offset = u32(0);
-//     for (var i: u32 = u32(1); i < len; i <<= u32(1)) {
-
-//         storageBarrier();
-//         workgroupBarrier();
-
-//         if (idx & i) != u32(0) && idx < len {
-//             idx_val += prefix_sum[((idx >> offset) << offset) - u32(1)];
-//         }
-
-//         // if idx + i < len {
-//         //     prefix_sum[idx + i] += prefix_sum[idx];
-//         // }
-
-//         storageBarrier();
-//         workgroupBarrier();
-// //
-//         prefix_sum[idx] = idx_val;
-// //
-//         offset ++;
-//     }
-
- 
- //Upsweep
-    // if idx < (len >> 1u) {
-    //     prefix_sum[(idx << 1u) + 1u] += prefix_sum[idx << 1u];
-    // }
-    // var offset = u32(1);
-    // for (var j = len >> u32(2); j > u32(0); j >>= 1u) {
-    //     storageBarrier();
-    //     workgroupBarrier();
-    //     if idx < j {
-    //         prefix_sum[(((idx << 1u) + u32(2)) << offset) - 1u] += prefix_sum[(((idx << 1u) + 1u) << offset) - 1u];
-    //     }    offset++;
-    // }
-    // //Downsweep
-    // for (var j = 1u; j < len; j <<= 1u) {
-    //     offset--;
-    //     storageBarrier();
-    //     workgroupBarrier();
-    //     if idx < j {
-    //         prefix_sum[(((idx << 1u) + u32(3)) << offset) - 1u] += prefix_sum[(((idx << 1u) + u32(2)) << offset) - 1u];
-    //     }
-    // }
-
-
-
+	uint idx_val = group_base + subgroupExclusiveAdd(cull ? clusters[idx].index_count : 0);
 
 
 	// Scan should now look like [2,2,2,5,6,6,6]
@@ -152,25 +67,23 @@ void main(  ) {
 	// Undo the starting addition to get our pack positions
 
 	// Scan should now look like [0,-,-,2,5,-,-]
-    if (bool(cull)) {
+    if (cull) {
 
-        idx_val -= clusters.result[idx].index_count;
         //var result_start: u32 = 0u;
 
-        uint ind_start = clusters.result[idx].index_offset;
+        uint ind_start = clusters[idx].index_offset;
 
 		
 		// Ideally, compute this in a step after writing cull to a buffer and compacting it down
-        for (uint ind = 0; ind < clusters.result[idx].index_count; ind++) {
-            result_indicies.result[offset + idx_val + ind] = indices.result[ind_start + ind] * cull;
+        for (uint ind = 0; ind < clusters[idx].index_count; ind++) {
+            result_indicies[idx_val + ind] = indices[ind_start + ind];
         }
 
-        idx_val += clusters.result[idx].index_count;
     }
 
 	// Fill the max index count from the final work item
 
-    if (idx == should_draw.result[offset + 0] - 1) {
-        draw_indirect_params.result[id.y].index_count = idx_val;
-    }
+    // if (idx == should_draw[offset + 0] - 1) {
+    //     draw_indirect_params[id.y].index_count = idx_val;
+    // }
 }

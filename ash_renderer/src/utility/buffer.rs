@@ -50,12 +50,12 @@ pub trait AsBuffer: VkHandle<VkItem = vk::Buffer> {
     }
 }
 #[repr(transparent)]
-pub struct TypedBuffer<T> {
+pub struct TBuffer<T> {
     buffer: Arc<Buffer>,
     _p: PhantomData<T>,
 }
 
-impl<T> TypedBuffer<T> {
+impl<T> TBuffer<T> {
     pub fn new(buffer: Arc<Buffer>) -> Self {
         Self {
             buffer,
@@ -64,7 +64,7 @@ impl<T> TypedBuffer<T> {
     }
 }
 
-impl<T> VkHandle for TypedBuffer<T> {
+impl<T> VkHandle for TBuffer<T> {
     type VkItem = vk::Buffer;
 
     fn handle(&self) -> Self::VkItem {
@@ -74,7 +74,7 @@ impl<T> VkHandle for TypedBuffer<T> {
     }
 }
 
-impl<T> AsBuffer for TypedBuffer<T> {
+impl<T> AsBuffer for TBuffer<T> {
     fn buffer(self: &Arc<Self>) -> Arc<Buffer> {
         self.buffer.clone()
     }
@@ -91,7 +91,7 @@ impl<T> AsBuffer for TypedBuffer<T> {
         self.buffer.usage
     }
 }
-impl<T> TypedBuffer<T> {
+impl<T> TBuffer<T> {
     pub fn new_per_swapchain(
         device: Arc<Device>,
         allocator: Arc<Mutex<Allocator>>,
@@ -110,7 +110,7 @@ impl<T> TypedBuffer<T> {
                 vk::BufferUsageFlags::UNIFORM_BUFFER,
                 MemoryLocation::CpuToGpu,
             );
-            uniform_buffers.push(Arc::new(TypedBuffer::new(Arc::new(uniform_buffer))));
+            uniform_buffers.push(Arc::new(TBuffer::new(Arc::new(uniform_buffer))));
         }
 
         uniform_buffers
@@ -133,7 +133,7 @@ impl<T> TypedBuffer<T> {
                 vk::BufferUsageFlags::UNIFORM_BUFFER,
                 MemoryLocation::CpuToGpu,
             );
-            let buf = TypedBuffer::new(Arc::new(uniform_buffer));
+            let buf = TBuffer::new(Arc::new(uniform_buffer));
 
             buf.update_uniform_buffer(datum);
 

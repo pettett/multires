@@ -8,7 +8,7 @@ use gpu_allocator::vulkan::Allocation;
 use crate::{
     core::Core,
     screen::Screen,
-    utility::{buffer::TypedBuffer, render_pass::RenderPass},
+    utility::{buffer::TBuffer, render_pass::RenderPass},
 };
 
 pub mod compute_culled_indices;

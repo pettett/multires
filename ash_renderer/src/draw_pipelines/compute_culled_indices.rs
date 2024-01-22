@@ -6,6 +6,7 @@ use std::{
 
 use ash::vk::{self};
 use bevy_ecs::world::World;
+use common::MeshVert;
 use common_renderer::components::transform::Transform;
 use gpu_allocator::vulkan::Allocator;
 
@@ -13,7 +14,7 @@ use crate::{
     core::Core,
     screen::Screen,
     utility::{
-        buffer::{AsBuffer, Buffer, TypedBuffer},
+        buffer::{AsBuffer, Buffer, TBuffer},
         command_pool::CommandPool,
         descriptor_pool::{
             DescriptorPool, DescriptorSet, DescriptorSetLayout, DescriptorWriteData,
@@ -22,7 +23,7 @@ use crate::{
         render_pass::RenderPass,
         {ComputePipeline, GraphicsPipeline, ShaderModule},
     },
-    VkHandle, TASK_GROUP_SIZE,
+    Vertex, VkHandle, TASK_GROUP_SIZE,
 };
 
 use super::{
@@ -33,12 +34,15 @@ use super::{
 pub struct ComputeCulledIndices {
     graphics_pipeline: GraphicsPipeline,
     should_draw_pipeline: ComputePipeline,
+    compact_indices_pipeline: ComputePipeline,
     descriptor_sets: Vec<DescriptorSet>,
     screen: Option<ScreenData>,
     descriptor_pool: Arc<DescriptorPool>,
     core: Arc<Core>,
-    should_cull_buffer: Arc<TypedBuffer<u32>>,
-    result_indices_buffer: Arc<TypedBuffer<u32>>,
+    should_cull_buffer: Arc<TBuffer<u32>>,
+    result_indices_buffer: Arc<TBuffer<u32>>,
+    vertex_buffer: Arc<TBuffer<MeshVert>>,
+    indices_buffer: Arc<TBuffer<u32>>,
 }
 
 impl ComputeCulledIndices {
@@ -52,9 +56,10 @@ impl ComputeCulledIndices {
         descriptor_pool: Arc<DescriptorPool>,
         uniform_transform_buffer: Arc<Buffer>,
         uniform_camera_buffers: &[Arc<impl AsBuffer>],
-        vertex_buffer: Arc<Buffer>,
+        vertex_buffer: Arc<TBuffer<MeshVert>>,
         meshlet_buffer: Arc<Buffer>,
         submesh_buffer: Arc<Buffer>,
+        indices_buffer: Arc<TBuffer<u32>>,
         cluster_count: u32,
     ) -> Self {
         let ubo_layout = create_descriptor_set_layout(core.device.clone());
@@ -72,13 +77,13 @@ impl ComputeCulledIndices {
             ubo_layout.clone(),
         );
 
-        // let compact_indices_pipeline = ComputePipeline::create_compute_pipeline(
-        //     core.device.clone(),
-        //     include_bytes!("../../shaders/spv/compact_indices.comp"),
-        //     ubo_layout.clone(),
-        // );
+        let compact_indices_pipeline = ComputePipeline::create_compute_pipeline(
+            core.device.clone(),
+            include_bytes!("../../shaders/spv/compact_indices.comp"),
+            ubo_layout.clone(),
+        );
 
-        let should_cull_buffer = TypedBuffer::new_filled(
+        let should_cull_buffer = TBuffer::new_filled(
             core.device.clone(),
             allocator.clone(),
             &core.command_pool,
@@ -87,13 +92,13 @@ impl ComputeCulledIndices {
             &vec![0; cluster_count as _],
         );
 
-        let result_indices_buffer = TypedBuffer::new_filled(
+        let result_indices_buffer = TBuffer::new_filled(
             core.device.clone(),
             allocator.clone(),
             &core.command_pool,
             graphics_queue,
-            vk::BufferUsageFlags::STORAGE_BUFFER,
-            &vec![0; 2_000_000],
+            vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::INDEX_BUFFER,
+            &vec![0; (indices_buffer.size() * 2) as usize],
         );
 
         let descriptor_sets = create_compute_culled_indices_descriptor_sets(
@@ -103,22 +108,26 @@ impl ComputeCulledIndices {
             &uniform_transform_buffer,
             &uniform_camera_buffers,
             &should_cull_buffer,
-            &vertex_buffer,
             &meshlet_buffer,
             &submesh_buffer,
             //&texture_image,
+            &result_indices_buffer,
+            &indices_buffer,
             screen.swapchain().images.len(),
         );
 
         Self {
             graphics_pipeline,
+            compact_indices_pipeline,
             descriptor_sets,
             screen: None,
             core,
             descriptor_pool,
             should_cull_buffer,
+            vertex_buffer,
             should_draw_pipeline,
             result_indices_buffer,
+            indices_buffer,
         }
     }
 }
@@ -205,12 +214,6 @@ impl ScreenData {
             let descriptor_sets_to_bind = [core_draw.descriptor_sets[i].handle()];
 
             unsafe {
-                device.handle.cmd_bind_pipeline(
-                    command_buffer,
-                    vk::PipelineBindPoint::COMPUTE,
-                    core_draw.should_draw_pipeline.handle(),
-                );
-
                 device.handle.cmd_bind_descriptor_sets(
                     command_buffer,
                     vk::PipelineBindPoint::COMPUTE,
@@ -218,6 +221,21 @@ impl ScreenData {
                     0,
                     &descriptor_sets_to_bind,
                     &[],
+                );
+                device.handle.cmd_bind_pipeline(
+                    command_buffer,
+                    vk::PipelineBindPoint::COMPUTE,
+                    core_draw.should_draw_pipeline.handle(),
+                );
+
+                device
+                    .handle
+                    .cmd_dispatch(command_buffer, submesh_count, 1, 1);
+
+                device.handle.cmd_bind_pipeline(
+                    command_buffer,
+                    vk::PipelineBindPoint::COMPUTE,
+                    core_draw.compact_indices_pipeline.handle(),
                 );
 
                 device
@@ -276,11 +294,26 @@ impl ScreenData {
                     &[],
                 );
 
-                device.fn_mesh_shader.cmd_draw_mesh_tasks(
+                device.handle.cmd_bind_index_buffer(
                     command_buffer,
-                    submesh_count,
-                    instance_count,
+                    core_draw.result_indices_buffer.handle(),
+                    0,
+                    vk::IndexType::UINT32,
+                );
+
+                device.handle.cmd_bind_vertex_buffers(
+                    command_buffer,
+                    0,
+                    &[core_draw.vertex_buffer.handle()],
+                    &[0],
+                );
+                device.handle.cmd_draw_indexed(
+                    command_buffer,
+                    core_draw.indices_buffer.item_len() as _,
                     1,
+                    0,
+                    0,
+                    0,
                 );
                 // device.cmd_draw_indexed(
                 //     command_buffer,
@@ -314,37 +347,22 @@ fn create_graphics_pipeline(
     swapchain_extent: vk::Extent2D,
     ubo_set_layout: Arc<DescriptorSetLayout>,
 ) -> GraphicsPipeline {
-    let task_shader_module = ShaderModule::new(
+    let vert_shader_module = ShaderModule::new(
         device.clone(),
-        bytemuck::cast_slice(include_bytes!(
-            "../../shaders/spv/mesh_shader_compute_cull.task"
-        )),
-    );
-    let mesh_shader_module = ShaderModule::new(
-        device.clone(),
-        bytemuck::cast_slice(include_bytes!(
-            "../../shaders/spv/mesh_shader_compute_cull.mesh"
-        )),
+        bytemuck::cast_slice(include_bytes!("../../shaders/spv/vert.vert")),
     );
     let frag_shader_module = ShaderModule::new(
         device.clone(),
-        bytemuck::cast_slice(include_bytes!(
-            "../../shaders/spv/mesh_shader_compute_cull.frag"
-        )),
+        bytemuck::cast_slice(include_bytes!("../../shaders/spv/frag_pbr.frag")),
     );
 
     let main_function_name = CString::new("main").unwrap(); // the beginning function name in shader code.
 
     let shader_stages = [
         vk::PipelineShaderStageCreateInfo::builder()
-            .module(task_shader_module.handle())
+            .module(vert_shader_module.handle())
             .name(&main_function_name)
-            .stage(vk::ShaderStageFlags::TASK_EXT)
-            .build(),
-        vk::PipelineShaderStageCreateInfo::builder()
-            .module(mesh_shader_module.handle())
-            .name(&main_function_name)
-            .stage(vk::ShaderStageFlags::MESH_EXT)
+            .stage(vk::ShaderStageFlags::VERTEX)
             .build(),
         vk::PipelineShaderStageCreateInfo::builder()
             .module(frag_shader_module.handle())
@@ -353,25 +371,18 @@ fn create_graphics_pipeline(
             .build(),
     ];
 
-    // let binding_description = VertexV3::get_binding_descriptions();
-    // let attribute_description = VertexV3::get_attribute_descriptions();
+    let binding_description = MeshVert::get_binding_descriptions();
+    let attribute_description = MeshVert::get_attribute_descriptions();
 
-    // let vertex_input_state_create_info = vk::PipelineVertexInputStateCreateInfo {
-    //     s_type: vk::StructureType::PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-    //     p_next: ptr::null(),
-    //     flags: vk::PipelineVertexInputStateCreateFlags::empty(),
-    //     vertex_attribute_description_count: attribute_description.len() as u32,
-    //     p_vertex_attribute_descriptions: attribute_description.as_ptr(),
-    //     vertex_binding_description_count: binding_description.len() as u32,
-    //     p_vertex_binding_descriptions: binding_description.as_ptr(),
-    // };
-    // let vertex_input_assembly_state_info = vk::PipelineInputAssemblyStateCreateInfo {
-    //     s_type: vk::StructureType::PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-    //     flags: vk::PipelineInputAssemblyStateCreateFlags::empty(),
-    //     p_next: ptr::null(),
-    //     primitive_restart_enable: vk::FALSE,
-    //     topology: vk::PrimitiveTopology::TRIANGLE_LIST,
-    // };
+    let vertex_input_state_create_info = vk::PipelineVertexInputStateCreateInfo::builder()
+        .vertex_binding_descriptions(&binding_description)
+        .vertex_attribute_descriptions(&attribute_description);
+
+    let vertex_input_assembly_state_info = vk::PipelineInputAssemblyStateCreateInfo {
+        primitive_restart_enable: vk::FALSE,
+        topology: vk::PrimitiveTopology::TRIANGLE_LIST,
+        ..Default::default()
+    };
 
     let viewports = [vk::Viewport {
         x: 0.0,
@@ -429,6 +440,8 @@ fn create_graphics_pipeline(
         .depth_stencil_state(&depth_state_create_info)
         .color_blend_state(&color_blend_state)
         .dynamic_state(&dynamic_state_info)
+        .vertex_input_state(&vertex_input_state_create_info)
+        .input_assembly_state(&vertex_input_assembly_state_info)
         .layout(pipeline_layout)
         .render_pass(render_pass.handle())
         .build()];
@@ -477,7 +490,11 @@ fn create_descriptor_set_layout(device: Arc<Device>) -> Arc<DescriptorSetLayout>
             .binding(0)
             .descriptor_count(1)
             .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-            .stage_flags(vk::ShaderStageFlags::MESH_EXT | vk::ShaderStageFlags::COMPUTE)
+            .stage_flags(
+                vk::ShaderStageFlags::MESH_EXT
+                    | vk::ShaderStageFlags::COMPUTE
+                    | vk::ShaderStageFlags::VERTEX,
+            )
             .build(),
         // layout(binding = 1) buffer Clusters {
         // 	ClusterData clusters[];
@@ -504,7 +521,7 @@ fn create_descriptor_set_layout(device: Arc<Device>) -> Arc<DescriptorSetLayout>
             .binding(3)
             .descriptor_count(1)
             .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-            .stage_flags(vk::ShaderStageFlags::MESH_EXT | vk::ShaderStageFlags::COMPUTE)
+            .stage_flags(vk::ShaderStageFlags::COMPUTE | vk::ShaderStageFlags::VERTEX)
             .build(),
         // layout (std430, binding = 4) buffer InputBufferI {
         // 	s_meshlet meshlets[];
@@ -522,7 +539,13 @@ fn create_descriptor_set_layout(device: Arc<Device>) -> Arc<DescriptorSetLayout>
             .binding(5)
             .descriptor_count(1)
             .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-            .stage_flags(vk::ShaderStageFlags::MESH_EXT)
+            .stage_flags(vk::ShaderStageFlags::COMPUTE)
+            .build(),
+        vk::DescriptorSetLayoutBinding::builder()
+            .binding(6)
+            .descriptor_count(1)
+            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+            .stage_flags(vk::ShaderStageFlags::COMPUTE)
             .build(),
     ];
 
@@ -536,9 +559,10 @@ fn create_compute_culled_indices_descriptor_sets(
     uniform_transform_buffer: &Arc<Buffer>,
     uniform_camera_buffers: &[Arc<impl AsBuffer>],
     should_draw_buffer: &Arc<impl AsBuffer>,
-    vertex_buffer: &Arc<Buffer>,
     meshlet_buffer: &Arc<Buffer>,
     submesh_buffer: &Arc<Buffer>,
+    result_indices_buffer: &Arc<impl AsBuffer>,
+    indices_buffer: &Arc<impl AsBuffer>,
     //texture: &Image,
     swapchain_images_size: usize,
 ) -> Vec<DescriptorSet> {
@@ -590,7 +614,11 @@ fn create_compute_culled_indices_descriptor_sets(
                     },
                     DescriptorWriteData::Buffer {
                         // 5
-                        buf: vertex_buffer.clone(), //
+                        buf: result_indices_buffer.buffer(), //
+                    },
+                    DescriptorWriteData::Buffer {
+                        // 6
+                        buf: indices_buffer.buffer(), //
                     },
                 ],
             )
