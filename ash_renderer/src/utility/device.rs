@@ -7,6 +7,7 @@ use std::{
 use ash::vk::{
     self, PhysicalDeviceBufferDeviceAddressFeatures, PhysicalDeviceMaintenance4Features,
     PhysicalDeviceMeshShaderFeaturesEXT, PhysicalDeviceShaderDrawParameterFeatures,
+    PhysicalDeviceSynchronization2Features,
 };
 use winapi::ctypes::c_char;
 
@@ -99,12 +100,16 @@ impl Device {
         let mut buffer_device_info =
             PhysicalDeviceBufferDeviceAddressFeatures::builder().buffer_device_address(true);
 
+        let mut synchronization2 =
+            PhysicalDeviceSynchronization2Features::builder().synchronization2(true);
+
         let device_create_info = vk::DeviceCreateInfo::builder()
             .push_next(&mut physical_device_features)
             .push_next(&mut shader_draw_params)
             .push_next(&mut mesh_shader)
             .push_next(&mut man4)
             .push_next(&mut buffer_device_info)
+            .push_next(&mut synchronization2)
             .queue_create_infos(&queue_create_infos)
             .enabled_extension_names(&enable_extension_names);
 

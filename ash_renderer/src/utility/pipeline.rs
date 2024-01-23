@@ -63,19 +63,16 @@ impl ComputePipeline {
                 .expect("Failed to create pipeline layout!")
         };
 
-        let graphic_pipeline_create_infos = [vk::ComputePipelineCreateInfo::builder()
+        let pipeline_create_infos = [vk::ComputePipelineCreateInfo::builder()
             .stage(shader_stage)
             .layout(pipeline_layout)
+            .flags(vk::PipelineCreateFlags::DISPATCH_BASE) // Allow non-0 bases, for applying this to instances
             .build()];
 
         let compute_pipelines = unsafe {
             device
                 .handle
-                .create_compute_pipelines(
-                    vk::PipelineCache::null(),
-                    &graphic_pipeline_create_infos,
-                    None,
-                )
+                .create_compute_pipelines(vk::PipelineCache::null(), &pipeline_create_infos, None)
                 .expect("Failed to create Compute Pipeline!.")
         };
 

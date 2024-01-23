@@ -289,8 +289,8 @@ impl App {
         let mut uniform_transforms = Vec::new();
 
         let mut world: World = World::new();
-        for i in 0..1 {
-            for j in 0..2 {
+        for i in 0..10 {
+            for j in 0..4 {
                 let mut transform = Transform::new_pos(
                     glam::Vec3A::X * i as f32 * 40.0 + glam::Vec3A::Y * j as f32 * 40.0,
                 );
@@ -592,6 +592,7 @@ impl App {
                     self.meshlet_buffer.clone(),
                     self.submesh_buffer.clone(),
                     self.indices_buffer.clone(),
+                    self.uniform_transforms.len(),
                     self.submesh_count,
                 ));
             }

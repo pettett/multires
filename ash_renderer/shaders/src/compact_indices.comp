@@ -5,6 +5,7 @@
 #extension GL_ARB_shader_draw_parameters: require
 
 #extension GL_KHR_shader_subgroup_arithmetic: enable
+#extension GL_KHR_shader_subgroup_vote: enable
 
 #include "structs\cluster_data.glsl"
 
@@ -24,6 +25,9 @@ layout(binding = 6) readonly buffer Indicies {
     uint indices[];
 };
 
+layout(binding = 7) buffer DrawIndexedIndirectData {
+    DrawIndexedIndirect indirect[];
+};
 
 const uint LOCAL_SIZE_X = 16;
 
@@ -35,15 +39,13 @@ void main(  ) {
 	uint gid = gl_WorkGroupID.x;
 
     uint idx = id.x;
-    uint len = indices.length();
+    uint instance_index = id.y;
+    uint len = clusters.length();
 	
-	// For the end workgroup
-    // if (idx >= should_draw[offset]) {
+	// For workgroups outside of bounds
+    // if (subgroupAll(idx >= len)) {
     //     return;
     // }
- 
-
-	// Initialise scan to list of sizes [2,0,0,3,1,0,0]
 
 	// Add workgroups before this workgroup
 	uint thread_sum = 0;
@@ -57,18 +59,28 @@ void main(  ) {
 
     uint group_base = subgroupAdd(thread_sum);
 	
+	// For the end workgroup
+    // if () {
+    //     return;
+    // }
+ 
 	// Add things within this workgroup
-	bool cull = should_draw[idx] > 0;
-
-	uint idx_val = group_base + subgroupExclusiveAdd(cull ? clusters[idx].index_count : 0);
+	bool draw = should_draw[idx] > 0 && idx < len;
 
 
-	// Scan should now look like [2,2,2,5,6,6,6]
+	uint prev_instances_index_count = instance_index == 0 ? 0 : indirect[instance_index-1].base_index + indirect[instance_index-1].index_count;
+	//const uint TEST = 5000000;
+	//uint prev_instances_index_count = instance_index * TEST;
+
+	uint contributed_indices = draw ? clusters[idx].index_count : 0;
+
+	uint destination_idx = prev_instances_index_count + group_base + subgroupExclusiveAdd(contributed_indices);
+
 
 	// Undo the starting addition to get our pack positions
 
 	// Scan should now look like [0,-,-,2,5,-,-]
-    if (cull) {
+    if (draw) {
 
         //var result_start: u32 = 0u;
 
@@ -76,11 +88,21 @@ void main(  ) {
 
 		
 		// Ideally, compute this in a step after writing cull to a buffer and compacting it down
-        for (uint ind = 0; ind < clusters[idx].index_count; ind++) {
-            result_indicies[idx_val + ind] = indices[ind_start + ind];
+        for (uint i = 0; i < clusters[idx].index_count; i++) {
+            result_indicies[destination_idx + i] = indices[ind_start + i];
         }
 
+
     }
+
+	// Last invocation or last cluster
+	if (idx == len-1){
+		// Just in case we are the last index, get the index of the final position
+		destination_idx += contributed_indices;
+
+		indirect[instance_index].index_count = (destination_idx - prev_instances_index_count);
+		indirect[instance_index].base_index = prev_instances_index_count;
+	}
 
 	// Fill the max index count from the final work item
 

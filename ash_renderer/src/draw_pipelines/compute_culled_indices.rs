@@ -41,6 +41,7 @@ pub struct ComputeCulledIndices {
     core: Arc<Core>,
     should_cull_buffer: Arc<TBuffer<u32>>,
     result_indices_buffer: Arc<TBuffer<u32>>,
+    draw_indexed_indirect_buffer: Arc<TBuffer<vk::DrawIndexedIndirectCommand>>,
     vertex_buffer: Arc<TBuffer<MeshVert>>,
     indices_buffer: Arc<TBuffer<u32>>,
 }
@@ -60,6 +61,7 @@ impl ComputeCulledIndices {
         meshlet_buffer: Arc<Buffer>,
         submesh_buffer: Arc<Buffer>,
         indices_buffer: Arc<TBuffer<u32>>,
+        instance_count: usize,
         cluster_count: u32,
     ) -> Self {
         let ubo_layout = create_descriptor_set_layout(core.device.clone());
@@ -101,6 +103,27 @@ impl ComputeCulledIndices {
             &vec![0; (indices_buffer.size() * 2) as usize],
         );
 
+        let mut draw_indexed_commands = Vec::with_capacity(instance_count);
+
+        for i in 0..instance_count {
+            draw_indexed_commands.push(vk::DrawIndexedIndirectCommand {
+                index_count: indices_buffer.item_len() as _,
+                instance_count: 1,
+                first_index: (indices_buffer.item_len() * i) as _,
+                vertex_offset: 0,
+                first_instance: i as _,
+            });
+        }
+
+        let draw_indexed_indirect_buffer = TBuffer::new_filled(
+            core.device.clone(),
+            allocator.clone(),
+            &core.command_pool,
+            graphics_queue,
+            vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::INDIRECT_BUFFER,
+            &draw_indexed_commands,
+        );
+
         let descriptor_sets = create_compute_culled_indices_descriptor_sets(
             &core.device,
             &descriptor_pool,
@@ -113,6 +136,7 @@ impl ComputeCulledIndices {
             //&texture_image,
             &result_indices_buffer,
             &indices_buffer,
+            &draw_indexed_indirect_buffer,
             screen.swapchain().images.len(),
         );
 
@@ -127,6 +151,7 @@ impl ComputeCulledIndices {
             vertex_buffer,
             should_draw_pipeline,
             result_indices_buffer,
+            draw_indexed_indirect_buffer,
             indices_buffer,
         }
     }
@@ -213,6 +238,50 @@ impl ScreenData {
 
             let descriptor_sets_to_bind = [core_draw.descriptor_sets[i].handle()];
 
+            let should_draw_buffer_barriers = [
+                vk::BufferMemoryBarrier2::builder()
+                    .buffer(core_draw.should_cull_buffer.handle())
+                    .src_access_mask(vk::AccessFlags2::SHADER_STORAGE_WRITE)
+                    .dst_access_mask(vk::AccessFlags2::SHADER_STORAGE_READ)
+                    .src_stage_mask(vk::PipelineStageFlags2::COMPUTE_SHADER)
+                    .dst_stage_mask(vk::PipelineStageFlags2::COMPUTE_SHADER)
+                    .size(vk::WHOLE_SIZE)
+                    .build(),
+                vk::BufferMemoryBarrier2::builder()
+                    .buffer(core_draw.draw_indexed_indirect_buffer.handle())
+                    .src_access_mask(vk::AccessFlags2::SHADER_STORAGE_WRITE)
+                    .dst_access_mask(vk::AccessFlags2::SHADER_STORAGE_READ)
+                    .src_stage_mask(vk::PipelineStageFlags2::COMPUTE_SHADER)
+                    .dst_stage_mask(vk::PipelineStageFlags2::COMPUTE_SHADER)
+                    .size(vk::WHOLE_SIZE)
+                    .build(),
+            ];
+
+            let should_draw_dependency_info =
+                vk::DependencyInfo::builder().buffer_memory_barriers(&should_draw_buffer_barriers);
+
+            let result_indices_buffer_barriers = [
+                vk::BufferMemoryBarrier2::builder()
+                    .buffer(core_draw.result_indices_buffer.handle())
+                    .src_access_mask(vk::AccessFlags2::SHADER_STORAGE_WRITE)
+                    .dst_access_mask(vk::AccessFlags2::INDEX_READ)
+                    .src_stage_mask(vk::PipelineStageFlags2::COMPUTE_SHADER)
+                    .dst_stage_mask(vk::PipelineStageFlags2::INDEX_INPUT)
+                    .size(vk::WHOLE_SIZE)
+                    .build(),
+                vk::BufferMemoryBarrier2::builder()
+                    .buffer(core_draw.draw_indexed_indirect_buffer.handle())
+                    .src_access_mask(vk::AccessFlags2::SHADER_STORAGE_WRITE)
+                    .dst_access_mask(vk::AccessFlags2::INDIRECT_COMMAND_READ)
+                    .src_stage_mask(vk::PipelineStageFlags2::COMPUTE_SHADER)
+                    .dst_stage_mask(vk::PipelineStageFlags2::DRAW_INDIRECT)
+                    .size(vk::WHOLE_SIZE)
+                    .build(),
+            ];
+
+            let result_indices_dependency_info = vk::DependencyInfo::builder()
+                .buffer_memory_barriers(&result_indices_buffer_barriers);
+
             unsafe {
                 device.handle.cmd_bind_descriptor_sets(
                     command_buffer,
@@ -222,39 +291,52 @@ impl ScreenData {
                     &descriptor_sets_to_bind,
                     &[],
                 );
-                device.handle.cmd_bind_pipeline(
-                    command_buffer,
-                    vk::PipelineBindPoint::COMPUTE,
-                    core_draw.should_draw_pipeline.handle(),
-                );
 
-                let instance = 0;
+                for instance in 0..instance_count {
+                    device.handle.cmd_bind_pipeline(
+                        command_buffer,
+                        vk::PipelineBindPoint::COMPUTE,
+                        core_draw.should_draw_pipeline.handle(),
+                    );
 
-                device.handle.cmd_dispatch_base(
-                    command_buffer,
-                    0,
-                    instance,
-                    0,
-                    submesh_count,
-                    1,
-                    1,
-                );
+                    device.handle.cmd_dispatch_base(
+                        command_buffer,
+                        0,
+                        instance,
+                        0,
+                        submesh_count,
+                        1,
+                        1,
+                    );
 
-                device.handle.cmd_bind_pipeline(
-                    command_buffer,
-                    vk::PipelineBindPoint::COMPUTE,
-                    core_draw.compact_indices_pipeline.handle(),
-                );
+                    // Force previous compute shader to be complete before this one
+                    device
+                        .handle
+                        .cmd_pipeline_barrier2(command_buffer, &should_draw_dependency_info);
 
-                device.handle.cmd_dispatch_base(
-                    command_buffer,
-                    0,
-                    instance,
-                    0,
-                    submesh_count,
-                    1,
-                    1,
-                );
+                    device.handle.cmd_bind_pipeline(
+                        command_buffer,
+                        vk::PipelineBindPoint::COMPUTE,
+                        core_draw.compact_indices_pipeline.handle(),
+                    );
+
+                    device.handle.cmd_dispatch_base(
+                        command_buffer,
+                        0,
+                        instance,
+                        0,
+                        submesh_count.div_ceil(16),
+                        1,
+                        1,
+                    );
+
+                    // Force result indices to be complete before continuing.
+                    // Because we re-bind the pipelines every time, we need to specify this dependency for all
+                    // Otherwise, only the last instance will have correct info
+                    device
+                        .handle
+                        .cmd_pipeline_barrier2(command_buffer, &result_indices_dependency_info);
+                }
 
                 device.handle.cmd_begin_render_pass(
                     command_buffer,
@@ -321,13 +403,22 @@ impl ScreenData {
                     &[core_draw.vertex_buffer.handle()],
                     &[0],
                 );
-                device.handle.cmd_draw_indexed(
+                // device.handle.cmd_draw_indexed(
+                //     command_buffer,
+                //     core_draw.indices_buffer.item_len() as _,
+                //     instance_count,
+                //     0,
+                //     0,
+                //     0,
+                // );
+
+                // Each instance has their own indirect drawing buffer, tracing out their position in the result buffer
+                device.handle.cmd_draw_indexed_indirect(
                     command_buffer,
-                    core_draw.indices_buffer.item_len() as _,
+                    core_draw.draw_indexed_indirect_buffer.handle(),
+                    0,
                     instance_count,
-                    0,
-                    0,
-                    0,
+                    core_draw.draw_indexed_indirect_buffer.stride() as _,
                 );
                 // device.cmd_draw_indexed(
                 //     command_buffer,
@@ -561,6 +652,12 @@ fn create_descriptor_set_layout(device: Arc<Device>) -> Arc<DescriptorSetLayout>
             .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
             .stage_flags(vk::ShaderStageFlags::COMPUTE)
             .build(),
+        vk::DescriptorSetLayoutBinding::builder()
+            .binding(7)
+            .descriptor_count(1)
+            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+            .stage_flags(vk::ShaderStageFlags::COMPUTE)
+            .build(),
     ];
 
     Arc::new(DescriptorSetLayout::new(device, &ubo_layout_bindings))
@@ -577,6 +674,7 @@ fn create_compute_culled_indices_descriptor_sets(
     submesh_buffer: &Arc<Buffer>,
     result_indices_buffer: &Arc<impl AsBuffer>,
     indices_buffer: &Arc<impl AsBuffer>,
+    draw_indexed_indirect_buffer: &Arc<TBuffer<vk::DrawIndexedIndirectCommand>>,
     //texture: &Image,
     swapchain_images_size: usize,
 ) -> Vec<DescriptorSet> {
@@ -633,6 +731,10 @@ fn create_compute_culled_indices_descriptor_sets(
                     DescriptorWriteData::Buffer {
                         // 6
                         buf: indices_buffer.buffer(), //
+                    },
+                    DescriptorWriteData::Buffer {
+                        // 6
+                        buf: draw_indexed_indirect_buffer.buffer(), //
                     },
                 ],
             )

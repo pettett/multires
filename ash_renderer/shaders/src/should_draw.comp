@@ -50,11 +50,14 @@ float cluster_error(uint idx, uint i) {
     }
 }
 
-layout (local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+const uint LOCAL_SIZE_X = 1;
+
+layout (local_size_x = LOCAL_SIZE_X, local_size_y = 1, local_size_z = 1) in;
  
 void main() {
 	uvec3 id = gl_GlobalInvocationID;
     uint i = id.x;
+    uint instance = id.y;
     //uint len = indices.result.length();
 
     // if (i == 0) {
@@ -66,8 +69,8 @@ void main() {
     // }
     // should_draw[i] = i32(clusters[i].index_offset);
 
-    uint start = clusters[i].index_offset;
-    uint end = start + clusters[i].index_count;
+    //uint start = clusters[i].index_offset;
+    //uint end = start + clusters[i].index_count;
 
 	// Calculate if this cluster should be drawn:
 	// draw_error >= min(self.error, self.co-parent.error) 
@@ -77,23 +80,18 @@ void main() {
     float this_error = -LARGE_ERROR;
 
     if (clusters[i].co_parent >= 0) {
-        this_error = min(cluster_error(i, 0), cluster_error(clusters[i].co_parent, 0));
+        this_error = min(cluster_error(i, instance), cluster_error(clusters[i].co_parent, instance));
     }
 
 	// lots of zeros
     float parent_error = LARGE_ERROR;
 
     if (clusters[i].parent0 >= 0) { // If we have one parent, we are guarenteed to have another.
-        parent_error = min(cluster_error(clusters[i].parent0, 0), cluster_error(clusters[i].parent1, 0));
+        parent_error = min(cluster_error(clusters[i].parent0, instance), cluster_error(clusters[i].parent1, instance));
     }
 
     bool cull = ubo.target_error >= this_error && ubo.target_error < parent_error;
 
     should_draw[i] = cull ? i + 1 : 0;
 	
-	// Ideally, compute this in a step after writing cull to a buffer and compacting it down
-
-    //for (var ind: u32 = start; ind < end; ind++) {
-    //    result_indicies[ind] = indices[ind] * cull;
-    //}
 }
