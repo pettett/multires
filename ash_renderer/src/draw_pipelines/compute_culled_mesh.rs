@@ -66,18 +66,20 @@ impl ComputeCulledMesh {
         );
 
         let should_draw_pipeline = ComputePipeline::create_compute_pipeline(
-            core.device.clone(),
+            &core,
             include_bytes!("../../shaders/spv/should_draw.comp"),
             ubo_layout.clone(),
+            "Should Draw Pipeline",
         );
 
         let should_cull_buffer = TBuffer::new_filled(
-            core.device.clone(),
+            &core,
             allocator.clone(),
             &core.command_pool,
             graphics_queue,
             vk::BufferUsageFlags::STORAGE_BUFFER,
             &vec![1; cluster_count as _],
+            "Should Cull Buffer",
         );
 
         let descriptor_sets = create_compute_culled_meshes_descriptor_sets(

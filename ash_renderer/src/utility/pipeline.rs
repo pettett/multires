@@ -2,7 +2,7 @@ use std::{ffi::CString, ops::Deref, ptr, sync::Arc};
 
 use ash::vk;
 
-use crate::VkHandle;
+use crate::{core::Core, VkHandle};
 
 use super::{descriptor_pool::DescriptorSetLayout, device::Device};
 
@@ -37,11 +37,13 @@ impl<const T: bool> Pipeline<T> {
 }
 impl ComputePipeline {
     pub fn create_compute_pipeline(
-        device: Arc<Device>,
+        core: &Core,
         shader: &[u8],
         ubo_layout: Arc<DescriptorSetLayout>,
+        name: &str,
     ) -> ComputePipeline {
-        let comp_shader_module = ShaderModule::new(device.clone(), bytemuck::cast_slice(shader));
+        let comp_shader_module =
+            ShaderModule::new(core.device.clone(), bytemuck::cast_slice(shader));
 
         let main_function_name = CString::new("main").unwrap(); // the beginning function name in shader code.
 
@@ -57,7 +59,7 @@ impl ComputePipeline {
             vk::PipelineLayoutCreateInfo::builder().set_layouts(&set_layouts);
 
         let pipeline_layout = unsafe {
-            device
+            core.device
                 .handle
                 .create_pipeline_layout(&pipeline_layout_create_info, None)
                 .expect("Failed to create pipeline layout!")
@@ -70,13 +72,20 @@ impl ComputePipeline {
             .build()];
 
         let compute_pipelines = unsafe {
-            device
+            core.device
                 .handle
                 .create_compute_pipelines(vk::PipelineCache::null(), &pipeline_create_infos, None)
                 .expect("Failed to create Compute Pipeline!.")
         };
 
-        ComputePipeline::new(device, compute_pipelines[0], pipeline_layout, ubo_layout)
+        core.name_object(name, compute_pipelines[0]);
+
+        ComputePipeline::new(
+            core.device.clone(),
+            compute_pipelines[0],
+            pipeline_layout,
+            ubo_layout,
+        )
     }
 }
 

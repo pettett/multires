@@ -12,10 +12,10 @@ use gpu_allocator::{
     MemoryLocation,
 };
 
-use crate::VkHandle;
+use crate::{core::Core, VkHandle};
 
 use super::{
-    buffer::{AsBuffer, Buffer},
+    buffer::{AsBuffer, Buffer, STAGING_BUFFER},
     command_pool::CommandPool,
     device::Device,
     instance::Instance,
@@ -53,7 +53,7 @@ impl Drop for Image {
 
 impl Image {
     pub fn create_image(
-        device: Arc<Device>,
+        core: &Core,
         width: u32,
         height: u32,
         mip_levels: u32,
@@ -63,6 +63,7 @@ impl Image {
         usage: vk::ImageUsageFlags,
         location: MemoryLocation,
         allocator: Arc<Mutex<Allocator>>,
+        name: &str,
     ) -> Image {
         let image_create_info = vk::ImageCreateInfo {
             s_type: vk::StructureType::IMAGE_CREATE_INFO,
@@ -87,19 +88,21 @@ impl Image {
         };
 
         let image = unsafe {
-            device
+            core.device
                 .handle
                 .create_image(&image_create_info, None)
                 .expect("Failed to create Texture Image!")
         };
 
-        let requirements = unsafe { device.handle.get_image_memory_requirements(image) };
+        core.name_object(name, image);
+
+        let requirements = unsafe { core.device.handle.get_image_memory_requirements(image) };
 
         let allocation = allocator
             .lock()
             .unwrap()
             .allocate(&AllocationCreateDesc {
-                name: "Image Allocation",
+                name,
                 requirements,
                 location,
                 linear: true, // Buffers are always linear
@@ -108,14 +111,14 @@ impl Image {
             .unwrap();
 
         unsafe {
-            device
+            core.device
                 .handle
                 .bind_image_memory(image, allocation.memory(), allocation.offset())
                 .expect("Failed to bind Image Memmory!");
         }
 
         Image {
-            device,
+            device: core.device.clone(),
             image,
             image_memory: allocation,
             allocator,
@@ -126,12 +129,13 @@ impl Image {
     }
 
     pub fn create_texture_image(
-        device: Arc<Device>,
+        core: &Core,
 
         allocator: Arc<Mutex<Allocator>>,
         command_pool: &Arc<CommandPool>,
         submit_queue: vk::Queue,
         image_path: &Path,
+        name: &str,
     ) -> Self {
         // let mut image_object = image::open(image_path).unwrap(); // this function is slow in debug mode.
         // image_object = image_object.flipv();
@@ -157,11 +161,12 @@ impl Image {
         }
 
         let staging_buffer = Buffer::new(
-            device.clone(),
+            core,
             allocator.clone(),
             image_size,
             vk::BufferUsageFlags::TRANSFER_SRC,
             gpu_allocator::MemoryLocation::CpuToGpu,
+            STAGING_BUFFER,
         );
 
         unsafe {
@@ -175,7 +180,7 @@ impl Image {
         }
 
         let texture_image = Self::create_image(
-            device.clone(),
+            core,
             image_width,
             image_height,
             1,
@@ -185,10 +190,11 @@ impl Image {
             vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
             MemoryLocation::GpuOnly,
             allocator,
+            name,
         );
 
         Self::transition_image_layout(
-            &device,
+            &core.device,
             command_pool,
             submit_queue,
             &texture_image,
@@ -199,7 +205,7 @@ impl Image {
         );
 
         copy_buffer_to_image(
-            &device,
+            &core.device,
             command_pool,
             submit_queue,
             staging_buffer.handle(),
@@ -209,7 +215,7 @@ impl Image {
         );
 
         Self::transition_image_layout(
-            &device,
+            &core.device,
             command_pool,
             submit_queue,
             &texture_image,
@@ -339,16 +345,16 @@ impl Image {
     }
 
     pub fn create_depth_resources(
-        instance: &Instance,
-        device: Arc<Device>,
+        core: &Core,
         physical_device: vk::PhysicalDevice,
         swapchain_extent: vk::Extent2D,
         allocator: Arc<Mutex<Allocator>>,
         msaa_samples: vk::SampleCountFlags,
+        name: &str,
     ) -> Self {
-        let depth_format = instance.find_depth_format(physical_device);
+        let depth_format = core.instance.find_depth_format(physical_device);
         Self::create_image(
-            device,
+            core,
             swapchain_extent.width,
             swapchain_extent.height,
             1,
@@ -358,6 +364,7 @@ impl Image {
             vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
             MemoryLocation::GpuOnly,
             allocator,
+            name,
         )
         .create_image_view(depth_format, vk::ImageAspectFlags::DEPTH, 1)
     }

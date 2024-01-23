@@ -62,11 +62,7 @@ impl Screen {
         ));
 
         self.depth = Some(create_depth_resources(
-            &self.core.instance.handle,
-            self.core.device.clone(),
-            &self.core.physical_device,
-            self.core.command_pool.handle(),
-            graphics_queue,
+            &self.core,
             self.swapchain().extent,
             allocator.clone(),
         ));
@@ -109,18 +105,14 @@ impl Drop for Screen {
 }
 
 fn create_depth_resources(
-    instance: &ash::Instance,
-    device: Arc<Device>,
-    physical_device: &PhysicalDevice,
-    _command_pool: vk::CommandPool,
-    _submit_queue: vk::Queue,
+    core: &Core,
     swapchain_extent: vk::Extent2D,
     allocator: Arc<Mutex<Allocator>>,
 ) -> Arc<Image> {
-    let depth_format = find_depth_format(instance, physical_device);
+    let depth_format = find_depth_format(&core.instance.handle, &core.physical_device);
     Arc::new(
         Image::create_image(
-            device,
+            core,
             swapchain_extent.width,
             swapchain_extent.height,
             1,
@@ -130,6 +122,7 @@ fn create_depth_resources(
             vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
             gpu_allocator::MemoryLocation::GpuOnly,
             allocator,
+            "Depth Texture",
         )
         .create_image_view(depth_format, vk::ImageAspectFlags::DEPTH, 1),
     )

@@ -1,18 +1,21 @@
 use std::{
+    ffi,
     marker::PhantomData,
     mem, ptr,
     sync::{Arc, Mutex},
 };
 
-use ash::vk::{self, BufferUsageFlags};
+use ash::vk::{self, BufferUsageFlags, Handle};
 use gpu_allocator::{
     vulkan::{self, Allocation, AllocationCreateDesc, AllocationScheme, Allocator},
     MemoryLocation,
 };
 
-use crate::VkHandle;
+use crate::{core::Core, VkHandle};
 
 use super::{command_pool::CommandPool, descriptor_pool::DescriptorSet, device::Device};
+
+pub const STAGING_BUFFER: &str = "Staging Buffer";
 
 pub trait AsBuffer: VkHandle<VkItem = vk::Buffer> {
     fn buffer(self: &Arc<Self>) -> Arc<Buffer>;
@@ -93,10 +96,11 @@ impl<T> AsBuffer for TBuffer<T> {
 }
 impl<T> TBuffer<T> {
     pub fn new_per_swapchain(
-        device: Arc<Device>,
+        core: &Core,
         allocator: Arc<Mutex<Allocator>>,
         location: MemoryLocation,
         swapchain_image_count: usize,
+        name: &str,
     ) -> Vec<Arc<Self>> {
         let buffer_size = ::std::mem::size_of::<T>();
 
@@ -104,11 +108,12 @@ impl<T> TBuffer<T> {
 
         for _ in 0..swapchain_image_count {
             let uniform_buffer = Buffer::new(
-                device.clone(),
+                core,
                 allocator.clone(),
                 buffer_size as u64,
                 vk::BufferUsageFlags::UNIFORM_BUFFER,
                 MemoryLocation::CpuToGpu,
+                name,
             );
             uniform_buffers.push(Arc::new(TBuffer::new(Arc::new(uniform_buffer))));
         }
@@ -117,9 +122,10 @@ impl<T> TBuffer<T> {
     }
 
     pub fn new_with_data(
-        device: Arc<Device>,
+        core: &Core,
         allocator: Arc<Mutex<Allocator>>,
         data: Vec<T>,
+        name: &str,
     ) -> Vec<Self> {
         let buffer_size = ::std::mem::size_of::<T>();
 
@@ -127,11 +133,12 @@ impl<T> TBuffer<T> {
 
         for datum in data {
             let uniform_buffer = Buffer::new(
-                device.clone(),
+                core,
                 allocator.clone(),
                 buffer_size as u64,
                 vk::BufferUsageFlags::UNIFORM_BUFFER,
                 MemoryLocation::CpuToGpu,
+                name,
             );
             let buf = TBuffer::new(Arc::new(uniform_buffer));
 
@@ -158,21 +165,23 @@ impl<T> TBuffer<T> {
     }
 
     pub fn new_filled(
-        device: Arc<Device>,
+        core: &Core,
         allocator: Arc<Mutex<Allocator>>,
         command_pool: &Arc<CommandPool>,
         submit_queue: vk::Queue,
         usage: vk::BufferUsageFlags,
         data: &[T],
+        name: &str,
     ) -> Arc<Self> {
         Arc::new(Self {
             buffer: Buffer::new_filled(
-                device,
+                core,
                 allocator.clone(),
                 command_pool,
                 submit_queue,
                 usage,
                 data,
+                name,
             ),
             _p: PhantomData,
         })
@@ -235,11 +244,12 @@ impl VkHandle for Buffer {
 
 impl Buffer {
     pub fn new(
-        device: Arc<Device>,
+        core: &Core,
         allocator: Arc<Mutex<Allocator>>,
         size: vk::DeviceSize,
         usage: vk::BufferUsageFlags,
         location: MemoryLocation,
+        name: &str,
     ) -> Buffer {
         let buffer_create_info = vk::BufferCreateInfo {
             s_type: vk::StructureType::BUFFER_CREATE_INFO,
@@ -253,19 +263,21 @@ impl Buffer {
         };
 
         let buffer = unsafe {
-            device
+            core.device
                 .handle
                 .create_buffer(&buffer_create_info, None)
                 .expect("Failed to create Vertex Buffer")
         };
 
-        let requirements = unsafe { device.handle.get_buffer_memory_requirements(buffer) };
+        core.name_object(name, buffer);
+
+        let requirements = unsafe { core.device.handle.get_buffer_memory_requirements(buffer) };
 
         let allocation = allocator
             .lock()
             .unwrap()
             .allocate(&AllocationCreateDesc {
-                name: "Example allocation",
+                name,
                 requirements,
                 location,
                 linear: true, // Buffers are always linear
@@ -274,14 +286,14 @@ impl Buffer {
             .unwrap();
 
         unsafe {
-            device
+            core.device
                 .handle
                 .bind_buffer_memory(buffer, allocation.memory(), allocation.offset())
                 .expect("Failed to bind Buffer");
         }
 
         Buffer {
-            device,
+            device: core.device.clone(),
             handle: buffer,
             size,
             allocator,
@@ -291,39 +303,43 @@ impl Buffer {
     }
 
     pub fn new_storage_filled<T: bytemuck::Pod>(
-        device: Arc<Device>,
+        core: &Core,
         allocator: Arc<Mutex<Allocator>>,
         command_pool: &Arc<CommandPool>,
         submit_queue: vk::Queue,
         data: &[T],
+        name: &str,
     ) -> Arc<Buffer> {
         Self::new_filled(
-            device,
+            core,
             allocator,
             command_pool,
             submit_queue,
             vk::BufferUsageFlags::STORAGE_BUFFER,
             data,
+            name,
         )
     }
 
     /// Create a new buffer and fill it with initial data copied in from a staging buffer
     pub fn new_filled<T>(
-        device: Arc<Device>,
+        core: &Core,
         allocator: Arc<Mutex<Allocator>>,
         command_pool: &Arc<CommandPool>,
         submit_queue: vk::Queue,
         usage: vk::BufferUsageFlags,
         data: &[T],
+        name: &str,
     ) -> Arc<Buffer> {
         let buffer_size = ::std::mem::size_of_val(data) as vk::DeviceSize;
 
         let staging_buffer = Self::new(
-            device.clone(),
+            core,
             allocator.clone(),
             buffer_size,
             vk::BufferUsageFlags::TRANSFER_SRC,
             MemoryLocation::CpuToGpu,
+            STAGING_BUFFER,
         );
 
         unsafe {
@@ -337,11 +353,12 @@ impl Buffer {
         }
         //THIS is not actually a vertex buffer, but a storage buffer that can be accessed from the mesh shader
         let buffer = Self::new(
-            device.clone(),
+            core,
             allocator,
             buffer_size,
             vk::BufferUsageFlags::TRANSFER_DST | usage,
             MemoryLocation::GpuOnly,
+            name,
         );
 
         staging_buffer.copy_to_other(submit_queue, command_pool, &buffer, buffer_size);

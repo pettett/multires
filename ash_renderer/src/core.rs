@@ -1,4 +1,7 @@
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::{
+    ffi,
+    sync::{Arc, Mutex, MutexGuard},
+};
 
 use crate::{
     utility::{
@@ -14,7 +17,7 @@ use crate::{
 };
 
 use crate::utility::{device::Device, physical_device::PhysicalDevice, surface::Surface};
-use ash::vk;
+use ash::vk::{self, Handle};
 
 use gpu_allocator::{
     vulkan::{Allocator, AllocatorCreateDesc},
@@ -96,6 +99,28 @@ impl Core {
             debug_utils_loader,
             debug_messenger,
         })
+    }
+
+    /// Name the object, if a debug util loader is attached
+    /// Otherwise this function will do nothing
+    pub fn name_object<T: Handle + Default>(&self, name: &str, object: T) {
+        let raw = object.as_raw();
+        if raw == T::default().as_raw() {
+            // Null pointer
+            return;
+        }
+
+        let name_c = ffi::CString::new(name).unwrap();
+
+        let object_name_info = vk::DebugUtilsObjectNameInfoEXT::builder()
+            .object_type(T::TYPE)
+            .object_handle(raw)
+            .object_name(&name_c);
+        unsafe {
+            self.debug_utils_loader
+                .set_debug_utils_object_name(self.device.handle.handle(), &object_name_info)
+                .unwrap();
+        }
     }
 }
 impl Drop for Core {

@@ -252,38 +252,42 @@ impl App {
         println!("V: {:?} M: {:?}", data.verts.len(), meshlets.len());
 
         let vertex_buffer = TBuffer::new_filled(
-            device.clone(),
+            &core,
             allocator.clone(),
             &core.command_pool,
             graphics_queue,
             vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::VERTEX_BUFFER,
             &data.verts,
+            "Vertex Buffer",
         );
 
         let meshlet_buffer = Buffer::new_storage_filled(
-            device.clone(),
+            &core,
             allocator.clone(),
             &core.command_pool,
             graphics_queue,
             &meshlets,
+            "Meshlet Buffer",
         );
 
         let submesh_buffer = Buffer::new_storage_filled(
-            device.clone(),
+            &core,
             allocator.clone(),
             &core.command_pool,
             graphics_queue,
             &cluster_data,
+            "Submesh Buffer",
         );
 
         let indices_buffer = TBuffer::new_filled(
-            core.device.clone(),
+            &core,
             allocator.clone(),
             &core.command_pool,
             graphics_queue,
             // Allow index use for testing
             vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::INDEX_BUFFER,
             &indices,
+            "Indices Buffer",
         );
 
         let mut uniform_transforms = Vec::new();
@@ -308,18 +312,20 @@ impl App {
         }
 
         let uniform_transform_buffer = Buffer::new_storage_filled(
-            device.clone(),
+            &core,
             allocator.clone(),
             &core.command_pool,
             graphics_queue,
             &uniform_transforms,
+            "Transform Buffer",
         );
 
         let uniform_camera_buffers = TBuffer::<CameraUniformBufferObject>::new_per_swapchain(
-            device.clone(),
+            &core,
             allocator.clone(),
             gpu_allocator::MemoryLocation::CpuToGpu,
             screen.swapchain().images.len(),
+            "Camera Buffer",
         );
 
         println!("Loading descriptors");

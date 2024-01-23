@@ -4,11 +4,7 @@ use std::{
     sync::Arc,
 };
 
-use ash::vk::{
-    self, PhysicalDeviceBufferDeviceAddressFeatures, PhysicalDeviceMaintenance4Features,
-    PhysicalDeviceMeshShaderFeaturesEXT, PhysicalDeviceShaderDrawParameterFeatures,
-    PhysicalDeviceSynchronization2Features,
-};
+use ash::vk;
 use winapi::ctypes::c_char;
 
 use crate::{VkDeviceOwned, VkHandle};
@@ -87,29 +83,18 @@ impl Device {
 
         // Just go ahead and enable everything we have
         let mut physical_device_features = physical_device.get_features();
+        // FIXME: Do these on a case by case basis for each pipeline
 
-        let mut shader_draw_params =
-            PhysicalDeviceShaderDrawParameterFeatures::builder().shader_draw_parameters(true);
+        let feature_set = physical_device_features.feature_set();
 
-        let mut mesh_shader = PhysicalDeviceMeshShaderFeaturesEXT::builder()
-            .mesh_shader(true)
-            .task_shader(true);
-
-        let mut man4 = PhysicalDeviceMaintenance4Features::builder().maintenance4(true);
-
-        let mut buffer_device_info =
-            PhysicalDeviceBufferDeviceAddressFeatures::builder().buffer_device_address(true);
-
-        let mut synchronization2 =
-            PhysicalDeviceSynchronization2Features::builder().synchronization2(true);
+        assert!(feature_set.task_shader);
+        assert!(feature_set.mesh_shader);
+        assert!(feature_set.maintenance4);
+        assert!(feature_set.synchronization2);
+        assert!(feature_set.buffer_device_address);
 
         let device_create_info = vk::DeviceCreateInfo::builder()
-            .push_next(&mut physical_device_features)
-            .push_next(&mut shader_draw_params)
-            .push_next(&mut mesh_shader)
-            .push_next(&mut man4)
-            .push_next(&mut buffer_device_info)
-            .push_next(&mut synchronization2)
+            .push_next(&mut physical_device_features.device) // The rest will already have been pushed on
             .queue_create_infos(&queue_create_infos)
             .enabled_extension_names(&enable_extension_names);
 

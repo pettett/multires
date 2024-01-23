@@ -73,12 +73,13 @@ impl IndirectTasks {
             });
         }
         let indirect_task_buffer = TBuffer::new_filled(
-            core.device.clone(),
+            &core,
             allocator.clone(),
             &core.command_pool,
             graphics_queue,
             vk::BufferUsageFlags::INDIRECT_BUFFER | vk::BufferUsageFlags::STORAGE_BUFFER,
             &task_indirect_data,
+            "Indirect Task Buffer",
         );
 
         let descriptor_sets = create_descriptor_sets(
