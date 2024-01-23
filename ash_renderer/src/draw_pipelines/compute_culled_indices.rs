@@ -228,9 +228,17 @@ impl ScreenData {
                     core_draw.should_draw_pipeline.handle(),
                 );
 
-                device
-                    .handle
-                    .cmd_dispatch(command_buffer, submesh_count, 1, 1);
+                let instance = 0;
+
+                device.handle.cmd_dispatch_base(
+                    command_buffer,
+                    0,
+                    instance,
+                    0,
+                    submesh_count,
+                    1,
+                    1,
+                );
 
                 device.handle.cmd_bind_pipeline(
                     command_buffer,
@@ -238,9 +246,15 @@ impl ScreenData {
                     core_draw.compact_indices_pipeline.handle(),
                 );
 
-                device
-                    .handle
-                    .cmd_dispatch(command_buffer, submesh_count, 1, 1);
+                device.handle.cmd_dispatch_base(
+                    command_buffer,
+                    0,
+                    instance,
+                    0,
+                    submesh_count,
+                    1,
+                    1,
+                );
 
                 device.handle.cmd_begin_render_pass(
                     command_buffer,
@@ -310,7 +324,7 @@ impl ScreenData {
                 device.handle.cmd_draw_indexed(
                     command_buffer,
                     core_draw.indices_buffer.item_len() as _,
-                    1,
+                    instance_count,
                     0,
                     0,
                     0,

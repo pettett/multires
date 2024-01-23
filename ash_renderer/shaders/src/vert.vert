@@ -28,9 +28,9 @@ layout (location = 1) in vec4 norm;
 
 
 void main() {
-	gl_Position = ubo.view_proj * models[0] * vec4(pos.xyz, 1);
+	gl_Position = ubo.view_proj * models[gl_InstanceIndex] * vec4(pos.xyz, 1);
 
-	OUT.world_normal = (models[0] * vec4(norm.xyz, 0)).xyz;
+	OUT.world_normal = (models[gl_InstanceIndex] * vec4(norm.xyz, 0)).xyz;
 		
 	OUT.fragColor = vec3(1,1,1);
 		

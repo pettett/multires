@@ -25,8 +25,9 @@ layout(binding = 6) readonly buffer Indicies {
 };
 
 
+const uint LOCAL_SIZE_X = 16;
 
-layout (local_size_x = 4, local_size_y = 1, local_size_z = 1) in;
+layout (local_size_x = LOCAL_SIZE_X, local_size_y = 1, local_size_z = 1) in;
 
 void main(  ) {
 	uvec3 id = gl_GlobalInvocationID;
@@ -48,7 +49,7 @@ void main(  ) {
 	uint thread_sum = 0;
 
     for (uint group = 0; group < gid; group++) {
-		uint meshlet = group * 4 + lid;
+		uint meshlet = group * LOCAL_SIZE_X + lid;
 		if (should_draw[meshlet] > 0){
     	    thread_sum += clusters[meshlet].index_count;
 		}

@@ -309,11 +309,11 @@ fn create_descriptor_set_layout(device: Arc<Device>) -> Arc<DescriptorSetLayout>
             p_immutable_samplers: ptr::null(),
         },
         vk::DescriptorSetLayoutBinding {
-            // verts buffer
+            // camera uniform
             binding: 3,
-            descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
+            descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
             descriptor_count: 1,
-            stage_flags: vk::ShaderStageFlags::MESH_EXT,
+            stage_flags: vk::ShaderStageFlags::MESH_EXT | vk::ShaderStageFlags::TASK_EXT,
             p_immutable_samplers: ptr::null(),
         },
         vk::DescriptorSetLayoutBinding {
@@ -325,11 +325,11 @@ fn create_descriptor_set_layout(device: Arc<Device>) -> Arc<DescriptorSetLayout>
             p_immutable_samplers: ptr::null(),
         },
         vk::DescriptorSetLayoutBinding {
-            // camera uniform
+            // meshlet buffer
             binding: 5,
-            descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
+            descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
             descriptor_count: 1,
-            stage_flags: vk::ShaderStageFlags::MESH_EXT | vk::ShaderStageFlags::TASK_EXT,
+            stage_flags: vk::ShaderStageFlags::MESH_EXT,
             p_immutable_samplers: ptr::null(),
         },
         vk::DescriptorSetLayoutBinding {
@@ -395,15 +395,15 @@ fn create_descriptor_sets(
                     },
                     DescriptorWriteData::Buffer {
                         // 3
-                        buf: meshlet_buffer.clone(),
+                        buf: uniform_camera_buffers[i].buffer(),
                     },
                     DescriptorWriteData::Buffer {
                         //  4
-                        buf: vertex_buffer.clone(),
+                        buf: meshlet_buffer.clone(),
                     },
                     DescriptorWriteData::Buffer {
                         //  5
-                        buf: uniform_camera_buffers[i].buffer(),
+                        buf: vertex_buffer.clone(),
                     },
                     DescriptorWriteData::Buffer {
                         //  6

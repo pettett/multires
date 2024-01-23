@@ -290,7 +290,7 @@ impl App {
 
         let mut world: World = World::new();
         for i in 0..1 {
-            for j in 0..1 {
+            for j in 0..2 {
                 let mut transform = Transform::new_pos(
                     glam::Vec3A::X * i as f32 * 40.0 + glam::Vec3A::Y * j as f32 * 40.0,
                 );

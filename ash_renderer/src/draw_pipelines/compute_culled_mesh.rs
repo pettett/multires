@@ -305,9 +305,7 @@ fn create_graphics_pipeline(
     );
     let mesh_shader_module = ShaderModule::new(
         device.clone(),
-        bytemuck::cast_slice(include_bytes!(
-            "../../shaders/spv/mesh_shader_compute_cull.mesh"
-        )),
+        bytemuck::cast_slice(include_bytes!("../../shaders/spv/mesh-shader.mesh")),
     );
     let frag_shader_module = ShaderModule::new(
         device.clone(),
