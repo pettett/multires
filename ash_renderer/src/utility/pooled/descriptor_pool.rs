@@ -3,13 +3,11 @@ use std::{ptr, sync::Arc};
 use ash::vk::{self, DescriptorSetLayoutCreateInfo};
 use egui::ahash::HashMap;
 
-use crate::{CameraUniformBufferObject, VkHandle};
+use crate::{VkHandle};
 
-use super::{
+use super::super::{
     buffer::{AsBuffer, Buffer},
-    device::Device,
-    image::Image,
-    structures::ModelUniformBufferObject,
+    device::Device, 
 };
 
 pub struct DescriptorPool {

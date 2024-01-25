@@ -5,11 +5,11 @@ use std::{
 
 use crate::{
     utility::{
-        command_pool::CommandPool,
         // the mod define some fixed functions that have been learned before.
         constants::*,
         debug::*,
         instance::Instance,
+        pooled::{command_pool::CommandPool, query_pool::QueryPool},
         structures::*,
         window::init_window,
     },
@@ -19,10 +19,6 @@ use crate::{
 use crate::utility::{device::Device, physical_device::PhysicalDevice, surface::Surface};
 use ash::vk::{self, Handle};
 
-use gpu_allocator::{
-    vulkan::{Allocator, AllocatorCreateDesc},
-    AllocationSizes,
-};
 use winit::event_loop::EventLoop;
 
 pub struct Core {
@@ -33,6 +29,7 @@ pub struct Core {
     pub surface: Arc<Surface>,
     pub queue_family: QueueFamilyIndices,
     pub command_pool: Arc<CommandPool>,
+    pub query_pool: Arc<QueryPool>,
 
     debug_utils_loader: ash::extensions::ext::DebugUtils,
     debug_messenger: vk::DebugUtilsMessengerEXT,
@@ -69,15 +66,6 @@ impl Core {
 
         let physical_device_subgroup_properties = physical_device.get_subgroup_properties();
 
-        // Features required for subgroupMax to work in task shader
-        assert!(TASK_GROUP_SIZE <= physical_device_subgroup_properties.subgroup_size);
-        assert!(physical_device_subgroup_properties
-            .supported_stages
-            .contains(vk::ShaderStageFlags::TASK_EXT));
-        assert!(physical_device_subgroup_properties
-            .supported_operations
-            .contains(vk::SubgroupFeatureFlags::ARITHMETIC));
-
         let (device, queue_family) = Device::create_logical_device(
             instance.clone(),
             physical_device.clone(),
@@ -86,8 +74,19 @@ impl Core {
             &surface,
         );
 
-        let command_pool = CommandPool::new(device.clone(), queue_family.graphics_family.unwrap());
+        // Features required for subgroupMax to work in task shader
+        assert!(TASK_GROUP_SIZE <= physical_device_subgroup_properties.subgroup_size);
+        if device.features.task_shader {
+            assert!(physical_device_subgroup_properties
+                .supported_stages
+                .contains(vk::ShaderStageFlags::TASK_EXT));
+        }
+        assert!(physical_device_subgroup_properties
+            .supported_operations
+            .contains(vk::SubgroupFeatureFlags::ARITHMETIC));
 
+        let command_pool = CommandPool::new(device.clone(), queue_family.graphics_family.unwrap());
+        let query_pool = QueryPool::new(device.clone());
         Arc::new(Core {
             window,
             device,
@@ -96,6 +95,7 @@ impl Core {
             surface,
             queue_family,
             command_pool,
+            query_pool,
             debug_utils_loader,
             debug_messenger,
         })

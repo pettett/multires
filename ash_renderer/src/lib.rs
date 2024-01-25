@@ -12,10 +12,10 @@ use crate::{
     utility::{
         // the mod define some fixed functions that have been learned before.
         constants::*,
-        descriptor_pool::DescriptorPool,
+        pooled::descriptor_pool::DescriptorPool,
         render_pass::RenderPass,
         structures::*,
-        swapchain::{SwapChainSupportDetail, Swapchain},
+        swapchain::{SwapChainSupportDetail},
         sync::SyncObjects,
     },
 };
@@ -44,7 +44,7 @@ use gui::{gui::Gui, window::GuiWindow};
 use screen::Screen;
 use utility::{
     buffer::{AsBuffer, Buffer, TBuffer},
-    descriptor_pool::DescriptorSet,
+    pooled::descriptor_pool::DescriptorSet,
 };
 use winit::event::WindowEvent;
 

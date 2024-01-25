@@ -11,7 +11,7 @@ use crate::{VkDeviceOwned, VkHandle};
 
 use super::{
     instance::Instance,
-    physical_device::{self, PhysicalDevice},
+    physical_device::{self, DeviceFeatureSet, PhysicalDevice},
     structures::{DeviceExtension, QueueFamilyIndices},
     surface::Surface,
 };
@@ -20,6 +20,7 @@ pub struct Device {
     instance: Arc<Instance>,
     physical_device: Arc<PhysicalDevice>,
 
+	pub features : DeviceFeatureSet,
     pub fn_mesh_shader: ash::extensions::ext::MeshShader,
     pub fn_swapchain: ash::extensions::khr::Swapchain,
     pub handle: ash::Device,
@@ -46,7 +47,7 @@ impl Device {
         instance: Arc<Instance>,
         physical_device: Arc<PhysicalDevice>,
         validation: &super::debug::ValidationInfo,
-        device_extensions: &DeviceExtension,
+        device_extensions: &DeviceExtension, 
         surface: &Surface,
     ) -> (Arc<Self>, QueueFamilyIndices) {
         let indices = instance.find_queue_family(physical_device.handle(), surface);
@@ -87,8 +88,8 @@ impl Device {
 
         let feature_set = physical_device_features.feature_set();
 
-        assert!(feature_set.task_shader);
-        assert!(feature_set.mesh_shader);
+        // assert!(feature_set.task_shader);
+        // assert!(feature_set.mesh_shader);
         assert!(feature_set.maintenance4);
         assert!(feature_set.synchronization2);
         assert!(feature_set.buffer_device_address);
@@ -114,6 +115,7 @@ impl Device {
                 physical_device,
                 fn_mesh_shader,
                 fn_swapchain,
+				features: feature_set,
                 handle: device,
             }),
             indices,

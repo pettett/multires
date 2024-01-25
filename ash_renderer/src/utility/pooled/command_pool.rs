@@ -4,7 +4,7 @@ use ash::vk;
 
 use crate::{CameraUniformBufferObject, VkHandle};
 
-use super::{
+use super::super::{
     buffer::{AsBuffer, Buffer},
     device::Device,
     image::Image,

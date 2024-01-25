@@ -14,8 +14,8 @@ use crate::{
     screen::Screen,
     utility::{
         buffer::{AsBuffer, Buffer, TBuffer},
-        command_pool::CommandPool,
-        descriptor_pool::{
+        pooled::command_pool::CommandPool,
+        pooled::descriptor_pool::{
             DescriptorPool, DescriptorSet, DescriptorSetLayout, DescriptorWriteData,
         },
         device::Device,

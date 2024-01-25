@@ -9,7 +9,7 @@ use gpu_allocator::vulkan::{Allocator, AllocatorVisualizer};
 use raw_window_handle::HasRawDisplayHandle;
 
 use crate::{
-    utility::{command_pool::CommandPool, device::Device, swapchain::Swapchain},
+    utility::{pooled::command_pool::CommandPool, device::Device, swapchain::Swapchain},
     QueueFamilyIndices,
 };
 

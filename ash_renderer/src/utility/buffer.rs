@@ -13,7 +13,7 @@ use gpu_allocator::{
 
 use crate::{core::Core, VkHandle};
 
-use super::{command_pool::CommandPool, descriptor_pool::DescriptorSet, device::Device};
+use super::{pooled::command_pool::CommandPool, pooled::descriptor_pool::DescriptorSet, device::Device};
 
 pub const STAGING_BUFFER: &str = "Staging Buffer";
 

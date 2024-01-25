@@ -16,7 +16,7 @@ use crate::{core::Core, VkHandle};
 
 use super::{
     buffer::{AsBuffer, Buffer, STAGING_BUFFER},
-    command_pool::CommandPool,
+    pooled::command_pool::CommandPool,
     device::Device,
     instance::Instance,
 };

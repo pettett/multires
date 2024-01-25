@@ -1,11 +1,9 @@
 //! The utility mod define some fixed function using in this tutorial.
 //! Help to simplify the code.
-
+pub mod pooled;
 pub mod buffer;
-pub mod command_pool;
 pub mod constants;
 pub mod debug;
-pub mod descriptor_pool;
 pub mod device;
 pub mod fps_limiter;
 pub mod image;

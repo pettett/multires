@@ -4,7 +4,7 @@ use ash::vk;
 
 use crate::{core::Core, VkHandle};
 
-use super::{descriptor_pool::DescriptorSetLayout, device::Device};
+use super::{pooled::descriptor_pool::DescriptorSetLayout, device::Device};
 
 pub struct Pipeline<const T: bool> {
     device: Arc<Device>,
