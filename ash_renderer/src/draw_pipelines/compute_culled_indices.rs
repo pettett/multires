@@ -15,15 +15,16 @@ use crate::{
     screen::Screen,
     utility::{
         buffer::{AsBuffer, Buffer, TBuffer},
+        device::Device,
         pooled::command_pool::CommandPool,
         pooled::descriptor_pool::{
             DescriptorPool, DescriptorSet, DescriptorSetLayout, DescriptorWriteData,
         },
-        device::Device,
         render_pass::RenderPass,
         {ComputePipeline, GraphicsPipeline, ShaderModule},
     },
-    Vertex, VkHandle, TASK_GROUP_SIZE,
+    vertex::Vertex,
+    VkHandle, TASK_GROUP_SIZE,
 };
 
 use super::{

@@ -17,14 +17,13 @@ pub const VALIDATION: ValidationInfo = ValidationInfo {
 pub const DEVICE_EXTENSIONS: DeviceExtension = DeviceExtension {};
 
 pub const MAX_FRAMES_IN_FLIGHT: usize = 2;
-pub const IS_PAINT_FPS_COUNTER: bool = false;
 
 impl DeviceExtension {
-    pub fn get_extensions_raw_names(&self) -> [*const c_char; 1] {
+    pub fn get_extensions_raw_names(&self) -> [*const c_char; 3] {
         [
-            // currently just enable the Swapchain extension.
-            //ash::extensions::ext::MeshShader::name().as_ptr(),
+            ash::extensions::ext::MeshShader::name().as_ptr(),
             ash::extensions::khr::Swapchain::name().as_ptr(),
+            ash::extensions::khr::BufferDeviceAddress::name().as_ptr(),
         ]
     }
 }

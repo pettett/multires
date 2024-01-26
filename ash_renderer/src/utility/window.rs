@@ -81,11 +81,7 @@ impl ProgramProc {
                         .resource_mut::<Time>()
                         .tick(tick_counter.delta_time());
 
-                    vulkan_app.draw_frame();
-
-                    if IS_PAINT_FPS_COUNTER {
-                        print!("FPS: {}\r", tick_counter.fps());
-                    }
+                    vulkan_app.draw_frame(&tick_counter);
 
                     tick_counter.tick_frame();
                 }

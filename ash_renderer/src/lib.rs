@@ -4,6 +4,7 @@ pub mod gui;
 pub mod multires;
 pub mod screen;
 pub mod utility;
+pub mod vertex;
 
 use crate::{
     core::Core,
@@ -15,7 +16,7 @@ use crate::{
         pooled::descriptor_pool::DescriptorPool,
         render_pass::RenderPass,
         structures::*,
-        swapchain::{SwapChainSupportDetail},
+        swapchain::SwapChainSupportDetail,
         sync::SyncObjects,
     },
 };
@@ -44,6 +45,7 @@ use gui::{gui::Gui, window::GuiWindow};
 use screen::Screen;
 use utility::{
     buffer::{AsBuffer, Buffer, TBuffer},
+    fps_limiter::FPSLimiter,
     pooled::descriptor_pool::DescriptorSet,
 };
 use winit::event::WindowEvent;
@@ -71,38 +73,6 @@ pub enum MeshDrawingPipelineType {
     ComputeCulledMesh,
     ComputeCulledIndices,
     None,
-}
-
-pub trait Vertex {
-    fn get_binding_descriptions() -> Vec<vk::VertexInputBindingDescription>;
-    fn get_attribute_descriptions() -> Vec<vk::VertexInputAttributeDescription>;
-}
-
-impl Vertex for MeshVert {
-    fn get_binding_descriptions() -> Vec<vk::VertexInputBindingDescription> {
-        vec![vk::VertexInputBindingDescription {
-            binding: 0,
-            stride: mem::size_of::<MeshVert>() as _,
-            input_rate: vk::VertexInputRate::VERTEX,
-        }]
-    }
-
-    fn get_attribute_descriptions() -> Vec<vk::VertexInputAttributeDescription> {
-        vec![
-            vk::VertexInputAttributeDescription {
-                location: 0,
-                binding: 0,
-                format: vk::Format::R32G32B32A32_SFLOAT,
-                offset: 0,
-            },
-            vk::VertexInputAttributeDescription {
-                location: 1,
-                binding: 0,
-                format: vk::Format::R32G32B32A32_SFLOAT,
-                offset: mem::size_of::<[f32; 4]>() as _,
-            },
-        ]
-    }
 }
 
 pub struct App {
@@ -441,7 +411,7 @@ impl App {
     //     }
     // }
 
-    fn draw_frame(&mut self) {
+    fn draw_frame(&mut self, fps: &FPSLimiter) {
         let wait_fences = [self.sync_objects.in_flight_fences[self.current_frame]];
 
         unsafe {
@@ -483,7 +453,7 @@ impl App {
         let wait_stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
         let signal_semaphores = [self.sync_objects.render_finished_semaphores[self.current_frame]];
 
-        let ui_cmd = self.draw_gui(image_index as usize);
+        let ui_cmd = self.draw_gui(image_index as usize, fps);
 
         let submit_infos = [vk::SubmitInfo::builder()
             .command_buffers(&[self.draw.draw(image_index as usize), ui_cmd])
@@ -650,7 +620,7 @@ impl App {
     pub fn get_allocator(&self) -> MutexGuard<Allocator> {
         self.allocator.lock().unwrap()
     }
-    fn draw_gui(&mut self, image_index: usize) -> vk::CommandBuffer {
+    fn draw_gui(&mut self, image_index: usize, fps: &FPSLimiter) -> vk::CommandBuffer {
         self.gui.draw(image_index, |ctx| {
             for w in &mut self.windows {
                 w.draw(ctx);
@@ -658,14 +628,25 @@ impl App {
             egui::Window::new("App Config")
                 .open(&mut self.app_info_open)
                 .show(ctx, |ui| {
+                    ui.label(format!("FPS: {:?}", fps.fps()));
+
+                    let data = self.core.query_pool.get_results(image_index as _);
+                    ui.label(format!("Query: {:?}", data));
+
                     ui.label(format!("Current Pipeline: {:?}", self.current_pipeline));
 
-                    if ui.button("Indirect Tasks").clicked() {
-                        self.switch_pipeline = MeshDrawingPipelineType::IndirectTasks;
-                    }
-                    if ui.button("Compute Culled Mesh").clicked() {
-                        self.switch_pipeline = MeshDrawingPipelineType::ComputeCulledMesh;
-                    }
+                    ui.add_enabled_ui(self.core.device.features.mesh_shader, |ui| {
+                        if ui.button("Indirect Tasks").clicked() {
+                            self.switch_pipeline = MeshDrawingPipelineType::IndirectTasks;
+                        }
+                    });
+
+                    ui.add_enabled_ui(false, |ui| {
+                        if ui.button("Compute Culled Mesh").clicked() {
+                            self.switch_pipeline = MeshDrawingPipelineType::ComputeCulledMesh;
+                        }
+                    });
+
                     if ui.button("Compute Culled Indices").clicked() {
                         self.switch_pipeline = MeshDrawingPipelineType::ComputeCulledIndices;
                     }

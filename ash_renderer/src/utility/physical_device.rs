@@ -37,9 +37,11 @@ pub struct PhysicalRelevantFeatureSupport {
     sync2: vk::PhysicalDeviceSynchronization2Features,
 }
 
+#[derive(Debug)]
 pub struct DeviceFeatureSet {
     pub mesh_shader: bool,
     pub task_shader: bool,
+    pub mesh_queries: bool,
     pub synchronization2: bool,
     pub shader_draw_parameters: bool,
     pub maintenance4: bool,
@@ -51,11 +53,27 @@ impl PhysicalRelevantFeatureSupport {
         DeviceFeatureSet {
             mesh_shader: self.mesh_shader.mesh_shader > 0,
             task_shader: self.mesh_shader.task_shader > 0,
+            mesh_queries: self.mesh_shader.mesh_shader_queries > 0,
+
             synchronization2: self.sync2.synchronization2 > 0,
             shader_draw_parameters: self.shader_draw_param.shader_draw_parameters > 0,
             maintenance4: self.maintenance4.maintenance4 > 0,
             buffer_device_address: self.buffer_device_address.buffer_device_address > 0,
         }
+    }
+
+    pub fn init() -> Box<Self> {
+        let mut relevant_features = Box::new(PhysicalRelevantFeatureSupport::default());
+
+        // Get support info on all the features we want
+        relevant_features.device = vk::PhysicalDeviceFeatures2::builder()
+            .push_next(&mut relevant_features.buffer_device_address)
+            .push_next(&mut relevant_features.mesh_shader)
+            .push_next(&mut relevant_features.maintenance4)
+            .push_next(&mut relevant_features.sync2)
+            .push_next(&mut relevant_features.shader_draw_param)
+            .build();
+        relevant_features
     }
 }
 
@@ -105,37 +123,36 @@ impl PhysicalDevice {
     }
 
     pub fn get_features(&self) -> Box<PhysicalRelevantFeatureSupport> {
-        let mut relevant_features = Box::new(PhysicalRelevantFeatureSupport::default());
-
-        // Get support info on all the features we want
-        relevant_features.device = vk::PhysicalDeviceFeatures2::builder()
-            .push_next(&mut relevant_features.buffer_device_address)
-            .push_next(&mut relevant_features.mesh_shader)
-            .push_next(&mut relevant_features.maintenance4)
-            .push_next(&mut relevant_features.sync2)
-            .push_next(&mut relevant_features.shader_draw_param)
-            .build();
+        let mut all_features = PhysicalRelevantFeatureSupport::init();
 
         unsafe {
             self.instance
                 .handle
-                .get_physical_device_features2(self.handle, &mut relevant_features.device)
+                .get_physical_device_features2(self.handle, &mut all_features.device)
         };
 
         // Disable everything we don't need
 
-        relevant_features
-            .mesh_shader
-            .primitive_fragment_shading_rate_mesh_shader = 0;
+        let mut relevant_features = PhysicalRelevantFeatureSupport::init();
 
-        relevant_features.mesh_shader.multiview_mesh_shader = 0;
+        relevant_features.mesh_shader.mesh_shader = all_features.mesh_shader.mesh_shader;
+        relevant_features.mesh_shader.task_shader = all_features.mesh_shader.task_shader;
+        relevant_features.mesh_shader.mesh_shader_queries =
+            all_features.mesh_shader.mesh_shader_queries;
 
+        relevant_features.sync2.synchronization2 = all_features.sync2.synchronization2;
         relevant_features
             .buffer_device_address
-            .buffer_device_address_capture_replay = 0;
-        relevant_features
-            .buffer_device_address
-            .buffer_device_address_multi_device = 0;
+            .buffer_device_address = all_features.buffer_device_address.buffer_device_address;
+        relevant_features.maintenance4.maintenance4 = all_features.maintenance4.maintenance4;
+        relevant_features.shader_draw_param.shader_draw_parameters =
+            all_features.shader_draw_param.shader_draw_parameters;
+
+        relevant_features.device.features.multi_draw_indirect =
+            all_features.device.features.multi_draw_indirect;
+
+        relevant_features.device.features.pipeline_statistics_query =
+            all_features.device.features.pipeline_statistics_query;
 
         relevant_features
     }

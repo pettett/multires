@@ -14,11 +14,11 @@ use crate::{
     screen::Screen,
     utility::{
         buffer::{AsBuffer, Buffer, TBuffer},
+        device::Device,
         pooled::command_pool::CommandPool,
         pooled::descriptor_pool::{
             DescriptorPool, DescriptorSet, DescriptorSetLayout, DescriptorWriteData,
         },
-        device::Device,
         render_pass::RenderPass,
         {GraphicsPipeline, ShaderModule},
     },
@@ -197,6 +197,10 @@ impl ScreenData {
                 .clear_values(&clear_values);
 
             unsafe {
+                let q = i as _;
+
+                core.query_pool.reset(command_buffer, q);
+
                 device.handle.cmd_begin_render_pass(
                     command_buffer,
                     &render_pass_begin_info,
@@ -224,23 +228,23 @@ impl ScreenData {
                     }],
                 );
 
+                // ---------- Pipeline bound, use queries
+
+                device.handle.cmd_begin_query(
+                    command_buffer,
+                    core.query_pool.handle(),
+                    q,
+                    vk::QueryControlFlags::empty(),
+                );
+
                 device.handle.cmd_bind_pipeline(
                     command_buffer,
                     vk::PipelineBindPoint::GRAPHICS,
                     core_draw.graphics_pipeline.handle(),
                 );
 
-                //let vertex_buffers = [vertex_buffer];
-                //let offsets = [0_u64];
                 let descriptor_sets_to_bind = [core_draw.descriptor_sets[i].handle()];
 
-                //device.cmd_bind_vertex_buffers(command_buffer, 0, &vertex_buffers, &offsets);
-                //device.cmd_bind_index_buffer(
-                //    command_buffer,
-                //    index_buffer,
-                //    0,
-                //    vk::IndexType::UINT32,
-                //);
                 device.handle.cmd_bind_descriptor_sets(
                     command_buffer,
                     vk::PipelineBindPoint::GRAPHICS,
@@ -257,14 +261,10 @@ impl ScreenData {
                     instance_count,
                     indirect_task_buffer.stride() as _,
                 );
-                // device.cmd_draw_indexed(
-                //     command_buffer,
-                //     RECT_TEX_COORD_INDICES_DATA.len() as u32,
-                //     1,
-                //     0,
-                //     0,
-                //     0,
-                // );
+
+                device
+                    .handle
+                    .cmd_end_query(command_buffer, core.query_pool.handle(), q);
 
                 device.handle.cmd_end_render_pass(command_buffer);
 

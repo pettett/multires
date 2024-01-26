@@ -20,7 +20,7 @@ pub struct Device {
     instance: Arc<Instance>,
     physical_device: Arc<PhysicalDevice>,
 
-	pub features : DeviceFeatureSet,
+    pub features: DeviceFeatureSet,
     pub fn_mesh_shader: ash::extensions::ext::MeshShader,
     pub fn_swapchain: ash::extensions::khr::Swapchain,
     pub handle: ash::Device,
@@ -47,7 +47,7 @@ impl Device {
         instance: Arc<Instance>,
         physical_device: Arc<PhysicalDevice>,
         validation: &super::debug::ValidationInfo,
-        device_extensions: &DeviceExtension, 
+        device_extensions: &DeviceExtension,
         surface: &Surface,
     ) -> (Arc<Self>, QueueFamilyIndices) {
         let indices = instance.find_queue_family(physical_device.handle(), surface);
@@ -80,19 +80,25 @@ impl Device {
             .map(|layer_name| layer_name.as_ptr())
             .collect();
 
-        let enable_extension_names = device_extensions.get_extensions_raw_names();
-
         // Just go ahead and enable everything we have
         let mut physical_device_features = physical_device.get_features();
         // FIXME: Do these on a case by case basis for each pipeline
 
         let feature_set = physical_device_features.feature_set();
 
-        // assert!(feature_set.task_shader);
-        // assert!(feature_set.mesh_shader);
         assert!(feature_set.maintenance4);
         assert!(feature_set.synchronization2);
         assert!(feature_set.buffer_device_address);
+
+        if feature_set.mesh_shader {
+            println!("Mesh shaders are supported!");
+            assert!(feature_set.mesh_queries);
+            assert!(feature_set.task_shader);
+        }
+
+        println!("{:?}", feature_set);
+
+        let enable_extension_names = device_extensions.get_extensions_raw_names();
 
         let device_create_info = vk::DeviceCreateInfo::builder()
             .push_next(&mut physical_device_features.device) // The rest will already have been pushed on
@@ -115,7 +121,7 @@ impl Device {
                 physical_device,
                 fn_mesh_shader,
                 fn_swapchain,
-				features: feature_set,
+                features: feature_set,
                 handle: device,
             }),
             indices,

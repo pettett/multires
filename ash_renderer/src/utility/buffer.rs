@@ -13,7 +13,9 @@ use gpu_allocator::{
 
 use crate::{core::Core, VkHandle};
 
-use super::{pooled::command_pool::CommandPool, pooled::descriptor_pool::DescriptorSet, device::Device};
+use super::{
+    device::Device, pooled::command_pool::CommandPool, pooled::descriptor_pool::DescriptorSet,
+};
 
 pub const STAGING_BUFFER: &str = "Staging Buffer";
 
@@ -363,7 +365,7 @@ impl Buffer {
 
         staging_buffer.copy_to_other(submit_queue, command_pool, &buffer, buffer_size);
 
-        println!("Created buffer, size: {}", buffer_size);
+        // println!("Created buffer, size: {}", buffer_size);
 
         Arc::new(buffer)
     }

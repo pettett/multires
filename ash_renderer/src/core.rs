@@ -86,7 +86,8 @@ impl Core {
             .contains(vk::SubgroupFeatureFlags::ARITHMETIC));
 
         let command_pool = CommandPool::new(device.clone(), queue_family.graphics_family.unwrap());
-        let query_pool = QueryPool::new(device.clone());
+
+        let query_pool = QueryPool::new(device.clone(), 5);
         Arc::new(Core {
             window,
             device,
