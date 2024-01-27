@@ -454,6 +454,49 @@ impl WingedMesh {
         Ok(())
     }
 
+    fn poke_away_tri(&mut self, fid: FaceID) -> anyhow::Result<()> {
+        let face = self.get_face(fid);
+
+        let eid = face.edge;
+
+        let edge = self.get_edge(eid);
+
+        let tri = [eid, edge.edge_left_ccw, edge.edge_left_cw];
+
+        assert_eq!(tri[0], eid);
+
+        self.wipe_face(fid);
+
+        // Remove any last references to this triangle
+        for &e in &tri {
+            let v_o = self.get_edge(e).vert_origin;
+            let ccw = self.get_edge(e).edge_left_ccw;
+
+            self.get_vert_mut(v_o).remove_outgoing(e);
+            self.get_vert_mut(v_o).remove_incoming(ccw);
+
+            self.wipe_edge(e);
+        }
+        Ok(())
+    }
+
+    /// Remove every triangle with a `cluster_idx` different to `cluster_idx`
+    pub fn filter_tris_by_cluster(&mut self, cluster_idx: usize) -> anyhow::Result<()> {
+        let mut remove = Vec::new();
+
+        for (i, f) in self.iter_faces() {
+            if f.cluster_idx != cluster_idx {
+                remove.push(i);
+            }
+        }
+
+        for i in remove {
+            self.poke_away_tri(i)?;
+        }
+
+        Ok(())
+    }
+
     fn neighbour_vertices(&self, v: &Vertex) -> HashSet<VertID> {
         // This is the exact number of neighbours, assuming this is a manifold vertex, otherwise it will still be pretty close.
         let mut neighbours = HashSet::with_capacity(v.incoming_edges().len());

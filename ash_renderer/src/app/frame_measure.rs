@@ -36,9 +36,12 @@ where
     /// Returns 0 for a 0 sampled collection
     pub fn mean(&self) -> T {
         let mut sum = T::zero();
-        self.samples.iter().for_each(|&val| sum += val);
 
-        sum / T::from_usize(self.samples.len().max(1)).unwrap()
+        let div = T::from_usize(self.samples.len().max(1)).unwrap();
+
+        self.samples.iter().for_each(|&val| sum += val / div);
+
+        sum
     }
 
     /// Grab the most recent sample

@@ -40,7 +40,7 @@ use common_renderer::{
 };
 use draw_pipelines::{
     compute_culled_indices::ComputeCulledIndices, compute_culled_mesh::ComputeCulledMesh,
-    indirect_tasks::IndirectTasks, stub::Stub, DrawPipeline,
+    draw_indirect::DrawIndirect, indirect_tasks::IndirectTasks, stub::Stub, DrawPipeline,
 };
 use glam::{vec3a, Quat, Vec3A};
 use gpu_allocator::{vulkan::*, AllocationSizes, AllocatorDebugSettings};
@@ -67,6 +67,7 @@ pub trait VkDeviceOwned: VkHandle<VkItem = vk::Device> {}
 #[derive(Debug, Clone, Copy)]
 pub enum MeshDrawingPipelineType {
     IndirectTasks,
+    DrawIndirect,
     ComputeCulledMesh,
     ComputeCulledIndices,
     None,
@@ -280,15 +281,17 @@ impl App {
 
         let mut r = rand::rngs::StdRng::seed_from_u64(42);
 
+        let mut mid = Vec3A::ZERO;
+
         for i in 0..30 {
             for j in 0..15 {
-                let mut transform = Transform::new_pos(
-                    glam::Vec3A::X * i as f32 * 20.0 + glam::Vec3A::Z * j as f32 * 40.0,
-                );
+                let p = glam::Vec3A::X * i as f32 * 20.0 + glam::Vec3A::Z * j as f32 * 40.0;
+                mid += p;
+                let mut transform = Transform::new_pos(p);
 
-                if i == 10 && j == 10 {
-                    *transform.scale_mut() *= 20.0
-                };
+                //if i == 10 && j == 10 {
+                *transform.scale_mut() *= 10.0;
+                //};
 
                 uniform_transforms.push(ModelUniformBufferObject {
                     model: transform.get_local_to_world(),
@@ -297,6 +300,7 @@ impl App {
                 world.spawn(transform);
             }
         }
+        mid /= (30 * 15) as f32;
 
         let uniform_transform_buffer = Buffer::new_storage_filled(
             &core,
@@ -328,7 +332,7 @@ impl App {
         println!("Generated App");
 
         let cam = Camera::new(1.0);
-        let transform = Transform::new(Vec3A::ZERO, Quat::IDENTITY);
+        let transform = Transform::new(mid + Vec3A::Y * 200.0, Quat::IDENTITY);
 
         let uniform_camera = CameraUniformBufferObject {
             view_proj: cam.build_view_projection_matrix(&transform),
@@ -589,6 +593,25 @@ impl App {
                     self.submesh_count,
                 ));
             }
+            MeshDrawingPipelineType::DrawIndirect => {
+                self.draw_pipeline = Box::new(DrawIndirect::new(
+                    self.core.clone(),
+                    &self.screen,
+                    &mut self.world,
+                    self.allocator.clone(),
+                    &self.render_pass,
+                    self.graphics_queue,
+                    self.descriptor_pool.clone(),
+                    self.uniform_transform_buffer.clone(),
+                    &self.uniform_camera_buffers,
+                    self.vertex_buffer.clone(),
+                    self.meshlet_buffer.clone(),
+                    self.submesh_buffer.clone(),
+                    self.indices_buffer.clone(),
+                    self.uniform_transforms.len(),
+                    self.submesh_count,
+                ));
+            }
             MeshDrawingPipelineType::None => (),
         }
 
@@ -672,6 +695,10 @@ impl App {
 
                     if ui.button("Compute Culled Indices").clicked() {
                         self.switch_pipeline = MeshDrawingPipelineType::ComputeCulledIndices;
+                    }
+
+                    if ui.button("Draw Full Res").clicked() {
+                        self.switch_pipeline = MeshDrawingPipelineType::DrawIndirect;
                     }
                 });
 

@@ -13,6 +13,7 @@ use crate::{
 
 pub mod compute_culled_indices;
 pub mod compute_culled_mesh;
+pub mod draw_indirect;
 pub mod indirect_tasks;
 pub mod stub;
 

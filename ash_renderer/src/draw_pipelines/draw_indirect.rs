@@ -2,31 +2,28 @@ use std::{
     ffi::CString,
     ptr,
     sync::{Arc, Mutex},
-    time,
 };
 
 use ash::vk::{self};
 use bevy_ecs::world::World;
+use common::MeshVert;
 use common_renderer::components::transform::Transform;
 use gpu_allocator::vulkan::Allocator;
 
 use crate::{
-    app::frame_measure::RollingMeasure,
     core::Core,
     screen::Screen,
     utility::{
         buffer::{AsBuffer, Buffer, TBuffer},
         device::Device,
         pooled::command_pool::CommandPool,
-        pooled::{
-            descriptor_pool::{
-                DescriptorPool, DescriptorSet, DescriptorSetLayout, DescriptorWriteData,
-            },
-            query_pool::QueryPool,
+        pooled::descriptor_pool::{
+            DescriptorPool, DescriptorSet, DescriptorSetLayout, DescriptorWriteData,
         },
         render_pass::RenderPass,
-        {GraphicsPipeline, ShaderModule},
+        {ComputePipeline, GraphicsPipeline, ShaderModule},
     },
+    vertex::Vertex,
     VkHandle, TASK_GROUP_SIZE,
 };
 
@@ -34,28 +31,20 @@ use super::{
     init_color_blend_attachment_states, init_depth_state_create_info,
     init_multisample_state_create_info, init_rasterization_statue_create_info, DrawPipeline,
 };
-#[derive(bytemuck::Zeroable, Copy, Clone)]
-pub struct IndirectTasksQueryResults {
-    task: u32,
-    mesh: u32,
-    avail: u32,
-}
-pub struct IndirectTasks {
+
+pub struct DrawIndirect {
     graphics_pipeline: GraphicsPipeline,
     descriptor_sets: Vec<DescriptorSet>,
     screen: Option<ScreenData>,
     descriptor_pool: Arc<DescriptorPool>,
     core: Arc<Core>,
-    indirect_task_buffer: Arc<TBuffer<vk::DrawMeshTasksIndirectCommandEXT>>,
-
-    // Evaluation data
-    last_sample: time::Instant,
-    mesh_invocations: RollingMeasure<u32, 60>,
-    task_invocations: RollingMeasure<u32, 60>,
-    query_pool: Arc<QueryPool<IndirectTasksQueryResults>>,
+    should_cull_buffer: Arc<TBuffer<u32>>,
+    draw_indexed_indirect_buffer: Arc<TBuffer<vk::DrawIndexedIndirectCommand>>,
+    vertex_buffer: Arc<TBuffer<MeshVert>>,
+    indices_buffer: Arc<TBuffer<u32>>,
 }
 
-impl IndirectTasks {
+impl DrawIndirect {
     pub fn new(
         core: Arc<Core>,
         screen: &Screen,
@@ -66,9 +55,11 @@ impl IndirectTasks {
         descriptor_pool: Arc<DescriptorPool>,
         uniform_transform_buffer: Arc<Buffer>,
         uniform_camera_buffers: &[Arc<impl AsBuffer>],
-        vertex_buffer: Arc<Buffer>,
+        vertex_buffer: Arc<TBuffer<MeshVert>>,
         meshlet_buffer: Arc<Buffer>,
         submesh_buffer: Arc<Buffer>,
+        indices_buffer: Arc<TBuffer<u32>>,
+        instance_count: usize,
         cluster_count: u32,
     ) -> Self {
         let ubo_layout = create_descriptor_set_layout(core.device.clone());
@@ -79,58 +70,67 @@ impl IndirectTasks {
             screen.swapchain().extent,
             ubo_layout.clone(),
         );
-        let mut task_indirect_data = Vec::new();
 
-        for e in world.query::<&Transform>().iter(world) {
-            task_indirect_data.push(vk::DrawMeshTasksIndirectCommandEXT {
-                group_count_x: 8,
-                group_count_y: 1,
-                group_count_z: 1,
-            });
-        }
-        let indirect_task_buffer = TBuffer::new_filled(
+        let should_cull_buffer = TBuffer::new_filled(
             &core,
             allocator.clone(),
             &core.command_pool,
             graphics_queue,
-            vk::BufferUsageFlags::INDIRECT_BUFFER | vk::BufferUsageFlags::STORAGE_BUFFER,
-            &task_indirect_data,
-            "Indirect Task Buffer",
+            vk::BufferUsageFlags::STORAGE_BUFFER,
+            &vec![0; cluster_count as _],
+            "Should Cull Buffer",
         );
 
-        let descriptor_sets = create_descriptor_sets(
+        let mut draw_indexed_commands = Vec::with_capacity(instance_count);
+
+        draw_indexed_commands.push(vk::DrawIndexedIndirectCommand {
+            index_count: indices_buffer.item_len() as _,
+            instance_count: instance_count as _,
+            first_index: 0,
+            vertex_offset: 0,
+            first_instance: 0,
+        });
+
+        let draw_indexed_indirect_buffer = TBuffer::new_filled(
+            &core,
+            allocator.clone(),
+            &core.command_pool,
+            graphics_queue,
+            vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::INDIRECT_BUFFER,
+            &draw_indexed_commands,
+            "Draw Indexed Indirect Buffer",
+        );
+
+        let descriptor_sets = create_compute_culled_indices_descriptor_sets(
             &core.device,
             &descriptor_pool,
             &ubo_layout,
             &uniform_transform_buffer,
             &uniform_camera_buffers,
-            &vertex_buffer,
+            &should_cull_buffer,
             &meshlet_buffer,
             &submesh_buffer,
-            &indirect_task_buffer,
             //&texture_image,
+            &indices_buffer,
+            &draw_indexed_indirect_buffer,
             screen.swapchain().images.len(),
         );
-
-        let query_pool = QueryPool::new(core.device.clone(), 1);
 
         Self {
             graphics_pipeline,
             descriptor_sets,
-            descriptor_pool,
             screen: None,
-            indirect_task_buffer,
-            query_pool,
-
             core,
-            last_sample: time::Instant::now(),
-            mesh_invocations: Default::default(),
-            task_invocations: Default::default(),
+            descriptor_pool,
+            should_cull_buffer,
+            vertex_buffer,
+            draw_indexed_indirect_buffer,
+            indices_buffer,
         }
     }
 }
 
-impl DrawPipeline for IndirectTasks {
+impl DrawPipeline for DrawIndirect {
     fn draw(&self, frame_index: usize) -> vk::CommandBuffer {
         self.screen.as_ref().unwrap().command_buffers[frame_index]
     }
@@ -149,25 +149,10 @@ impl DrawPipeline for IndirectTasks {
             submesh_count,
             instance_count,
             render_pass,
-            &self.indirect_task_buffer,
         ));
     }
 
-    fn stats_gui(&mut self, ui: &mut egui::Ui, image_index: usize) {
-        if image_index == 0 && self.last_sample.elapsed() > time::Duration::from_secs_f32(0.01) {
-            if let Some(results) = self.query_pool.get_results(0) {
-                assert!(results.avail > 0);
-
-                self.mesh_invocations.tick(results.mesh);
-                self.task_invocations.tick(results.task);
-            }
-
-            self.last_sample = time::Instant::now();
-        }
-
-        self.mesh_invocations.gui("Mesh Invocations", ui);
-        self.task_invocations.gui("Task Invocations", ui);
-    }
+    fn stats_gui(&mut self, ui: &mut egui::Ui, image_index: usize) {}
 }
 
 struct ScreenData {
@@ -175,24 +160,15 @@ struct ScreenData {
     command_pool: Arc<CommandPool>,
     command_buffers: Vec<vk::CommandBuffer>,
 }
-impl Drop for ScreenData {
-    fn drop(&mut self) {
-        unsafe {
-            self.device
-                .handle
-                .free_command_buffers(self.command_pool.handle, &self.command_buffers);
-        }
-    }
-}
+
 impl ScreenData {
     pub fn create_command_buffers(
-        core_draw: &IndirectTasks,
+        core_draw: &DrawIndirect,
         core: &Core,
         screen: &Screen,
         submesh_count: u32,
         instance_count: u32,
         render_pass: &RenderPass,
-        indirect_task_buffer: &TBuffer<vk::DrawMeshTasksIndirectCommandEXT>,
     ) -> Self {
         let device = core.device.clone();
         let command_buffers = core
@@ -235,11 +211,9 @@ impl ScreenData {
                 })
                 .clear_values(&clear_values);
 
+            let descriptor_sets_to_bind = [core_draw.descriptor_sets[i].handle()];
+
             unsafe {
-                let q = i as _;
-                if q == 0 {
-                    core_draw.query_pool.reset(command_buffer, q);
-                }
                 device.handle.cmd_begin_render_pass(
                     command_buffer,
                     &render_pass_begin_info,
@@ -267,23 +241,22 @@ impl ScreenData {
                     }],
                 );
 
-                // ---------- Pipeline bound, use queries
-                if q == 0 {
-                    device.handle.cmd_begin_query(
-                        command_buffer,
-                        core_draw.query_pool.handle(),
-                        q,
-                        vk::QueryControlFlags::empty(),
-                    );
-                }
                 device.handle.cmd_bind_pipeline(
                     command_buffer,
                     vk::PipelineBindPoint::GRAPHICS,
                     core_draw.graphics_pipeline.handle(),
                 );
 
-                let descriptor_sets_to_bind = [core_draw.descriptor_sets[i].handle()];
+                //let vertex_buffers = [vertex_buffer];
+                //let offsets = [0_u64];
 
+                //device.cmd_bind_vertex_buffers(command_buffer, 0, &vertex_buffers, &offsets);
+                //device.cmd_bind_index_buffer(
+                //    command_buffer,
+                //    index_buffer,
+                //    0,
+                //    vk::IndexType::UINT32,
+                //);
                 device.handle.cmd_bind_descriptor_sets(
                     command_buffer,
                     vk::PipelineBindPoint::GRAPHICS,
@@ -293,18 +266,45 @@ impl ScreenData {
                     &[],
                 );
 
-                device.fn_mesh_shader.cmd_draw_mesh_tasks_indirect(
+                device.handle.cmd_bind_index_buffer(
                     command_buffer,
-                    indirect_task_buffer.handle(),
+                    core_draw.indices_buffer.handle(),
                     0,
-                    instance_count,
-                    indirect_task_buffer.stride() as _,
+                    vk::IndexType::UINT32,
                 );
-                if q == 0 {
-                    device
-                        .handle
-                        .cmd_end_query(command_buffer, core_draw.query_pool.handle(), q);
-                }
+
+                device.handle.cmd_bind_vertex_buffers(
+                    command_buffer,
+                    0,
+                    &[core_draw.vertex_buffer.handle()],
+                    &[0],
+                );
+                // device.handle.cmd_draw_indexed(
+                //     command_buffer,
+                //     core_draw.indices_buffer.item_len() as _,
+                //     instance_count,
+                //     0,
+                //     0,
+                //     0,
+                // );
+
+                // Each instance has their own indirect drawing buffer, tracing out their position in the result buffer
+                device.handle.cmd_draw_indexed_indirect(
+                    command_buffer,
+                    core_draw.draw_indexed_indirect_buffer.handle(),
+                    0,
+                    1,
+                    core_draw.draw_indexed_indirect_buffer.stride() as _,
+                );
+                // device.cmd_draw_indexed(
+                //     command_buffer,
+                //     RECT_TEX_COORD_INDICES_DATA.len() as u32,
+                //     1,
+                //     0,
+                //     0,
+                //     0,
+                // );
+
                 device.handle.cmd_end_render_pass(command_buffer);
 
                 device
@@ -322,172 +322,28 @@ impl ScreenData {
     }
 }
 
-fn create_descriptor_set_layout(device: Arc<Device>) -> Arc<DescriptorSetLayout> {
-    let ubo_layout_bindings = [
-        vk::DescriptorSetLayoutBinding {
-            // transform uniform
-            binding: 0,
-            descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
-            descriptor_count: 1,
-            stage_flags: vk::ShaderStageFlags::MESH_EXT | vk::ShaderStageFlags::TASK_EXT,
-            p_immutable_samplers: ptr::null(),
-        },
-        // vk::DescriptorSetLayoutBinding {
-        //     // sampler uniform
-        //     binding: 1,
-        //     descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-        //     descriptor_count: 1,
-        //     stage_flags: vk::ShaderStageFlags::FRAGMENT,
-        //     p_immutable_samplers: ptr::null(),
-        // },
-        vk::DescriptorSetLayoutBinding {
-            // sampler uniform
-            binding: 2,
-            descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
-            descriptor_count: 1,
-            stage_flags: vk::ShaderStageFlags::TASK_EXT,
-            p_immutable_samplers: ptr::null(),
-        },
-        vk::DescriptorSetLayoutBinding {
-            // camera uniform
-            binding: 3,
-            descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
-            descriptor_count: 1,
-            stage_flags: vk::ShaderStageFlags::MESH_EXT | vk::ShaderStageFlags::TASK_EXT,
-            p_immutable_samplers: ptr::null(),
-        },
-        vk::DescriptorSetLayoutBinding {
-            // verts buffer
-            binding: 4,
-            descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
-            descriptor_count: 1,
-            stage_flags: vk::ShaderStageFlags::MESH_EXT,
-            p_immutable_samplers: ptr::null(),
-        },
-        vk::DescriptorSetLayoutBinding {
-            // meshlet buffer
-            binding: 5,
-            descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
-            descriptor_count: 1,
-            stage_flags: vk::ShaderStageFlags::MESH_EXT,
-            p_immutable_samplers: ptr::null(),
-        },
-        vk::DescriptorSetLayoutBinding {
-            // indirect draw params buffer array
-            binding: 6,
-            descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
-            descriptor_count: 1,
-            stage_flags: vk::ShaderStageFlags::TASK_EXT,
-            p_immutable_samplers: ptr::null(),
-        },
-    ];
-
-    Arc::new(DescriptorSetLayout::new(device, &ubo_layout_bindings))
-}
-
-fn create_descriptor_sets(
-    device: &Arc<Device>,
-    descriptor_pool: &Arc<DescriptorPool>,
-    descriptor_set_layout: &Arc<DescriptorSetLayout>,
-    uniform_transform_buffer: &Arc<Buffer>,
-    uniform_camera_buffers: &[Arc<impl AsBuffer>],
-    vertex_buffer: &Arc<Buffer>,
-    meshlet_buffer: &Arc<Buffer>,
-    cluster_buffer: &Arc<Buffer>,
-    indirect_draw_array_buffer: &Arc<impl AsBuffer>,
-    //texture: &Image,
-    swapchain_images_size: usize,
-) -> Vec<DescriptorSet> {
-    let mut layouts: Vec<vk::DescriptorSetLayout> = vec![];
-    for _ in 0..swapchain_images_size {
-        layouts.push(descriptor_set_layout.handle());
-    }
-
-    let descriptor_set_allocate_info = vk::DescriptorSetAllocateInfo::builder()
-        .descriptor_pool(descriptor_pool.handle)
-        .set_layouts(&layouts);
-
-    let vk_descriptor_sets = unsafe {
-        device
-            .handle
-            .allocate_descriptor_sets(&descriptor_set_allocate_info)
-            .expect("Failed to allocate descriptor sets!")
-    };
-
-    let descriptor_sets: Vec<_> = vk_descriptor_sets
-        .into_iter()
-        .enumerate()
-        .map(|(i, set)| {
-            DescriptorSet::new(
-                set,
-                descriptor_pool.clone(),
-                descriptor_set_layout.clone(),
-                device.clone(),
-                vec![
-                    DescriptorWriteData::Buffer {
-                        //  0
-                        buf: uniform_transform_buffer.clone(),
-                    },
-                    DescriptorWriteData::Empty,
-                    DescriptorWriteData::Buffer {
-                        //  2
-                        buf: cluster_buffer.buffer(),
-                    },
-                    DescriptorWriteData::Buffer {
-                        // 3
-                        buf: uniform_camera_buffers[i].buffer(),
-                    },
-                    DescriptorWriteData::Buffer {
-                        //  4
-                        buf: meshlet_buffer.clone(),
-                    },
-                    DescriptorWriteData::Buffer {
-                        //  5
-                        buf: vertex_buffer.clone(),
-                    },
-                    DescriptorWriteData::Buffer {
-                        //  6
-                        buf: indirect_draw_array_buffer.buffer(),
-                    },
-                ],
-            )
-        })
-        .collect();
-
-    descriptor_sets
-}
-
 fn create_graphics_pipeline(
     device: Arc<Device>,
     render_pass: &RenderPass,
     swapchain_extent: vk::Extent2D,
     ubo_set_layout: Arc<DescriptorSetLayout>,
 ) -> GraphicsPipeline {
-    let task_shader_module = ShaderModule::new(
+    let vert_shader_module = ShaderModule::new(
         device.clone(),
-        bytemuck::cast_slice(include_bytes!("../../shaders/spv/mesh-shader.task")),
-    );
-    let mesh_shader_module = ShaderModule::new(
-        device.clone(),
-        bytemuck::cast_slice(include_bytes!("../../shaders/spv/mesh-shader.mesh")),
+        bytemuck::cast_slice(include_bytes!("../../shaders/spv/vert.vert")),
     );
     let frag_shader_module = ShaderModule::new(
         device.clone(),
-        bytemuck::cast_slice(include_bytes!("../../shaders/spv/frag_colour.frag")),
+        bytemuck::cast_slice(include_bytes!("../../shaders/spv/frag_pbr.frag")),
     );
 
     let main_function_name = CString::new("main").unwrap(); // the beginning function name in shader code.
 
     let shader_stages = [
         vk::PipelineShaderStageCreateInfo::builder()
-            .module(task_shader_module.handle())
+            .module(vert_shader_module.handle())
             .name(&main_function_name)
-            .stage(vk::ShaderStageFlags::TASK_EXT)
-            .build(),
-        vk::PipelineShaderStageCreateInfo::builder()
-            .module(mesh_shader_module.handle())
-            .name(&main_function_name)
-            .stage(vk::ShaderStageFlags::MESH_EXT)
+            .stage(vk::ShaderStageFlags::VERTEX)
             .build(),
         vk::PipelineShaderStageCreateInfo::builder()
             .module(frag_shader_module.handle())
@@ -496,25 +352,18 @@ fn create_graphics_pipeline(
             .build(),
     ];
 
-    // let binding_description = VertexV3::get_binding_descriptions();
-    // let attribute_description = VertexV3::get_attribute_descriptions();
+    let binding_description = MeshVert::get_binding_descriptions();
+    let attribute_description = MeshVert::get_attribute_descriptions();
 
-    // let vertex_input_state_create_info = vk::PipelineVertexInputStateCreateInfo {
-    //     s_type: vk::StructureType::PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-    //     p_next: ptr::null(),
-    //     flags: vk::PipelineVertexInputStateCreateFlags::empty(),
-    //     vertex_attribute_description_count: attribute_description.len() as u32,
-    //     p_vertex_attribute_descriptions: attribute_description.as_ptr(),
-    //     vertex_binding_description_count: binding_description.len() as u32,
-    //     p_vertex_binding_descriptions: binding_description.as_ptr(),
-    // };
-    // let vertex_input_assembly_state_info = vk::PipelineInputAssemblyStateCreateInfo {
-    //     s_type: vk::StructureType::PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-    //     flags: vk::PipelineInputAssemblyStateCreateFlags::empty(),
-    //     p_next: ptr::null(),
-    //     primitive_restart_enable: vk::FALSE,
-    //     topology: vk::PrimitiveTopology::TRIANGLE_LIST,
-    // };
+    let vertex_input_state_create_info = vk::PipelineVertexInputStateCreateInfo::builder()
+        .vertex_binding_descriptions(&binding_description)
+        .vertex_attribute_descriptions(&attribute_description);
+
+    let vertex_input_assembly_state_info = vk::PipelineInputAssemblyStateCreateInfo {
+        primitive_restart_enable: vk::FALSE,
+        topology: vk::PrimitiveTopology::TRIANGLE_LIST,
+        ..Default::default()
+    };
 
     let viewports = [vk::Viewport {
         x: 0.0,
@@ -572,6 +421,8 @@ fn create_graphics_pipeline(
         .depth_stencil_state(&depth_state_create_info)
         .color_blend_state(&color_blend_state)
         .dynamic_state(&dynamic_state_info)
+        .vertex_input_state(&vertex_input_state_create_info)
+        .input_assembly_state(&vertex_input_assembly_state_info)
         .layout(pipeline_layout)
         .render_pass(render_pass.handle())
         .build()];
@@ -609,4 +460,158 @@ fn create_graphics_pipeline(
         pipeline_layout,
         ubo_set_layout,
     )
+}
+
+fn create_descriptor_set_layout(device: Arc<Device>) -> Arc<DescriptorSetLayout> {
+    let ubo_layout_bindings = [
+        // layout (binding = 0) readonly buffer ModelUniformBufferObject {
+        // 	mat4 models[];
+        // };
+        vk::DescriptorSetLayoutBinding::builder()
+            .binding(0)
+            .descriptor_count(1)
+            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+            .stage_flags(
+                vk::ShaderStageFlags::MESH_EXT
+                    | vk::ShaderStageFlags::COMPUTE
+                    | vk::ShaderStageFlags::VERTEX,
+            )
+            .build(),
+        // layout(binding = 1) buffer Clusters {
+        // 	ClusterData clusters[];
+        // };
+        vk::DescriptorSetLayoutBinding::builder()
+            .binding(1)
+            .descriptor_count(1)
+            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+            .stage_flags(vk::ShaderStageFlags::TASK_EXT | vk::ShaderStageFlags::COMPUTE)
+            .build(),
+        // layout(binding = 2) buffer ShouldDraw {
+        // 	uint should_draw[];
+        // };
+        vk::DescriptorSetLayoutBinding::builder()
+            .binding(2)
+            .descriptor_count(1)
+            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+            .stage_flags(vk::ShaderStageFlags::TASK_EXT | vk::ShaderStageFlags::COMPUTE)
+            .build(),
+        // layout (binding = 3) uniform CameraUniformBufferObject {
+        // 	CameraUniformObject ubo;
+        // };
+        vk::DescriptorSetLayoutBinding::builder()
+            .binding(3)
+            .descriptor_count(1)
+            .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+            .stage_flags(vk::ShaderStageFlags::COMPUTE | vk::ShaderStageFlags::VERTEX)
+            .build(),
+        // layout (std430, binding = 4) buffer InputBufferI {
+        // 	s_meshlet meshlets[];
+        // };
+        vk::DescriptorSetLayoutBinding::builder()
+            .binding(4)
+            .descriptor_count(1)
+            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+            .stage_flags(vk::ShaderStageFlags::MESH_EXT)
+            .build(),
+        // layout (std430, binding = 5) buffer InputBufferV {
+        // 	Vertex verts[];
+        // };
+        vk::DescriptorSetLayoutBinding::builder()
+            .binding(5)
+            .descriptor_count(1)
+            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+            .stage_flags(vk::ShaderStageFlags::COMPUTE)
+            .build(),
+        vk::DescriptorSetLayoutBinding::builder()
+            .binding(6)
+            .descriptor_count(1)
+            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+            .stage_flags(vk::ShaderStageFlags::COMPUTE)
+            .build(),
+        vk::DescriptorSetLayoutBinding::builder()
+            .binding(7)
+            .descriptor_count(1)
+            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+            .stage_flags(vk::ShaderStageFlags::COMPUTE)
+            .build(),
+    ];
+
+    Arc::new(DescriptorSetLayout::new(device, &ubo_layout_bindings))
+}
+
+fn create_compute_culled_indices_descriptor_sets(
+    device: &Arc<Device>,
+    descriptor_pool: &Arc<DescriptorPool>,
+    descriptor_set_layout: &Arc<DescriptorSetLayout>,
+    uniform_transform_buffer: &Arc<Buffer>,
+    uniform_camera_buffers: &[Arc<impl AsBuffer>],
+    should_draw_buffer: &Arc<impl AsBuffer>,
+    meshlet_buffer: &Arc<Buffer>,
+    submesh_buffer: &Arc<Buffer>,
+    indices_buffer: &Arc<impl AsBuffer>,
+    draw_indexed_indirect_buffer: &Arc<TBuffer<vk::DrawIndexedIndirectCommand>>,
+    //texture: &Image,
+    swapchain_images_size: usize,
+) -> Vec<DescriptorSet> {
+    let mut layouts: Vec<vk::DescriptorSetLayout> = vec![];
+    for _ in 0..swapchain_images_size {
+        layouts.push(descriptor_set_layout.handle());
+    }
+
+    let descriptor_set_allocate_info = vk::DescriptorSetAllocateInfo::builder()
+        .descriptor_pool(descriptor_pool.handle)
+        .set_layouts(&layouts);
+
+    let vk_descriptor_sets = unsafe {
+        device
+            .handle
+            .allocate_descriptor_sets(&descriptor_set_allocate_info)
+            .expect("Failed to allocate descriptor sets!")
+    };
+
+    let descriptor_sets: Vec<_> = vk_descriptor_sets
+        .into_iter()
+        .enumerate()
+        .map(|(i, set)| {
+            DescriptorSet::new(
+                set,
+                descriptor_pool.clone(),
+                descriptor_set_layout.clone(),
+                device.clone(),
+                vec![
+                    DescriptorWriteData::Buffer {
+                        // 0
+                        buf: uniform_transform_buffer.clone(),
+                    },
+                    DescriptorWriteData::Buffer {
+                        // 1
+                        buf: submesh_buffer.clone(), //
+                    },
+                    DescriptorWriteData::Buffer {
+                        // 2
+                        buf: should_draw_buffer.buffer(),
+                    },
+                    DescriptorWriteData::Buffer {
+                        // 3
+                        buf: uniform_camera_buffers[i].buffer(),
+                    },
+                    DescriptorWriteData::Buffer {
+                        // 4
+                        buf: meshlet_buffer.clone(), //
+                    },
+                    DescriptorWriteData::Empty,
+                    DescriptorWriteData::Buffer {
+                        // 6
+                        buf: indices_buffer.buffer(), //
+                    },
+                    DescriptorWriteData::Buffer {
+                        // 6
+                        buf: draw_indexed_indirect_buffer.buffer(), //
+                    },
+                ],
+            )
+        })
+        .collect();
+
+    descriptor_sets
 }

@@ -21,11 +21,3 @@ thiserror = "1.0"
 rayon = "1.8"
 indicatif = { version = "0.17", features = ["rayon"], optional = true }
 parking_lot = "0.12"
-
-
-[dev-dependencies]
-criterion = "0.3"
-
-[[bench]]
-name = "bench_pidge"
-harness = false

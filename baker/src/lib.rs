@@ -18,7 +18,7 @@ use petgraph::visit::IntoNeighbors;
 const CLUSTERS_PER_SIMPLIFIED_GROUP: usize = 2;
 const STARTING_CLUSTER_SIZE: usize = 280;
 
-const COLOUR_CLUSTER_SIZE: usize = 60;
+const COLOUR_CLUSTER_SIZE: usize = 55;
 //TODO: Curb random sized groups and the like to bring this number to more reasonable amounts
 //const MAX_TRIS_PER_CLUSTER: usize = 126 * 3;
 

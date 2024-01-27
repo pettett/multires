@@ -10,12 +10,20 @@ impl TriMesh {
     pub fn from_gltf(path: impl AsRef<std::path::Path>) -> gltf::Result<Self> {
         let (doc, buffers, _) = gltf::import(path)?;
 
-        let mesh = doc.meshes().next().unwrap();
-        let p = mesh.primitives().next().unwrap();
+        let mesh = doc
+            .meshes()
+            .next()
+            .expect("GLTF must contain at least one mesh");
+        let p = mesh
+            .primitives()
+            .next()
+            .expect("Mesh must contain at least one primitive");
 
         let reader = p.reader(|buffer| Some(&buffers[buffer.index()]));
-        let vert_iter = reader.read_positions().unwrap();
-        let norm_iter = reader.read_normals().unwrap();
+        let vert_iter = reader
+            .read_positions()
+            .expect("Mesh must contain positions");
+        let norm_iter = reader.read_normals().expect("Mesh must contain normals");
 
         Ok(TriMesh {
             verts: vert_iter.map(|[x, y, z]| Vec4::new(x, y, z, 1.0)).collect(),

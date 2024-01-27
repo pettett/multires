@@ -9,7 +9,7 @@ use common::graph::{
 use glam::Vec4Swizzles;
 
 impl WingedMesh {
-    pub fn partition_contiguous(&mut self) -> usize {
+    pub fn partition_contiguous(&mut self) -> Vec<usize> {
         println!("Wiping partitions");
         // Wipe partitions
         for (_, f) in self.iter_faces_mut() {
@@ -18,9 +18,7 @@ impl WingedMesh {
 
         let mut p = 1;
         let mut search = Vec::new();
-
-        #[cfg(feature = "progress")]
-        let bar = indicatif::ProgressBar::new(self.face_count() as _);
+        let mut counts = Vec::new();
 
         loop {
             assert_eq!(search.len(), 0);
@@ -34,18 +32,17 @@ impl WingedMesh {
             }
 
             if search.len() == 0 {
-                #[cfg(feature = "progress")]
-                bar.finish();
-
                 // end this with p-1 partitions
-                break p - 1;
+                break counts;
             }
+
+            counts.push(0);
 
             while let Some(fid) = search.pop() {
                 // Mark
-                #[cfg(feature = "progress")]
-                bar.inc(1);
+
                 self.get_face_mut(fid).cluster_idx = p;
+                counts[p - 1] += 1;
 
                 // Search for unmarked
                 let e0 = self.get_face(fid).edge;
@@ -93,11 +90,21 @@ impl WingedMesh {
 
         let mut occupancies = vec![0; cluster_count];
 
-        for (fid, face) in self.iter_faces_mut() {
-            // Some faces will have already been removed
-            face.cluster_idx = cluster_indexes[fid.0] as usize;
+        for i in 0..cluster_indexes.len() {
+            let fid = *mesh_dual
+                .node_weight(petgraph::graph::node_index(i))
+                .unwrap();
+            let face = self.get_face_mut(fid);
+
+            face.cluster_idx = cluster_indexes[i] as usize;
             occupancies[face.cluster_idx] += 1;
         }
+
+        // for (fid, face) in self.iter_faces_mut() {
+        //     // Some faces will have already been removed
+        //     face.cluster_idx = cluster_indexes[fid.0] as usize;
+        //     occupancies[face.cluster_idx] += 1;
+        // }
 
         //assert!(*occupancies.iter().max().unwrap() <= MAX_TRIS_PER_CLUSTER);
 

@@ -110,7 +110,7 @@ void main() {
 			);
     }
 
-	float error =  ubo.target_error * ubo.target_error;
+	float error = ubo.target_error * ubo.target_error;
 
     bool draw = error >= this_error && error < parent_error;
 
