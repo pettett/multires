@@ -14,11 +14,11 @@ use crate::{
     screen::Screen,
     utility::{
         buffer::{AsBuffer, Buffer, TBuffer},
+        device::Device,
         pooled::command_pool::CommandPool,
         pooled::descriptor_pool::{
             DescriptorPool, DescriptorSet, DescriptorSetLayout, DescriptorWriteData,
         },
-        device::Device,
         render_pass::RenderPass,
         {ComputePipeline, GraphicsPipeline, ShaderModule},
     },
@@ -129,6 +129,8 @@ impl DrawPipeline for ComputeCulledMesh {
             render_pass,
         ));
     }
+
+    fn stats_gui(&mut self, ui: &mut egui::Ui, image_index: usize) {}
 }
 
 struct ScreenData {

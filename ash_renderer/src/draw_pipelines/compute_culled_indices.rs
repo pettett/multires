@@ -184,6 +184,8 @@ impl DrawPipeline for ComputeCulledIndices {
             render_pass,
         ));
     }
+
+    fn stats_gui(&mut self, ui: &mut egui::Ui, image_index: usize) {}
 }
 
 struct ScreenData {

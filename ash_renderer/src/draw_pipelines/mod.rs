@@ -27,6 +27,8 @@ pub trait DrawPipeline {
         instance_count: u32,
         render_pass: &RenderPass,
     );
+
+    fn stats_gui(&mut self, ui: &mut egui::Ui, frame_index: usize);
 }
 
 pub fn init_rasterization_statue_create_info() -> vk::PipelineRasterizationStateCreateInfo {

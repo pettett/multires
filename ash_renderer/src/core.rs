@@ -1,7 +1,4 @@
-use std::{
-    ffi,
-    sync::{Arc, Mutex, MutexGuard},
-};
+use std::{ffi, sync::Arc};
 
 use crate::{
     utility::{
@@ -11,7 +8,6 @@ use crate::{
         instance::Instance,
         pooled::{command_pool::CommandPool, query_pool::QueryPool},
         structures::*,
-        window::init_window,
     },
     VkHandle, TASK_GROUP_SIZE, WINDOW_TITLE,
 };
@@ -29,7 +25,6 @@ pub struct Core {
     pub surface: Arc<Surface>,
     pub queue_family: QueueFamilyIndices,
     pub command_pool: Arc<CommandPool>,
-    pub query_pool: Arc<QueryPool>,
 
     debug_utils_loader: ash::extensions::ext::DebugUtils,
     debug_messenger: vk::DebugUtilsMessengerEXT,
@@ -37,7 +32,8 @@ pub struct Core {
 impl Core {
     pub fn new(event_loop: &EventLoop<()>) -> Arc<Self> {
         println!("initing window");
-        let window = init_window(event_loop, WINDOW_TITLE, WINDOW_WIDTH, WINDOW_HEIGHT);
+        let window =
+            crate::app::window::init_window(event_loop, WINDOW_TITLE, WINDOW_WIDTH, WINDOW_HEIGHT);
 
         // init vulkan stuff
         println!("initing vulkan");
@@ -87,7 +83,6 @@ impl Core {
 
         let command_pool = CommandPool::new(device.clone(), queue_family.graphics_family.unwrap());
 
-        let query_pool = QueryPool::new(device.clone(), 5);
         Arc::new(Core {
             window,
             device,
@@ -96,7 +91,6 @@ impl Core {
             surface,
             queue_family,
             command_pool,
-            query_pool,
             debug_utils_loader,
             debug_messenger,
         })

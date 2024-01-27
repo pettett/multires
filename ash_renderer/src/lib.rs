@@ -6,6 +6,8 @@ pub mod screen;
 pub mod utility;
 pub mod vertex;
 
+pub mod app;
+
 use crate::{
     core::Core,
     gui::allocator_visualiser_window::AllocatorVisualiserWindow,
@@ -21,6 +23,7 @@ use crate::{
     },
 };
 
+use app::fps_limiter::FPSLimiter;
 use ash::vk;
 use bevy_ecs::{entity::Entity, event::Events, schedule::Schedule, world::World};
 use common::{asset::Asset, MeshVert, MultiResMesh};
@@ -39,22 +42,15 @@ use draw_pipelines::{
     compute_culled_indices::ComputeCulledIndices, compute_culled_mesh::ComputeCulledMesh,
     indirect_tasks::IndirectTasks, stub::Stub, DrawPipeline,
 };
-use glam::{Mat4, Quat, Vec3A};
+use glam::{Quat, Vec3A};
 use gpu_allocator::{vulkan::*, AllocationSizes, AllocatorDebugSettings};
 use gui::{gui::Gui, window::GuiWindow};
 use screen::Screen;
-use utility::{
-    buffer::{AsBuffer, Buffer, TBuffer},
-    fps_limiter::FPSLimiter,
-    pooled::descriptor_pool::DescriptorSet,
-};
+use utility::buffer::{AsBuffer, Buffer, TBuffer};
 use winit::event::WindowEvent;
 
-use std::{any::Any, sync::Arc};
-use std::{
-    mem,
-    sync::{Mutex, MutexGuard},
-};
+use std::sync::Arc;
+use std::sync::{Mutex, MutexGuard};
 
 // Constants
 const WINDOW_TITLE: &'static str = "Multires Mesh Renderer";
@@ -92,7 +88,7 @@ pub struct App {
 
     render_pass: RenderPass,
 
-    draw: Box<dyn DrawPipeline>,
+    draw_pipeline: Box<dyn DrawPipeline>,
 
     descriptor_pool: Arc<DescriptorPool>,
 
@@ -367,7 +363,7 @@ impl App {
 
             render_pass,
 
-            draw: Box::new(mesh_draw),
+            draw_pipeline: Box::new(mesh_draw),
             switch_pipeline: MeshDrawingPipelineType::ComputeCulledIndices,
             current_pipeline: MeshDrawingPipelineType::None,
 
@@ -456,7 +452,7 @@ impl App {
         let ui_cmd = self.draw_gui(image_index as usize, fps);
 
         let submit_infos = [vk::SubmitInfo::builder()
-            .command_buffers(&[self.draw.draw(image_index as usize), ui_cmd])
+            .command_buffers(&[self.draw_pipeline.draw(image_index as usize), ui_cmd])
             .wait_dst_stage_mask(&wait_stages)
             .signal_semaphores(&signal_semaphores)
             .wait_semaphores(&wait_semaphores)
@@ -516,11 +512,11 @@ impl App {
             _ => self.core.device.wait_device_idle(),
         }
 
-        self.draw = Box::new(Stub);
+        self.draw_pipeline = Box::new(Stub);
 
         match self.switch_pipeline {
             MeshDrawingPipelineType::IndirectTasks => {
-                self.draw = Box::new(IndirectTasks::new(
+                self.draw_pipeline = Box::new(IndirectTasks::new(
                     self.core.clone(),
                     &self.screen,
                     &mut self.world,
@@ -537,7 +533,7 @@ impl App {
                 ));
             }
             MeshDrawingPipelineType::ComputeCulledMesh => {
-                self.draw = Box::new(ComputeCulledMesh::new(
+                self.draw_pipeline = Box::new(ComputeCulledMesh::new(
                     self.core.clone(),
                     &self.screen,
                     &mut self.world,
@@ -554,7 +550,7 @@ impl App {
                 ));
             }
             MeshDrawingPipelineType::ComputeCulledIndices => {
-                self.draw = Box::new(ComputeCulledIndices::new(
+                self.draw_pipeline = Box::new(ComputeCulledIndices::new(
                     self.core.clone(),
                     &self.screen,
                     &mut self.world,
@@ -575,7 +571,7 @@ impl App {
             MeshDrawingPipelineType::None => (),
         }
 
-        self.draw.init_swapchain(
+        self.draw_pipeline.init_swapchain(
             &self.core,
             &self.screen,
             self.submesh_count,
@@ -590,6 +586,13 @@ impl App {
     fn recreate_swapchain(&mut self) {
         self.core.device.wait_device_idle();
 
+        let size = self.window_ref().inner_size();
+        {
+            let mut cam = self.world.entity_mut(self.camera);
+            let mut camera = cam.get_mut::<Camera>().unwrap();
+            camera.on_resize(&size);
+        }
+
         //self.cleanup_swapchain();
 
         self.screen.remake_swapchain(
@@ -598,7 +601,7 @@ impl App {
             self.allocator.clone(),
         );
 
-        self.draw.init_swapchain(
+        self.draw_pipeline.init_swapchain(
             &self.core,
             &self.screen,
             self.submesh_count,
@@ -628,10 +631,9 @@ impl App {
             egui::Window::new("App Config")
                 .open(&mut self.app_info_open)
                 .show(ctx, |ui| {
-                    ui.label(format!("FPS: {:?}", fps.fps()));
+                    ui.add(fps);
 
-                    let data = self.core.query_pool.get_results(image_index as _);
-                    ui.label(format!("Query: {:?}", data));
+                    self.draw_pipeline.stats_gui(ui, image_index);
 
                     ui.label(format!("Current Pipeline: {:?}", self.current_pipeline));
 

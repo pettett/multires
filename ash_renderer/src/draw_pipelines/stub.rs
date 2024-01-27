@@ -18,4 +18,6 @@ impl DrawPipeline for Stub {
         render_pass: &crate::utility::render_pass::RenderPass,
     ) {
     }
+
+    fn stats_gui(&mut self, ui: &mut egui::Ui, image_index: usize) {}
 }
