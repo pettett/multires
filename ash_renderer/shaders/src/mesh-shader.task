@@ -53,9 +53,14 @@ float cluster_error(uint idx, uint idy) {
     if (out_of_range) {
         return LARGE_ERROR;
     } else {
-		vec3 vec = cluster_data.clusters[idx].center - (inverse(model.models[idy]) * vec4(ubo.camera_pos, 1.0)).xyz;
-		float inv_center_distance = inversesqrt(dot(vec, vec));
-        return cluster_data.clusters[idx].error * (cluster_data.clusters[idx].radius * inv_center_distance);
+		vec3 cam = (inverse(model.models[idy]) * vec4(ubo.camera_pos, 1.0)).xyz;
+		vec3 center = cluster_data.clusters[idx].center;
+		float radius = cluster_data.clusters[idx].radius * cluster_data.clusters[idx].radius;
+		float error = cluster_data.clusters[idx].error * cluster_data.clusters[idx].error;
+
+		vec3 vec = center - cam;
+		float inv_center_distance = 1/(dot(vec, vec));
+        return error * radius * inv_center_distance;
 		//return cluster_data.clusters[idx].error;
 	}
 }
@@ -105,12 +110,25 @@ void main() {
 			);
     }
 
-	float error =  ubo.target_error;
+	float error =  ubo.target_error * ubo.target_error;
 
     bool draw = error >= this_error && error < parent_error;
 
-    payload.meshlet_start[local_index] = draw ? cluster_data.clusters[cluster_index].meshlet_start : -1;
-    payload.meshlet_count[local_index] = draw ? cluster_data.clusters[cluster_index].meshlet_count : 0;
+
+	const float CLIP_BOUND = 1.1;
+
+	vec4 clip_pos = ubo.view_proj * model.models[instance_index] * vec4(cluster_data.clusters[cluster_index].center, 1);
+	vec3 norm_clip_pos = clip_pos.xyz / clip_pos.w;
+	norm_clip_pos.z = clamp(norm_clip_pos.z, 0, CLIP_BOUND);
+
+	//vec4 clip_rad = ubo.view_proj * model.models[instance_index] * vec4(cluster_data.clusters[cluster_index].radius, cluster_data.clusters[cluster_index].radius, cluster_data.clusters[cluster_index].radius, 0);
+
+	norm_clip_pos.xy = abs(norm_clip_pos.xy) ;//- abs(clip_rad.xy);
+
+	bool in_clip = clamp(norm_clip_pos, vec3(0), vec3(CLIP_BOUND)) == norm_clip_pos;
+
+    payload.meshlet_start[local_index] = draw && in_clip ? cluster_data.clusters[cluster_index].meshlet_start : -1;
+    payload.meshlet_count[local_index] = draw && in_clip ? cluster_data.clusters[cluster_index].meshlet_count : 0;
     payload.instance = instance_index;
 	
 	// Calculate the largest possible index for the purpose of narrowing down the number of tasks dispatched.

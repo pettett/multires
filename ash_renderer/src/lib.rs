@@ -23,7 +23,7 @@ use crate::{
     },
 };
 
-use app::fps_limiter::FPSLimiter;
+use app::fps_limiter::FPSMeasure;
 use ash::vk;
 use bevy_ecs::{entity::Entity, event::Events, schedule::Schedule, world::World};
 use common::{asset::Asset, MeshVert, MultiResMesh};
@@ -42,15 +42,16 @@ use draw_pipelines::{
     compute_culled_indices::ComputeCulledIndices, compute_culled_mesh::ComputeCulledMesh,
     indirect_tasks::IndirectTasks, stub::Stub, DrawPipeline,
 };
-use glam::{Quat, Vec3A};
+use glam::{vec3a, Quat, Vec3A};
 use gpu_allocator::{vulkan::*, AllocationSizes, AllocatorDebugSettings};
 use gui::{gui::Gui, window::GuiWindow};
+use rand::{Rng, SeedableRng};
 use screen::Screen;
 use utility::buffer::{AsBuffer, Buffer, TBuffer};
 use winit::event::WindowEvent;
 
-use std::sync::Arc;
 use std::sync::{Mutex, MutexGuard};
+use std::{f32::consts::PI, sync::Arc};
 
 // Constants
 const WINDOW_TITLE: &'static str = "Multires Mesh Renderer";
@@ -114,6 +115,23 @@ pub struct App {
     // Make sure to drop the core last
     screen: Screen,
     core: Arc<Core>,
+}
+/// https://karthikkaranth.me/blog/generating-random-points-in-a-sphere/
+fn random_point_on_sphere(rng: &mut impl rand::Rng) -> glam::Vec3A {
+    let u = rng.gen_range(0.0..=1.0);
+    let v = rng.gen_range(0.0..=1.0);
+    let c = rng.gen_range(0.0..=1.0);
+    let theta = u * 2.0 * PI;
+    let phi = f32::acos(2.0 * v - 1.0);
+    let r = f32::cbrt(c);
+
+    let (sin_theta, cos_theta) = f32::sin_cos(theta);
+    let (sin_phi, cos_phi) = f32::sin_cos(phi);
+
+    let x = r * sin_phi * cos_theta;
+    let y = r * sin_phi * sin_theta;
+    let z = r * cos_phi;
+    vec3a(x, y, z)
 }
 
 impl App {
@@ -259,10 +277,13 @@ impl App {
         let mut uniform_transforms = Vec::new();
 
         let mut world: World = World::new();
-        for i in 0..10 {
-            for j in 0..4 {
+
+        let mut r = rand::rngs::StdRng::seed_from_u64(42);
+
+        for i in 0..30 {
+            for j in 0..15 {
                 let mut transform = Transform::new_pos(
-                    glam::Vec3A::X * i as f32 * 40.0 + glam::Vec3A::Y * j as f32 * 40.0,
+                    glam::Vec3A::X * i as f32 * 20.0 + glam::Vec3A::Z * j as f32 * 40.0,
                 );
 
                 if i == 10 && j == 10 {
@@ -312,7 +333,7 @@ impl App {
         let uniform_camera = CameraUniformBufferObject {
             view_proj: cam.build_view_projection_matrix(&transform),
             cam_pos: (*transform.get_pos()).into(),
-            target_error: 0.3,
+            target_error: 0.2,
         };
 
         world.insert_resource(Events::<MouseIn>::default());
@@ -364,7 +385,7 @@ impl App {
             render_pass,
 
             draw_pipeline: Box::new(mesh_draw),
-            switch_pipeline: MeshDrawingPipelineType::ComputeCulledIndices,
+            switch_pipeline: MeshDrawingPipelineType::IndirectTasks,
             current_pipeline: MeshDrawingPipelineType::None,
 
             uniform_transforms,
@@ -407,7 +428,7 @@ impl App {
     //     }
     // }
 
-    fn draw_frame(&mut self, fps: &FPSLimiter) {
+    fn draw_frame(&mut self, fps: &FPSMeasure) {
         let wait_fences = [self.sync_objects.in_flight_fences[self.current_frame]];
 
         unsafe {
@@ -418,7 +439,7 @@ impl App {
                 .expect("Failed to wait for Fence!");
         }
 
-        let (image_index, _is_sub_optimal) = unsafe {
+        let (image_index, is_sub_optimal) = unsafe {
             let result = self.core.device.fn_swapchain.acquire_next_image(
                 self.screen.swapchain().handle,
                 std::u64::MAX,
@@ -498,7 +519,7 @@ impl App {
                 _ => panic!("Failed to execute queue present."),
             },
         };
-        if is_resized {
+        if is_resized || is_sub_optimal {
             self.is_framebuffer_resized = false;
             self.recreate_swapchain();
         }
@@ -623,7 +644,7 @@ impl App {
     pub fn get_allocator(&self) -> MutexGuard<Allocator> {
         self.allocator.lock().unwrap()
     }
-    fn draw_gui(&mut self, image_index: usize, fps: &FPSLimiter) -> vk::CommandBuffer {
+    fn draw_gui(&mut self, image_index: usize, fps: &FPSMeasure) -> vk::CommandBuffer {
         self.gui.draw(image_index, |ctx| {
             for w in &mut self.windows {
                 w.draw(ctx);

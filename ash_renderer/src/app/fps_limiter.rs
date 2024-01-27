@@ -7,16 +7,16 @@ use super::frame_measure::RollingMeasure;
 const NANOS_PER_SEC: f32 = NANOS_PER_SEC_64 as _;
 const NANOS_PER_SEC_64: f64 = 1000_000_000.0;
 
-pub struct FPSLimiter {
+pub struct FPSMeasure {
     delta_time_counter: Instant,
     fps_measure_counter: Instant,
     delta_time_nanos: RollingMeasure<u32, 15>,
     fps_measure: RollingMeasure<f32, 60>,
 }
 
-impl FPSLimiter {
-    pub fn new() -> FPSLimiter {
-        FPSLimiter {
+impl FPSMeasure {
+    pub fn new() -> FPSMeasure {
+        FPSMeasure {
             delta_time_counter: Instant::now(),
             fps_measure_counter: Instant::now(),
             delta_time_nanos: RollingMeasure::default(),
@@ -49,7 +49,7 @@ impl FPSLimiter {
     }
 }
 
-impl egui::Widget for &FPSLimiter {
+impl egui::Widget for &FPSMeasure {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
         self.fps_measure.gui("FPS", ui)
     }
