@@ -30,10 +30,11 @@ pollster = "0.3"
 anyhow = "1.0"
 thiserror = "1.0"
 crevice = { version = "0.14" }
+clap = { version = "4.4", features = ["derive"] }
 
 [profile.release]
 debug = true
+opt-level = 3
 
 [profile.dev.package."*"]
 debug = false
-# opt-level = 1

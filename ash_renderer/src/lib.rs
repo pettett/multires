@@ -116,6 +116,9 @@ pub struct App {
     // Make sure to drop the core last
     screen: Screen,
     core: Arc<Core>,
+
+    target_error: f32,
+    freeze_pos: bool,
 }
 /// https://karthikkaranth.me/blog/generating-random-points-in-a-sphere/
 fn random_point_on_sphere(rng: &mut impl rand::Rng) -> glam::Vec3A {
@@ -222,7 +225,7 @@ impl App {
 
         println!("Loading verts");
 
-        let data = MultiResMesh::load().unwrap();
+        let data = MultiResMesh::load("assets/torrin_main.bin").unwrap();
 
         let (clusters, meshlets) = multires::generate_meshlets(&data);
 
@@ -284,17 +287,19 @@ impl App {
         let mut mid = Vec3A::ZERO;
 
         for i in 0..30 {
-            for j in 0..15 {
+            for j in 0..30 {
                 let p = glam::Vec3A::X * i as f32 * 20.0 + glam::Vec3A::Z * j as f32 * 40.0;
                 mid += p;
                 let mut transform = Transform::new_pos(p);
 
                 //if i == 10 && j == 10 {
-                *transform.scale_mut() *= 10.0;
+                //*transform.scale_mut() *= 10.0;
+                //transform.scale_mut().z *= 10.0;
                 //};
 
                 uniform_transforms.push(ModelUniformBufferObject {
                     model: transform.get_local_to_world(),
+                    inv_model: transform.get_local_to_world().inverse(),
                 });
 
                 world.spawn(transform);
@@ -337,7 +342,7 @@ impl App {
         let uniform_camera = CameraUniformBufferObject {
             view_proj: cam.build_view_projection_matrix(&transform),
             cam_pos: (*transform.get_pos()).into(),
-            target_error: 0.2,
+            target_error: 0.5,
         };
 
         world.insert_resource(Events::<MouseIn>::default());
@@ -406,6 +411,9 @@ impl App {
 
             submesh_count: cluster_data.len() as u32,
             app_info_open: true,
+
+            target_error: 0.5,
+            freeze_pos: false,
         }
     }
 }
@@ -420,7 +428,11 @@ impl App {
             .unwrap()
             .build_view_projection_matrix(cam.get().unwrap());
 
-        self.uniform_camera.cam_pos = (*cam.get::<Transform>().unwrap().get_pos()).into();
+        if !self.freeze_pos {
+            self.uniform_camera.cam_pos = (*cam.get::<Transform>().unwrap().get_pos()).into();
+        }
+
+        self.uniform_camera.target_error = self.target_error;
 
         self.uniform_camera_buffers[current_image].update_uniform_buffer(self.uniform_camera);
     }
@@ -675,6 +687,14 @@ impl App {
             egui::Window::new("App Config")
                 .open(&mut self.app_info_open)
                 .show(ctx, |ui| {
+                    {
+                        ui.checkbox(&mut self.freeze_pos, "Freeze");
+                        ui.add(
+                            egui::Slider::new(&mut self.target_error, 0.0..=1.0)
+                                .text("Target Error"),
+                        );
+                    }
+
                     ui.add(fps);
 
                     self.draw_pipeline.stats_gui(ui, image_index);

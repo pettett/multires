@@ -1,4 +1,4 @@
-use std::marker::PhantomData;
+use std::{marker::PhantomData, mem};
 
 pub trait Key: Into<usize> {}
 pub trait Value: Clone + PartialEq {}
@@ -118,7 +118,7 @@ impl<K: Key, V> Pidge<K, V> {
         self.len += 1;
     }
 
-    pub fn wipe(&mut self, key: K) {
+    pub fn wipe(&mut self, key: K) -> V {
         let id = key.into();
 
         let mut new_span_start = None;
@@ -170,12 +170,18 @@ impl<K: Key, V> Pidge<K, V> {
         // }
 
         // And write in ourself to have correct values, in the case that either of the above span points are still None.
-        self.data[id] = PidgeHole::Empty {
+        let mut data = PidgeHole::Empty {
             span_start: new_span_start.unwrap_or(id),
             span_end: new_span_end.unwrap_or(id),
         };
+        mem::swap(&mut data, &mut self.data[id]);
 
         self.len -= 1;
+
+        match data {
+            PidgeHole::Filled(d) => d,
+            PidgeHole::Empty { .. } => unreachable!(),
+        }
     }
     pub fn get(&self, key: K) -> &V {
         self.data[key.into()].as_ref().unwrap()

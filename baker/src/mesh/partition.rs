@@ -430,9 +430,38 @@ pub mod tests {
 
     use anyhow::Context;
 
-    use crate::mesh::winged_mesh::{test::TEST_MESH_LOW, MeshError};
+    use crate::{
+        mesh::winged_mesh::{
+            test::{TEST_MESH_DRAGON, TEST_MESH_HIGH, TEST_MESH_LOW},
+            MeshError,
+        },
+        STARTING_CLUSTER_SIZE,
+    };
 
     use super::*;
+    #[test]
+    pub fn test_group_sizes() -> anyhow::Result<()> {
+        let test_config = &metis::MultilevelKWayPartitioningConfig {
+            force_contiguous_partitions: Some(true),
+            minimize_subgraph_degree: Some(true),
+            ..Default::default()
+        }
+        .into();
+        let (mut mesh, verts, norms) = WingedMesh::from_gltf(TEST_MESH_DRAGON);
+
+        println!("{:?}", mesh.partition_contiguous());
+
+        mesh.filter_tris_by_cluster(1).unwrap();
+
+        mesh.partition_full_mesh(
+            test_config,
+            mesh.face_count().div_ceil(STARTING_CLUSTER_SIZE) as _,
+        )?;
+
+        mesh.group(test_config, &verts)?;
+
+        Ok(())
+    }
 
     #[test]
     pub fn test_group_neighbours() -> anyhow::Result<()> {
@@ -444,7 +473,10 @@ pub mod tests {
         .into();
         let (mut mesh, verts, norms) = WingedMesh::from_gltf(TEST_MESH_LOW);
 
-        mesh.partition_full_mesh(test_config, 200)?;
+        mesh.partition_full_mesh(
+            test_config,
+            mesh.face_count().div_ceil(STARTING_CLUSTER_SIZE) as _,
+        )?;
         mesh.group(test_config, &verts)?;
 
         // What does it mean for two groups to be neighbours?

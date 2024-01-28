@@ -37,8 +37,7 @@ pub fn group_and_partition_and_simplify(
     mut mesh: WingedMesh,
     verts: &[Vec4],
     normals: &[Vec4],
-    name: String,
-) {
+) -> Vec<MeshLevel> {
     let triangle_clustering_config = &metis::MultilevelKWayPartitioningConfig {
         //u_factor: Some(10),
         //minimize_subgraph_degree: Some(true), // this will sometimes break contiguous partitions
@@ -203,21 +202,7 @@ pub fn group_and_partition_and_simplify(
 
     //assert_eq!(partitions1.len() * 3, layer_1_indices.len());
 
-    MultiResMesh {
-        name,
-        verts: verts
-            .iter()
-            .zip(normals)
-            .map(|(v, n)| MeshVert {
-                pos: [v.x, v.y, v.z, 1.0],
-                normal: [n.x, n.y, n.z, 1.0],
-            })
-            .collect(),
-        // layer_1_indices: indices.clone(),
-        lods: layers,
-    }
-    .save()
-    .unwrap();
+    layers
 }
 
 pub fn apply_simplification(mut mesh: WingedMesh, verts: &[Vec4], name: String) -> WingedMesh {
@@ -285,7 +270,7 @@ pub fn apply_simplification(mut mesh: WingedMesh, verts: &[Vec4], name: String) 
         // layer_1_indices: indices.clone(),
         lods: layers,
     }
-    .save()
+    .save("simplified_asset.bin")
     .unwrap();
 
     mesh
@@ -432,7 +417,7 @@ mod test {
 
         //group_and_partition_full_res(working_mesh, &verts, mesh_name.to_owned());
         //apply_simplification(working_mesh, &verts, mesh_name.to_owned());
-        group_and_partition_and_simplify(mesh, &verts, &norms, mesh_name.to_owned());
+        group_and_partition_and_simplify(mesh, &verts, &norms);
     }
 
     #[test]

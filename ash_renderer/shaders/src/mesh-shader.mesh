@@ -10,13 +10,14 @@
 #include "structs\camera.glsl" // CameraUniformObject 
 #include "structs\vertex.glsl" // Vertex
 #include "structs\meshlet.glsl" // s_meshlet
+#include "structs\model.glsl" // Model
 
  
 const uint GROUP_SIZE = 16;
 
 
 layout (binding = 0) readonly buffer ModelUniformBufferObject {
-    mat4 models[];
+    Model models[];
 };
 
 layout (binding = 3) uniform CameraUniformBufferObject {
@@ -74,9 +75,9 @@ void main() {
 
 		uint vert_idx = meshlets[meshlet_index].vertices[i];
 		
-		gl_MeshVerticesEXT[i].gl_Position = ubo.view_proj * models[payload.instance] * vec4(verts[vert_idx].pos.xyz, 1);
+		gl_MeshVerticesEXT[i].gl_Position = ubo.view_proj * models[payload.instance].model * vec4(verts[vert_idx].pos.xyz, 1);
 		
-		OUT[i].world_normal = (models[payload.instance] * vec4(verts[vert_idx].normal.xyz, 0)).xyz;
+		OUT[i].world_normal = (models[payload.instance].model * vec4(verts[vert_idx].normal.xyz, 0)).xyz;
 		
 		OUT[i].fragColor = colour;
 		

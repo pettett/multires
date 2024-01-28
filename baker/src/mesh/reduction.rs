@@ -1,4 +1,4 @@
-use std::cmp;
+use std::{cmp, ops};
 
 use glam::vec4;
 #[cfg(feature = "progress")]
@@ -7,47 +7,18 @@ use indicatif::ProgressStyle;
 use rayon::prelude::*;
 
 use super::{
+    edge::EdgeID,
+    quadric::Quadric,
+    quadric_error::QuadricError,
     vertex::VertID,
-    winged_mesh::{EdgeID, FaceID, MeshError, WingedMesh},
+    winged_mesh::{MeshError, WingedMesh},
 };
 use anyhow::{Context, Result};
 
-#[derive(Clone, Copy)]
-pub struct Plane(glam::Vec4);
-/// Quadric type. Internally a DMat4, kept private to ensure only valid reduction operations can effect it.
-pub struct Quadric(glam::DMat4);
-/// Similar to `Quadric`, this data is for internal use only. Reverses the ordering of a float value, such that we take min values from a priority queue.
-#[derive(Clone, Copy)]
-pub struct Error(cmp::Reverse<f64>, EdgeID);
 /// Similar to `Quadric`, this data is for internal use only.
 #[derive(Clone)]
 pub struct CollapseQueue {
-    queue: priority_queue::PriorityQueue<EdgeID, Error>,
-}
-
-impl PartialEq for Error {
-    fn eq(&self, other: &Self) -> bool {
-        self.0 == other.0
-    }
-}
-
-impl PartialOrd for Error {
-    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
-        self.0.partial_cmp(&other.0)
-    }
-}
-
-impl Eq for Error {}
-
-impl Ord for Error {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        if let Some(ordering) = self.partial_cmp(other) {
-            ordering
-        } else {
-            // Choose what to do with NaNs, for example:
-            panic!("Cannot order invalid floats")
-        }
-    }
+    queue: priority_queue::PriorityQueue<EdgeID, QuadricError>,
 }
 
 pub fn tri_area(a: glam::Vec3A, b: glam::Vec3A, c: glam::Vec3A) -> f32 {
@@ -55,214 +26,6 @@ pub fn tri_area(a: glam::Vec3A, b: glam::Vec3A, c: glam::Vec3A) -> f32 {
     let ac = c - a;
 
     glam::Vec3A::cross(ab, ac).length() / 2.0
-}
-impl Plane {
-    pub fn from_three_points(a: glam::Vec3A, b: glam::Vec3A, c: glam::Vec3A) -> Self {
-        let ab = b - a;
-        let ac = c - a;
-
-        let normal = glam::Vec3A::cross(ab, ac).normalize();
-
-        Self::from_normal_and_point(normal, a)
-    }
-
-    pub fn from_normal_and_point(norm: glam::Vec3A, p: glam::Vec3A) -> Self {
-        let d = -p.dot(norm);
-
-        Plane(vec4(norm.x, norm.y, norm.z, d))
-    }
-
-    /// The fundamental error quadric `K_p`, such that `v^T K_p v` = `sqr distance v <-> p`
-    /// Properties: Additive, Symmetric.
-    pub fn fundamental_error_quadric(self) -> Quadric {
-        let p: glam::DVec4 = self.0.into();
-        let (a, b, c, d) = p.into();
-
-        // Do `p p^T`
-        Quadric(glam::DMat4::from_cols(a * p, b * p, c * p, d * p))
-    }
-
-    pub fn normal(&self) -> glam::Vec3A {
-        self.0.into()
-    }
-}
-
-impl Quadric {
-    /// Calculate error from Q and vertex, `v^T K_p v`
-    pub fn quadric_error(&self, v: glam::Vec3A) -> f64 {
-        let v: glam::Vec4 = (v, 1.0).into();
-        let v: glam::DVec4 = v.into();
-        v.dot(self.0 * v)
-    }
-}
-impl FaceID {
-    /// Generate plane from the 3 points a,b,c on this face.
-    pub fn plane(self, mesh: &WingedMesh, verts: &[glam::Vec4]) -> Plane {
-        let [a, b, c] = mesh.triangle_from_face(&mesh.get_face(self));
-
-        Plane::from_three_points(verts[a].into(), verts[b].into(), verts[c].into())
-    }
-}
-
-impl VertID {
-    /// Generate error matrix Q, the sum of Kp for all planes p around this vertex.
-    /// TODO: Eventually we can also add a high penality plane if this is a vertex on a boundary, but manually checking may be easier
-    #[allow(non_snake_case)]
-    pub fn generate_error_matrix(self, mesh: &WingedMesh, verts: &[glam::Vec4]) -> Quadric {
-        let mut Q = Quadric(glam::DMat4::ZERO);
-
-        for &e in mesh.get_vert(self).outgoing_edges() {
-            let f = mesh.get_edge(e).face;
-
-            let plane = f.plane(mesh, verts);
-
-            let Kp = plane.fundamental_error_quadric();
-
-            Q.0 += Kp.0;
-
-            if mesh.get_edge(e).twin.is_none() {
-                // Boundary edge, add a plane that stops us moving away from the boundary
-
-                // Edge Plane should have normal of Edge X plane
-                let v = e.edge_vec(mesh, verts).unwrap();
-
-                let boundary_norm = v.cross(plane.normal());
-
-                let boundary_plane = Plane::from_normal_and_point(
-                    boundary_norm,
-                    verts[mesh.get_edge(e).vert_origin.0].into(),
-                );
-                // Multiply squared error by large factor, as changing the boundary adds a lot of visible error
-                Q.0 += boundary_plane.fundamental_error_quadric().0 * 3000.0;
-            }
-        }
-        Q
-    }
-}
-
-impl EdgeID {
-    /// Grab the source and destination vertex IDs from this edge.
-    /// Source vertex is just `HalfEdge.vert_origin`, destination vertex is `HalfEdge.edge_left_cw`'s vert_origin
-    pub fn src_dst(self, mesh: &WingedMesh) -> Result<(VertID, VertID)> {
-        let edge = mesh.try_get_edge(self)?;
-
-        //.get(self)
-        //.ok_or(MeshError::InvalidEdge)
-        //.context("Failed to lookup origin/destination")?;
-        let orig = edge.vert_origin;
-        let dest = mesh
-            .try_get_edge(edge.edge_left_cw)
-            .context(MeshError::InvalidCwEdge(self))?
-            .vert_origin;
-        Ok((orig, dest))
-    }
-
-    /// Get a vector A-B for the source and destinations from [`EdgeID::src_dst`]
-    pub fn edge_vec(&self, mesh: &WingedMesh, verts: &[glam::Vec4]) -> Result<glam::Vec3A> {
-        let (src, dst) = self.src_dst(mesh)?;
-        let vd: glam::Vec3A = verts[dst.0].into();
-        let vs: glam::Vec3A = verts[src.0].into();
-        Ok(vd - vs)
-    }
-
-    /// Evaluate if any restrictions on edge collapse apply to this edge.
-    ///
-    /// Current restrictions:
-    /// - Cannot change group boundaries.
-    /// - Cannot split group into non-contiguous segments.
-    /// - Cannot split with connected triangles which would cause an overlap.
-    /// - Cannot flip normals of any triangles when collapsing.
-    pub fn can_collapse_edge(self, mesh: &WingedMesh, verts: &[glam::Vec4]) -> Result<bool> {
-        let (orig, dest) = self.src_dst(mesh)?;
-
-        if !orig.is_group_embedded(mesh) {
-            // Cannot move a vertex unless it is in the center of a partition
-            return Ok(false);
-        }
-
-        //if !orig.is_group_embedded(mesh) {
-        //    // Cannot change group boundary
-        //    // Cannot move a vertex unless it is in the center of a partition
-        //    return Ok(false);
-        //}
-
-        if mesh.get_edge(self).twin.is_some() {
-            // This edge has a twin, so a bad collapse risks splitting the group into 2 pieces.
-
-            // If we change the boundary shape, we must move into a manifold embedded position,
-            // or we risk separating the partition into two chunks, which will break partitioning
-
-            if !orig.is_local_manifold(mesh) {
-                // We can split the group into two chunks by collapsing onto another edge (non manifold dest),
-                //  or collapsing onto another group
-                if !dest.is_group_embedded(mesh) || !dest.is_local_manifold(mesh) {
-                    return Ok(false);
-                }
-            }
-        }
-
-        // Cannot collapse edges that would result in combining triangles over each other
-        if !mesh.max_one_joint_neighbour_vertices_per_side(self) {
-            return Ok(false);
-        }
-
-        // Test normals of triangles before and after the swap
-        for &e in mesh
-            .get_vert(orig)
-            //.verts
-            //.get(orig)
-            //.ok_or(MeshError::InvalidVertex)
-            //.context("Failed to lookup vertex for finding plane normals")?
-            .outgoing_edges()
-        {
-            if e == self {
-                continue;
-            }
-
-            let f = mesh.get_edge(e).face;
-            let [a, b, c] = mesh.triangle_from_face(&mesh.get_face(f));
-
-            let (v_a, v_b, v_c, new_corner) = (
-                verts[a].into(),
-                verts[b].into(),
-                verts[c].into(),
-                verts[dest.0].into(),
-            );
-            let starting_plane = Plane::from_three_points(v_a, v_b, v_c);
-
-            let end_plane = match orig.0 {
-                i if i == a => Plane::from_three_points(new_corner, v_b, v_c),
-                i if i == b => Plane::from_three_points(v_a, new_corner, v_c),
-                i if i == c => Plane::from_three_points(v_a, v_b, new_corner),
-                _ => unreachable!(),
-            };
-
-            if starting_plane.normal().dot(end_plane.normal()) < 0.0 {
-                // Flipped triangle, give this an invalid weight - discard
-                return Ok(false);
-            }
-        }
-
-        Ok(true)
-    }
-
-    /// Estimate the error introduced by collapsing this edge. Does not take into account penalties from flipping triangles
-    pub fn edge_collapse_error(
-        self,
-        mesh: &WingedMesh,
-        verts: &[glam::Vec4],
-        quadric_errors: &[Quadric],
-    ) -> Result<Error> {
-        let (orig, dest) = self.src_dst(mesh)?;
-
-        // Collapsing this edge would move the origin to the destination, so we find the error of the origin at the merged point.
-        let q = Quadric(quadric_errors[orig.0].0 + quadric_errors[dest.0].0);
-
-        Ok(Error(
-            cmp::Reverse(q.quadric_error(verts[orig.0].into())),
-            self,
-        ))
-    }
 }
 
 impl WingedMesh {
@@ -372,18 +135,19 @@ impl WingedMesh {
 
             'outer: for i in 0..requirement {
                 let (orig, dest, eid, err) = loop {
-                    let (_, Error(cmp::Reverse(err), eid)) = match collapse_queues[qi].queue.pop() {
-                        Some(err) => err,
-                        None => {
-                            // FIXME: how to handle early exits
-                            #[cfg(feature = "progress")]
-                            bar.println(format!(
+                    let (_, QuadricError(cmp::Reverse(err), eid)) =
+                        match collapse_queues[qi].queue.pop() {
+                            Some(err) => err,
+                            None => {
+                                // FIXME: how to handle early exits
+                                #[cfg(feature = "progress")]
+                                bar.println(format!(
                                 "Out of valid edges - Exiting early from de-meshing with {} to go",
                                 requirement - i - 1
                             ));
-                            break 'outer;
-                        }
-                    };
+                                break 'outer;
+                            }
+                        };
 
                     let Ok((orig, dest)) = eid.src_dst(&self) else {
                         // Invalid edges are allowed to show up in the search
@@ -410,14 +174,8 @@ impl WingedMesh {
                 //    assert!(orig.is_group_embedded(&self));
                 //}
 
-                //TODO: When we collapse an edge, recalculate any effected edges.
-
-                let mut effected_edges: Vec<_> = self.get_vert(orig).outgoing_edges().to_vec();
-                effected_edges.extend(self.get_vert(dest).outgoing_edges());
-                effected_edges.extend(self.get_vert(orig).incoming_edges());
-                effected_edges.extend(self.get_vert(dest).incoming_edges());
-
                 quadrics[dest.0].0 += quadrics[orig.0].0;
+
                 #[allow(unreachable_patterns)]
                 match self.collapse_edge(eid) {
                     Ok(()) => (),
@@ -429,7 +187,15 @@ impl WingedMesh {
                     }
                 }
 
-                for eid in effected_edges {
+                // All the edges from src are now in dest, so we only need to check those
+                let effected_edges = self
+                    .get_vert(dest)
+                    .outgoing_edges()
+                    .iter()
+                    .chain(self.get_vert(dest).incoming_edges());
+
+                // Update priority queue with new errors
+                for &eid in effected_edges {
                     if let Ok(edge) = self.try_get_edge(eid) {
                         let edge_queue =
                             self.clusters[self.get_face(edge.face).cluster_idx].group_index;
@@ -456,16 +222,14 @@ impl WingedMesh {
 mod tests {
     use std::error::Error;
 
-    use crate::mesh::winged_mesh::test::TEST_MESH_MONK;
+    use crate::mesh::{plane::Plane, winged_mesh::test::TEST_MESH_MONK};
 
-    use super::{
-        super::winged_mesh::{test::TEST_MESH_HIGH, WingedMesh},
-        Plane,
-    };
+    use super::super::winged_mesh::{test::TEST_MESH_HIGH, WingedMesh};
 
     fn plane_distance(plane: &Plane, point: glam::Vec3A) -> f32 {
         point.dot(plane.0.into()) + plane.0.w
     }
+
     // Test that each face generates a valid plane
     #[test]
     pub fn test_planes() -> Result<(), Box<dyn Error>> {
