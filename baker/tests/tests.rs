@@ -93,9 +93,9 @@ fn test_determinacy() {
 
     let num_contiguous = mesh1.partition_contiguous();
 
-    println!("We have {} Contiguous segments", num_contiguous);
+    println!("We have {:?} Contiguous segments", num_contiguous);
 
-    assert_eq!(num_contiguous, 1);
+    assert_eq!(num_contiguous.len(), 1);
     //group_and_partition_full_res(working_mesh, &verts, mesh_name.to_owned());
     //apply_simplification(working_mesh, &verts, mesh_name.to_owned());
     group_and_partition_and_simplify(&mut mesh0, &verts);

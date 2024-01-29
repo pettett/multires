@@ -8,20 +8,18 @@ use anyhow::Context;
 use bincode::{config, de, enc};
 
 pub trait Asset: Sized + enc::Encode + de::Decode {
-    fn save(&self) -> anyhow::Result<()> {
+    fn save<P: AsRef<path::Path>>(&self, path: P) -> anyhow::Result<()> {
         let config = config::standard();
 
         let data = bincode::encode_to_vec(self, config)?;
 
-        let mut file = fs::File::create("asset.bin")?;
+        let mut file = fs::File::create(path)?;
         file.write_all(&data[..])?;
 
         Ok(())
     }
-    fn load() -> anyhow::Result<Self> {
+    fn load<P: AsRef<path::Path>>(path: P) -> anyhow::Result<Self> {
         let config = config::standard();
-
-        let path = "asset.bin";
 
         let file = fs::File::open(&path)?;
         let mut buf = BufReader::new(file);

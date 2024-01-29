@@ -13,6 +13,7 @@ use crate::{
 
 pub mod compute_culled_indices;
 pub mod compute_culled_mesh;
+pub mod draw_indirect;
 pub mod indirect_tasks;
 pub mod stub;
 
@@ -27,6 +28,8 @@ pub trait DrawPipeline {
         instance_count: u32,
         render_pass: &RenderPass,
     );
+
+    fn stats_gui(&mut self, ui: &mut egui::Ui, frame_index: usize);
 }
 
 pub fn init_rasterization_statue_create_info() -> vk::PipelineRasterizationStateCreateInfo {

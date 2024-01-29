@@ -6,6 +6,8 @@ pub mod screen;
 pub mod utility;
 pub mod vertex;
 
+pub mod app;
+
 use crate::{
     core::Core,
     gui::allocator_visualiser_window::AllocatorVisualiserWindow,
@@ -21,6 +23,7 @@ use crate::{
     },
 };
 
+use app::fps_limiter::FPSMeasure;
 use ash::vk;
 use bevy_ecs::{entity::Entity, event::Events, schedule::Schedule, world::World};
 use common::{asset::Asset, MeshVert, MultiResMesh};
@@ -37,24 +40,18 @@ use common_renderer::{
 };
 use draw_pipelines::{
     compute_culled_indices::ComputeCulledIndices, compute_culled_mesh::ComputeCulledMesh,
-    indirect_tasks::IndirectTasks, stub::Stub, DrawPipeline,
+    draw_indirect::DrawIndirect, indirect_tasks::IndirectTasks, stub::Stub, DrawPipeline,
 };
-use glam::{Mat4, Quat, Vec3A};
+use glam::{vec3a, Quat, Vec3A};
 use gpu_allocator::{vulkan::*, AllocationSizes, AllocatorDebugSettings};
 use gui::{gui::Gui, window::GuiWindow};
+use rand::{Rng, SeedableRng};
 use screen::Screen;
-use utility::{
-    buffer::{AsBuffer, Buffer, TBuffer},
-    fps_limiter::FPSLimiter,
-    pooled::descriptor_pool::DescriptorSet,
-};
+use utility::buffer::{AsBuffer, Buffer, TBuffer};
 use winit::event::WindowEvent;
 
-use std::{any::Any, sync::Arc};
-use std::{
-    mem,
-    sync::{Mutex, MutexGuard},
-};
+use std::sync::{Mutex, MutexGuard};
+use std::{f32::consts::PI, sync::Arc};
 
 // Constants
 const WINDOW_TITLE: &'static str = "Multires Mesh Renderer";
@@ -70,6 +67,7 @@ pub trait VkDeviceOwned: VkHandle<VkItem = vk::Device> {}
 #[derive(Debug, Clone, Copy)]
 pub enum MeshDrawingPipelineType {
     IndirectTasks,
+    DrawIndirect,
     ComputeCulledMesh,
     ComputeCulledIndices,
     None,
@@ -92,7 +90,7 @@ pub struct App {
 
     render_pass: RenderPass,
 
-    draw: Box<dyn DrawPipeline>,
+    draw_pipeline: Box<dyn DrawPipeline>,
 
     descriptor_pool: Arc<DescriptorPool>,
 
@@ -118,6 +116,26 @@ pub struct App {
     // Make sure to drop the core last
     screen: Screen,
     core: Arc<Core>,
+
+    target_error: f32,
+    freeze_pos: bool,
+}
+/// https://karthikkaranth.me/blog/generating-random-points-in-a-sphere/
+fn random_point_on_sphere(rng: &mut impl rand::Rng) -> glam::Vec3A {
+    let u = rng.gen_range(0.0..=1.0);
+    let v = rng.gen_range(0.0..=1.0);
+    let c = rng.gen_range(0.0..=1.0);
+    let theta = u * 2.0 * PI;
+    let phi = f32::acos(2.0 * v - 1.0);
+    let r = f32::cbrt(c);
+
+    let (sin_theta, cos_theta) = f32::sin_cos(theta);
+    let (sin_phi, cos_phi) = f32::sin_cos(phi);
+
+    let x = r * sin_phi * cos_theta;
+    let y = r * sin_phi * sin_theta;
+    let z = r * cos_phi;
+    vec3a(x, y, z)
 }
 
 impl App {
@@ -207,7 +225,7 @@ impl App {
 
         println!("Loading verts");
 
-        let data = MultiResMesh::load().unwrap();
+        let data = MultiResMesh::load("assets/torrin_main.bin").unwrap();
 
 		
         let (cluster_order, cluster_groups) = data.order_clusters();
@@ -266,23 +284,31 @@ impl App {
         let mut uniform_transforms = Vec::new();
 
         let mut world: World = World::new();
-        for i in 0..10 {
-            for j in 0..4 {
-                let mut transform = Transform::new_pos(
-                    glam::Vec3A::X * i as f32 * 40.0 + glam::Vec3A::Y * j as f32 * 40.0,
-                );
 
-                if i == 10 && j == 10 {
-                    *transform.scale_mut() *= 20.0
-                };
+        let mut r = rand::rngs::StdRng::seed_from_u64(42);
+
+        let mut mid = Vec3A::ZERO;
+
+        for i in 0..30 {
+            for j in 0..30 {
+                let p = glam::Vec3A::X * i as f32 * 20.0 + glam::Vec3A::Z * j as f32 * 40.0;
+                mid += p;
+                let mut transform = Transform::new_pos(p);
+
+                //if i == 10 && j == 10 {
+                //*transform.scale_mut() *= 10.0;
+                //transform.scale_mut().z *= 10.0;
+                //};
 
                 uniform_transforms.push(ModelUniformBufferObject {
                     model: transform.get_local_to_world(),
+                    inv_model: transform.get_local_to_world().inverse(),
                 });
 
                 world.spawn(transform);
             }
         }
+        mid /= (30 * 15) as f32;
 
         let uniform_transform_buffer = Buffer::new_storage_filled(
             &core,
@@ -314,12 +340,12 @@ impl App {
         println!("Generated App");
 
         let cam = Camera::new(1.0);
-        let transform = Transform::new(Vec3A::ZERO, Quat::IDENTITY);
+        let transform = Transform::new(mid + Vec3A::Y * 200.0, Quat::IDENTITY);
 
         let uniform_camera = CameraUniformBufferObject {
             view_proj: cam.build_view_projection_matrix(&transform),
             cam_pos: (*transform.get_pos()).into(),
-            target_error: 0.3,
+            target_error: 0.5,
         };
 
         world.insert_resource(Events::<MouseIn>::default());
@@ -370,8 +396,8 @@ impl App {
 
             render_pass,
 
-            draw: Box::new(mesh_draw),
-            switch_pipeline: MeshDrawingPipelineType::ComputeCulledIndices,
+            draw_pipeline: Box::new(mesh_draw),
+            switch_pipeline: MeshDrawingPipelineType::IndirectTasks,
             current_pipeline: MeshDrawingPipelineType::None,
 
             uniform_transforms,
@@ -388,6 +414,9 @@ impl App {
 
             submesh_count: cluster_data.len() as u32,
             app_info_open: true,
+
+            target_error: 0.5,
+            freeze_pos: false,
         }
     }
 }
@@ -402,7 +431,11 @@ impl App {
             .unwrap()
             .build_view_projection_matrix(cam.get().unwrap());
 
-        self.uniform_camera.cam_pos = (*cam.get::<Transform>().unwrap().get_pos()).into();
+        if !self.freeze_pos {
+            self.uniform_camera.cam_pos = (*cam.get::<Transform>().unwrap().get_pos()).into();
+        }
+
+        self.uniform_camera.target_error = self.target_error;
 
         self.uniform_camera_buffers[current_image].update_uniform_buffer(self.uniform_camera);
     }
@@ -414,7 +447,7 @@ impl App {
     //     }
     // }
 
-    fn draw_frame(&mut self, fps: &FPSLimiter) {
+    fn draw_frame(&mut self, fps: &FPSMeasure) {
         let wait_fences = [self.sync_objects.in_flight_fences[self.current_frame]];
 
         unsafe {
@@ -425,7 +458,7 @@ impl App {
                 .expect("Failed to wait for Fence!");
         }
 
-        let (image_index, _is_sub_optimal) = unsafe {
+        let (image_index, is_sub_optimal) = unsafe {
             let result = self.core.device.fn_swapchain.acquire_next_image(
                 self.screen.swapchain().handle,
                 std::u64::MAX,
@@ -459,7 +492,7 @@ impl App {
         let ui_cmd = self.draw_gui(image_index as usize, fps);
 
         let submit_infos = [vk::SubmitInfo::builder()
-            .command_buffers(&[self.draw.draw(image_index as usize), ui_cmd])
+            .command_buffers(&[self.draw_pipeline.draw(image_index as usize), ui_cmd])
             .wait_dst_stage_mask(&wait_stages)
             .signal_semaphores(&signal_semaphores)
             .wait_semaphores(&wait_semaphores)
@@ -505,7 +538,7 @@ impl App {
                 _ => panic!("Failed to execute queue present."),
             },
         };
-        if is_resized {
+        if is_resized || is_sub_optimal {
             self.is_framebuffer_resized = false;
             self.recreate_swapchain();
         }
@@ -519,11 +552,11 @@ impl App {
             _ => self.core.device.wait_device_idle(),
         }
 
-        self.draw = Box::new(Stub);
+        self.draw_pipeline = Box::new(Stub);
 
         match self.switch_pipeline {
             MeshDrawingPipelineType::IndirectTasks => {
-                self.draw = Box::new(IndirectTasks::new(
+                self.draw_pipeline = Box::new(IndirectTasks::new(
                     self.core.clone(),
                     &self.screen,
                     &mut self.world,
@@ -540,7 +573,7 @@ impl App {
                 ));
             }
             MeshDrawingPipelineType::ComputeCulledMesh => {
-                self.draw = Box::new(ComputeCulledMesh::new(
+                self.draw_pipeline = Box::new(ComputeCulledMesh::new(
                     self.core.clone(),
                     &self.screen,
                     &mut self.world,
@@ -557,7 +590,26 @@ impl App {
                 ));
             }
             MeshDrawingPipelineType::ComputeCulledIndices => {
-                self.draw = Box::new(ComputeCulledIndices::new(
+                self.draw_pipeline = Box::new(ComputeCulledIndices::new(
+                    self.core.clone(),
+                    &self.screen,
+                    &mut self.world,
+                    self.allocator.clone(),
+                    &self.render_pass,
+                    self.graphics_queue,
+                    self.descriptor_pool.clone(),
+                    self.uniform_transform_buffer.clone(),
+                    &self.uniform_camera_buffers,
+                    self.vertex_buffer.clone(),
+                    self.meshlet_buffer.clone(),
+                    self.submesh_buffer.clone(),
+                    self.indices_buffer.clone(),
+                    self.uniform_transforms.len(),
+                    self.submesh_count,
+                ));
+            }
+            MeshDrawingPipelineType::DrawIndirect => {
+                self.draw_pipeline = Box::new(DrawIndirect::new(
                     self.core.clone(),
                     &self.screen,
                     &mut self.world,
@@ -578,7 +630,7 @@ impl App {
             MeshDrawingPipelineType::None => (),
         }
 
-        self.draw.init_swapchain(
+        self.draw_pipeline.init_swapchain(
             &self.core,
             &self.screen,
             self.submesh_count,
@@ -593,6 +645,13 @@ impl App {
     fn recreate_swapchain(&mut self) {
         self.core.device.wait_device_idle();
 
+        let size = self.window_ref().inner_size();
+        {
+            let mut cam = self.world.entity_mut(self.camera);
+            let mut camera = cam.get_mut::<Camera>().unwrap();
+            camera.on_resize(&size);
+        }
+
         //self.cleanup_swapchain();
 
         self.screen.remake_swapchain(
@@ -601,7 +660,7 @@ impl App {
             self.allocator.clone(),
         );
 
-        self.draw.init_swapchain(
+        self.draw_pipeline.init_swapchain(
             &self.core,
             &self.screen,
             self.submesh_count,
@@ -623,7 +682,7 @@ impl App {
     pub fn get_allocator(&self) -> MutexGuard<Allocator> {
         self.allocator.lock().unwrap()
     }
-    fn draw_gui(&mut self, image_index: usize, fps: &FPSLimiter) -> vk::CommandBuffer {
+    fn draw_gui(&mut self, image_index: usize, fps: &FPSMeasure) -> vk::CommandBuffer {
         self.gui.draw(image_index, |ctx| {
             for w in &mut self.windows {
                 w.draw(ctx);
@@ -631,10 +690,17 @@ impl App {
             egui::Window::new("App Config")
                 .open(&mut self.app_info_open)
                 .show(ctx, |ui| {
-                    ui.label(format!("FPS: {:?}", fps.fps()));
+                    {
+                        ui.checkbox(&mut self.freeze_pos, "Freeze");
+                        ui.add(
+                            egui::Slider::new(&mut self.target_error, 0.0..=1.0)
+                                .text("Target Error"),
+                        );
+                    }
 
-                    let data = self.core.query_pool.get_results(image_index as _);
-                    ui.label(format!("Query: {:?}", data));
+                    ui.add(fps);
+
+                    self.draw_pipeline.stats_gui(ui, image_index);
 
                     ui.label(format!("Current Pipeline: {:?}", self.current_pipeline));
 
@@ -652,6 +718,10 @@ impl App {
 
                     if ui.button("Compute Culled Indices").clicked() {
                         self.switch_pipeline = MeshDrawingPipelineType::ComputeCulledIndices;
+                    }
+
+                    if ui.button("Draw Full Res").clicked() {
+                        self.switch_pipeline = MeshDrawingPipelineType::DrawIndirect;
                     }
                 });
 

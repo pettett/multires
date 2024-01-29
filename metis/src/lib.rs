@@ -19,7 +19,7 @@ pub mod test {
 
         graph::petgraph_to_svg(
             &graph,
-            "svg\\triangle_plane.svg",
+            "..\\svg\\triangle_plane.svg",
             &|_, _| String::new(),
             graph::GraphSVGRender::Undirected {
                 positions: false,

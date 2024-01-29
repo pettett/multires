@@ -27,6 +27,7 @@ impl QueueFamilyIndices {
 #[derive(Clone, Debug, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct ModelUniformBufferObject {
     pub model: glam::Mat4,
+    pub inv_model: glam::Mat4,
 }
 
 #[repr(C)]

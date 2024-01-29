@@ -7,7 +7,8 @@ use std::{collections::HashSet, fs};
 use crate::pidge::Pidge;
 
 use super::{
-    iter::EdgeIter,
+    edge::{EdgeID, EdgeIter, HalfEdge},
+    face::{Face, FaceID},
     vertex::{VertID, Vertex},
 };
 
@@ -42,95 +43,6 @@ pub enum MeshError {
 //Definition 6: A cut in the DAG is a subset of the tree such that for every node Ci all ancestors
 //of Ci are in the cut as well. The front of the cut is the set of arcs that connect a node in the cut
 //to a node outside.
-
-#[derive(Default, Hash, Debug, Clone, Copy, PartialEq, PartialOrd, Ord, Eq)]
-pub struct EdgeID(pub usize);
-impl Into<usize> for EdgeID {
-    fn into(self) -> usize {
-        self.0
-    }
-}
-impl From<usize> for EdgeID {
-    fn from(value: usize) -> Self {
-        EdgeID(value)
-    }
-}
-
-#[derive(Default, Hash, Debug, Clone, Copy, PartialEq, Eq)]
-pub struct FaceID(pub usize);
-impl Into<usize> for FaceID {
-    fn into(self) -> usize {
-        self.0 as usize
-    }
-}
-
-impl From<usize> for FaceID {
-    fn from(value: usize) -> Self {
-        FaceID(value)
-    }
-}
-
-impl IntegerId for FaceID {
-    fn from_id(id: u64) -> Self {
-        FaceID(id as usize)
-    }
-
-    fn id(&self) -> u64 {
-        self.0 as u64
-    }
-
-    fn id32(&self) -> u32 {
-        self.0 as u32
-    }
-}
-
-impl IntegerId for EdgeID {
-    fn from_id(id: u64) -> Self {
-        EdgeID(id as usize)
-    }
-
-    fn id(&self) -> u64 {
-        self.0 as u64
-    }
-
-    fn id32(&self) -> u32 {
-        self.0 as u32
-    }
-}
-impl FaceID {
-    pub fn center(self, mesh: &WingedMesh, verts: &[Vec4]) -> Vec4 {
-        let mut c = Vec4::ZERO;
-
-        for e in mesh.iter_edge_loop(mesh.get_face(self).edge) {
-            c += verts[mesh.get_edge(e).vert_origin.0];
-        }
-
-        c / 3.0
-    }
-}
-
-#[derive(Default, Debug, Clone, PartialEq, Eq)]
-pub struct HalfEdge {
-    pub vert_origin: VertID,
-    // This is not actually needed, as the destination is the origin of the cw edge
-    //pub vert_destination: VertID,
-    pub face: FaceID,
-    /// Edge leading on from the dest vert
-    pub edge_left_cw: EdgeID,
-    /// Edge connecting into the origin vert
-    pub edge_left_ccw: EdgeID,
-
-    pub age: u32,
-
-    pub twin: Option<EdgeID>,
-}
-
-#[derive(Default, Debug, Clone, PartialEq)]
-pub struct Face {
-    pub edge: EdgeID,
-    pub cluster_idx: usize,
-    pub colour: usize,
-}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct WingedMesh {
@@ -199,22 +111,6 @@ impl WingedMesh {
         self.verts.get_mut(vid)
     }
 
-    pub fn wipe_face(&mut self, face: FaceID) {
-        #[cfg(test)]
-        {
-            self.assert_face_valid(face).unwrap();
-        }
-
-        self.faces.wipe(face)
-    }
-    pub fn wipe_edge(&mut self, edge: EdgeID) {
-        self.edges.wipe(edge)
-    }
-
-    pub fn wipe_vert(&mut self, vert: VertID) {
-        self.verts.wipe(vert)
-    }
-
     pub fn face_count(&self) -> usize {
         self.faces.len()
     }
@@ -227,6 +123,41 @@ impl WingedMesh {
         self.verts.len()
     }
 
+    pub fn get_partition(&self) -> Vec<usize> {
+        self.faces
+            .iter_with_empty()
+            .filter_map(|f| f.as_ref().map(|f| f.cluster_idx))
+            .collect()
+    }
+
+    pub fn get_group(&self) -> Vec<usize> {
+        self.faces
+            .iter_with_empty()
+            .filter_map(|f| f.as_ref().map(|f| self.clusters[f.cluster_idx].group_index))
+            .collect()
+    }
+
+    pub fn iter_edge_loop(&self, e: EdgeID) -> EdgeIter {
+        // emit 3 edges and a none
+        EdgeIter::new(self, e, Some(e), 3)
+    }
+
+    pub fn cluster_count(&self) -> usize {
+        self.clusters.len()
+    }
+    pub fn age(&mut self) {
+        self.edges.iter_mut_with_empty().for_each(|e| {
+            if let Some(e) = e {
+                e.age += 1;
+            }
+        });
+    }
+    pub fn max_edge_age(&self) -> u32 {
+        self.edges.iter().map(|e| e.age).max().unwrap()
+    }
+    pub fn avg_edge_age(&self) -> f32 {
+        self.edges.iter().map(|e| e.age).sum::<u32>() as f32 / self.edge_count() as f32
+    }
     pub fn iter_verts(&self) -> impl Iterator<Item = (VertID, &Vertex)> {
         self.verts
             .iter_with_empty()
@@ -323,12 +254,20 @@ impl WingedMesh {
         #[cfg(feature = "progress")]
         let bar = indicatif::ProgressBar::new(face_count as u64);
 
+        let mut current = FaceID(0);
+
         for i in 0..face_count {
-            let a = tri_mesh.indices[i * 3] as usize;
+            let a = tri_mesh.indices[i * 3 + 0] as usize;
             let b = tri_mesh.indices[i * 3 + 1] as usize;
             let c = tri_mesh.indices[i * 3 + 2] as usize;
 
-            mesh.add_tri(FaceID(i), VertID(a), VertID(b), VertID(c));
+            if a == b || b == c || a == c {
+                println!("Discarding 0 area triangle");
+            } else {
+                mesh.add_tri(current, VertID(a), VertID(b), VertID(c));
+                current.0 += 1;
+            }
+
             #[cfg(feature = "progress")]
             bar.inc(1);
         }
@@ -401,56 +340,20 @@ impl WingedMesh {
         );
     }
 
-    /// Collapse a triangle, removing it from the graph, and pulling the two triangles on non-eid edges together
-    /// 	A
-    ///  	| 1
-    ///  	0  D
-    ///   	| 2
-    /// 	B
-    /// Preconditions: A valid triangle on valid edge `eid`
-    /// Postconditions:
-    /// - `eid` no longer valid, triangle removed,
-    /// - The twins of the two non-eid edges are linked, despite not actually being opposites (invalid)
-    /// - No edges have been moved
-    ///
-    /// This function should only be called as part of an edge collapse, as leaves mesh partially invalid.
-    fn collapse_tri(&mut self, eid: EdgeID) -> anyhow::Result<()> {
-        let edge = self.try_get_edge(eid)?;
+    /// Remove every triangle with a `cluster_idx` different to `cluster_idx`
+    pub fn filter_tris_by_cluster(&mut self, cluster_idx: usize) -> anyhow::Result<()> {
+        let mut remove = Vec::new();
 
-        let fid = edge.face;
-
-        let tri = [eid, edge.edge_left_ccw, edge.edge_left_cw];
-
-        assert_eq!(tri[0], eid);
-        // we are pinching edge to nothing, so make the other two edges twins
-        let t0 = edge.twin;
-        let t1 = self.get_edge(tri[1]).twin;
-        let t2 = self.get_edge(tri[2]).twin;
-
-        self.wipe_face(fid);
-
-        if let Some(t) = t1 {
-            self.get_edge_mut(t).twin = t2;
-        }
-        if let Some(t) = t2 {
-            self.get_edge_mut(t).twin = t1;
+        for (i, f) in self.iter_faces() {
+            if f.cluster_idx != cluster_idx {
+                remove.push(i);
+            }
         }
 
-        // Unlikely this will ever matter, but preserve consistency of mesh, as this edge is to be removed.
-        if let Some(t) = t0 {
-            self.get_edge_mut(t).twin = None;
+        for i in remove {
+            self.wipe_face(i);
         }
 
-        // Remove any last references to this triangle
-        for &e in &tri {
-            let v_o = self.get_edge(e).vert_origin;
-            let ccw = self.get_edge(e).edge_left_ccw;
-
-            self.get_vert_mut(v_o).remove_outgoing(e);
-            self.get_vert_mut(v_o).remove_incoming(ccw);
-
-            self.wipe_edge(e);
-        }
         Ok(())
     }
 
@@ -550,11 +453,6 @@ impl WingedMesh {
     ///  - `eid` is an invalid edge.
     ///  - `eid.face` and `eid.twin?.face` are invalid faces
     pub fn collapse_edge(&mut self, eid: EdgeID) -> anyhow::Result<()> {
-        let edge = self
-            .try_get_edge(eid)
-            .context("Attempted to collapse invalid edge")?
-            .clone();
-
         let (vid_orig, vid_dest) = eid.src_dst(self)?;
 
         #[cfg(test)]
@@ -566,7 +464,8 @@ impl WingedMesh {
             }
         }
 
-        self.collapse_tri(eid)
+        let edge = self
+            .collapse_tri(eid)
             .context("Failed to collapse main triangle")
             .context(MeshError::EdgeCollapse(eid, vid_orig, vid_dest))?;
 
@@ -588,38 +487,7 @@ impl WingedMesh {
         }
 
         // Remove `vert_origin`
-
-        // Main issue is a situation where triangles do not fan around the cake in both directions
-        // This will collapse an edge to have dest and source in same position.
-        // Because of this, we need to store all ingoing and outgoings per vertex, which isn't the worst in the world
-        // Although it would save a bit of memory to just store every fan
-        let b_outgoings = self.get_vert(vid_orig).outgoing_edges().to_vec();
-
-        for b_outgoing in b_outgoings {
-            // Don't fix invalid edges
-            #[cfg(test)]
-            {
-                let (orig, dest) = b_outgoing.src_dst(self).unwrap();
-                assert_eq!(orig, vid_orig);
-                assert_ne!(dest, vid_dest);
-            }
-
-            let b_outgoing_ccw = self.get_edge(b_outgoing).edge_left_ccw;
-
-            self.get_edge_mut(b_outgoing).vert_origin = vid_dest;
-
-            // Moving this origin moves both the start of this edge and the dest of the previous edge
-            self.get_vert_mut(vid_dest).add_outgoing(b_outgoing);
-            self.get_vert_mut(vid_dest).add_incoming(b_outgoing_ccw);
-
-            //TODO: add some tests here to make sure we don't break a triangle
-
-            // Reset their ages, as moved
-            self.get_edge_mut(b_outgoing).age = 0;
-            self.get_edge_mut(b_outgoing_ccw).age = 0;
-        }
-
-        self.wipe_vert(vid_orig);
+        self.wipe_vert(vid_orig, vid_dest);
 
         #[cfg(test)]
         {
@@ -635,7 +503,6 @@ impl WingedMesh {
                 .unwrap();
 
             // Make sure all the faces around va are valid, which will be everything we have touched
-            //FIXME: Fails
             for &out_eid in self.get_vert(vid_dest).outgoing_edges() {
                 self.assert_face_valid(self.get_edge(out_eid).face)
                     .context(MeshError::EdgeCollapse(eid, vid_orig, vid_dest))
@@ -652,48 +519,124 @@ impl WingedMesh {
             //for g in self.generate_group_graphs() {
             //    test::assert_contiguous_graph(&g);
             //}
-
-            //self.assert_valid();
         }
-        //self.assert_valid();
 
         Ok(())
     }
 
-    pub fn get_partition(&self) -> Vec<usize> {
-        self.faces
-            .iter_with_empty()
-            .filter_map(|f| f.as_ref().map(|f| f.cluster_idx))
-            .collect()
+    /// Collapse a triangle, removing it from the graph, and pulling the two triangles on non-eid edges together
+    /// 	A
+    ///  	| 1
+    ///  	0  D
+    ///   	| 2
+    /// 	B
+    /// Preconditions: A valid triangle on valid edge `eid`
+    /// Postconditions:
+    /// - `eid` no longer valid, triangle removed,
+    /// - The twins of the two non-eid edges are linked, despite not actually being opposites (invalid)
+    /// - No edges have been moved
+    ///
+    /// This function should only be called as part of an edge collapse, as leaves mesh partially invalid.
+    /// Returns:
+    /// 	The halfedge eid collapsed into nothing and removed
+    fn collapse_tri(&mut self, eid: EdgeID) -> anyhow::Result<HalfEdge> {
+        let edge = self.try_get_edge(eid)?;
+
+        let fid = edge.face;
+
+        // we are pinching edge to nothing, so make the other two edges twins
+        let (f, eids, [e0, e1, e2]) = self.wipe_face(fid);
+
+        let (o1, o0, t) = match eid {
+            eid if eid == eids[0] => (e1, e2, e0),
+            eid if eid == eids[1] => (e0, e2, e1),
+            eid if eid == eids[2] => (e0, e1, e2),
+            _ => unreachable!(),
+        };
+
+        if let Some(t) = o1.twin {
+            self.get_edge_mut(t).twin = o0.twin;
+        }
+        if let Some(t) = o0.twin {
+            self.get_edge_mut(t).twin = o1.twin;
+        }
+
+        Ok(t)
     }
 
-    pub fn get_group(&self) -> Vec<usize> {
-        self.faces
-            .iter_with_empty()
-            .filter_map(|f| f.as_ref().map(|f| self.clusters[f.cluster_idx].group_index))
-            .collect()
+    pub fn wipe_face(&mut self, face: FaceID) -> (Face, [EdgeID; 3], [HalfEdge; 3]) {
+        #[cfg(test)]
+        {
+            self.assert_face_valid(face).unwrap();
+        }
+
+        let f = self.faces.wipe(face);
+        let edge = self.wipe_edge(f.edge);
+
+        let tri = [f.edge, edge.edge_left_ccw, edge.edge_left_cw];
+
+        let edges = [edge, self.wipe_edge(tri[1]), self.wipe_edge(tri[2])];
+
+        // Remove any references to this triangle
+        for i in 0..3 {
+            let v_o = edges[i].vert_origin;
+
+            self.get_vert_mut(v_o).remove_outgoing(tri[i]);
+            self.get_vert_mut(v_o)
+                .remove_incoming(edges[i].edge_left_ccw);
+        }
+
+        (f, tri, edges)
     }
 
-    pub fn iter_edge_loop(&self, e: EdgeID) -> EdgeIter {
-        // emit 3 edges and a none
-        EdgeIter::new(self, e, Some(e), 3)
+    /// Remove an edge from the mesh.
+    /// For this to be valid, the cw and ccw edges must also be wiped,
+    /// so this function is non public
+    fn wipe_edge(&mut self, edge: EdgeID) -> HalfEdge {
+        let e = self.edges.wipe(edge);
+        // Consistency - neighbours must not reference this
+
+        if let Some(t) = e.twin {
+            self.edges.get_mut(t).twin = None;
+        }
+
+        e
     }
 
-    pub fn cluster_count(&self) -> usize {
-        self.clusters.len()
-    }
-    pub fn age(&mut self) {
-        self.edges.iter_mut_with_empty().for_each(|e| {
-            if let Some(e) = e {
-                e.age += 1;
+    /// Remove the vert `vid`, and shift any edges that reference it to `replacement`.
+    pub fn wipe_vert(&mut self, vid: VertID, replacement: VertID) {
+        // Main issue is a situation where triangles do not fan around the cake in both directions
+        // This will collapse an edge to have dest and source in same position.
+        // Because of this, we need to store all ingoing and outgoings per vertex, which isn't the worst in the world
+        // Although it would save a bit of memory to just store every fan
+
+        let (incomings, outgoings) = self.verts.wipe(vid).unpack();
+
+        for outgoing in outgoings {
+            let outgoing_edge = self.get_edge(outgoing);
+
+            // Don't fix invalid edges
+            #[cfg(test)]
+            {
+                let (orig, dest) = outgoing_edge.src_dst(self).unwrap();
+                assert_eq!(orig, vid);
+                assert_ne!(dest, replacement);
             }
-        });
-    }
-    pub fn max_edge_age(&self) -> u32 {
-        self.edges.iter().map(|e| e.age).max().unwrap()
-    }
-    pub fn avg_edge_age(&self) -> f32 {
-        self.edges.iter().map(|e| e.age).sum::<u32>() as f32 / self.edge_count() as f32
+
+            let outgoing_ccw = outgoing_edge.edge_left_ccw;
+
+            self.get_edge_mut(outgoing).vert_origin = replacement;
+
+            // Moving this origin moves both the start of this edge and the dest of the previous edge
+            self.get_vert_mut(replacement).add_outgoing(outgoing);
+            self.get_vert_mut(replacement).add_incoming(outgoing_ccw);
+
+            //TODO: add some tests here to make sure we don't break a triangle
+
+            // Reset their ages, as moved
+            self.get_edge_mut(outgoing).age = 0;
+            self.get_edge_mut(outgoing_ccw).age = 0;
+        }
     }
 }
 #[cfg(test)]
@@ -710,7 +653,8 @@ pub mod test {
     use crate::mesh::winged_mesh::WingedMesh;
     pub const TEST_MESH_HIGH: &str =
         "C:\\Users\\maxwe\\OneDriveC\\sync\\projects\\assets\\sphere.glb";
-
+    pub const TEST_MESH_DRAGON: &str =
+        "C:\\Users\\maxwe\\OneDriveC\\sync\\projects\\assets\\dragon_high.glb";
     pub const TEST_MESH_MONK: &str =
         "C:\\Users\\maxwe\\OneDriveC\\sync\\projects\\assets\\monk.glb";
     pub const TEST_MESH_MID: &str =

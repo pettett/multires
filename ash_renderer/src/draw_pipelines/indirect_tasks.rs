@@ -2,6 +2,7 @@ use std::{
     ffi::CString,
     ptr,
     sync::{Arc, Mutex},
+    time,
 };
 
 use ash::vk::{self};
@@ -10,14 +11,18 @@ use common_renderer::components::transform::Transform;
 use gpu_allocator::vulkan::Allocator;
 
 use crate::{
+    app::frame_measure::RollingMeasure,
     core::Core,
     screen::Screen,
     utility::{
         buffer::{AsBuffer, Buffer, TBuffer},
         device::Device,
         pooled::command_pool::CommandPool,
-        pooled::descriptor_pool::{
-            DescriptorPool, DescriptorSet, DescriptorSetLayout, DescriptorWriteData,
+        pooled::{
+            descriptor_pool::{
+                DescriptorPool, DescriptorSet, DescriptorSetLayout, DescriptorWriteData,
+            },
+            query_pool::QueryPool,
         },
         render_pass::RenderPass,
         {GraphicsPipeline, ShaderModule},
@@ -29,7 +34,12 @@ use super::{
     init_color_blend_attachment_states, init_depth_state_create_info,
     init_multisample_state_create_info, init_rasterization_statue_create_info, DrawPipeline,
 };
-
+#[derive(bytemuck::Zeroable, Copy, Clone)]
+pub struct IndirectTasksQueryResults {
+    task: u32,
+    mesh: u32,
+    avail: u32,
+}
 pub struct IndirectTasks {
     graphics_pipeline: GraphicsPipeline,
     descriptor_sets: Vec<DescriptorSet>,
@@ -37,6 +47,12 @@ pub struct IndirectTasks {
     descriptor_pool: Arc<DescriptorPool>,
     core: Arc<Core>,
     indirect_task_buffer: Arc<TBuffer<vk::DrawMeshTasksIndirectCommandEXT>>,
+
+    // Evaluation data
+    last_sample: time::Instant,
+    mesh_invocations: RollingMeasure<u32, 60>,
+    task_invocations: RollingMeasure<u32, 60>,
+    query_pool: Arc<QueryPool<IndirectTasksQueryResults>>,
 }
 
 impl IndirectTasks {
@@ -67,7 +83,7 @@ impl IndirectTasks {
 
         for e in world.query::<&Transform>().iter(world) {
             task_indirect_data.push(vk::DrawMeshTasksIndirectCommandEXT {
-                group_count_x: cluster_count.div_ceil(TASK_GROUP_SIZE) / 4,
+                group_count_x: 8,
                 group_count_y: 1,
                 group_count_z: 1,
             });
@@ -96,13 +112,20 @@ impl IndirectTasks {
             screen.swapchain().images.len(),
         );
 
+        let query_pool = QueryPool::new(core.device.clone(), 1);
+
         Self {
             graphics_pipeline,
             descriptor_sets,
             descriptor_pool,
             screen: None,
             indirect_task_buffer,
+            query_pool,
+
             core,
+            last_sample: time::Instant::now(),
+            mesh_invocations: Default::default(),
+            task_invocations: Default::default(),
         }
     }
 }
@@ -128,6 +151,22 @@ impl DrawPipeline for IndirectTasks {
             render_pass,
             &self.indirect_task_buffer,
         ));
+    }
+
+    fn stats_gui(&mut self, ui: &mut egui::Ui, image_index: usize) {
+        if image_index == 0 && self.last_sample.elapsed() > time::Duration::from_secs_f32(0.01) {
+            if let Some(results) = self.query_pool.get_results(0) {
+                assert!(results.avail > 0);
+
+                self.mesh_invocations.tick(results.mesh);
+                self.task_invocations.tick(results.task);
+            }
+
+            self.last_sample = time::Instant::now();
+        }
+
+        self.mesh_invocations.gui("Mesh Invocations", ui);
+        self.task_invocations.gui("Task Invocations", ui);
     }
 }
 
@@ -198,9 +237,9 @@ impl ScreenData {
 
             unsafe {
                 let q = i as _;
-
-                core.query_pool.reset(command_buffer, q);
-
+                if q == 0 {
+                    core_draw.query_pool.reset(command_buffer, q);
+                }
                 device.handle.cmd_begin_render_pass(
                     command_buffer,
                     &render_pass_begin_info,
@@ -229,14 +268,14 @@ impl ScreenData {
                 );
 
                 // ---------- Pipeline bound, use queries
-
-                device.handle.cmd_begin_query(
-                    command_buffer,
-                    core.query_pool.handle(),
-                    q,
-                    vk::QueryControlFlags::empty(),
-                );
-
+                if q == 0 {
+                    device.handle.cmd_begin_query(
+                        command_buffer,
+                        core_draw.query_pool.handle(),
+                        q,
+                        vk::QueryControlFlags::empty(),
+                    );
+                }
                 device.handle.cmd_bind_pipeline(
                     command_buffer,
                     vk::PipelineBindPoint::GRAPHICS,
@@ -261,11 +300,11 @@ impl ScreenData {
                     instance_count,
                     indirect_task_buffer.stride() as _,
                 );
-
-                device
-                    .handle
-                    .cmd_end_query(command_buffer, core.query_pool.handle(), q);
-
+                if q == 0 {
+                    device
+                        .handle
+                        .cmd_end_query(command_buffer, core_draw.query_pool.handle(), q);
+                }
                 device.handle.cmd_end_render_pass(command_buffer);
 
                 device

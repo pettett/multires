@@ -1,4 +1,4 @@
-use ash_renderer::{utility::window::ProgramProc, App};
+use ash_renderer::{app::window::ProgramProc, App};
 
 fn main() {
     let program_proc = ProgramProc::new();

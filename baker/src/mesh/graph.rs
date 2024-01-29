@@ -2,7 +2,10 @@ use std::collections::{HashMap, HashSet};
 
 use petgraph::visit::EdgeRef;
 
-use super::winged_mesh::{Face, FaceID, WingedMesh};
+use super::{
+    face::{Face, FaceID},
+    winged_mesh::WingedMesh,
+};
 
 impl WingedMesh {
     /// Generates a graph that is the dual of this mesh - connections from each face to their neighbours

@@ -6,6 +6,8 @@ use winit::event_loop::{ControlFlow, EventLoop};
 
 use crate::App;
 
+use super::fps_limiter::FPSMeasure;
+
 const IS_PAINT_FPS_COUNTER: bool = true;
 
 pub fn init_window(
@@ -36,7 +38,7 @@ impl ProgramProc {
     }
 
     pub fn main_loop(self, mut vulkan_app: App) {
-        let mut tick_counter = super::fps_limiter::FPSLimiter::new();
+        let mut tick_counter = FPSMeasure::new();
 
         self.event_loop
             .run(move |event, _, control_flow| match event {

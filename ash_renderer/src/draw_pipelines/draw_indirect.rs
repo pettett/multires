@@ -6,6 +6,7 @@ use std::{
 
 use ash::vk::{self};
 use bevy_ecs::world::World;
+use common::MeshVert;
 use common_renderer::components::transform::Transform;
 use gpu_allocator::vulkan::Allocator;
 
@@ -22,6 +23,7 @@ use crate::{
         render_pass::RenderPass,
         {ComputePipeline, GraphicsPipeline, ShaderModule},
     },
+    vertex::Vertex,
     VkHandle, TASK_GROUP_SIZE,
 };
 
@@ -30,17 +32,19 @@ use super::{
     init_multisample_state_create_info, init_rasterization_statue_create_info, DrawPipeline,
 };
 
-pub struct ComputeCulledMesh {
+pub struct DrawIndirect {
     graphics_pipeline: GraphicsPipeline,
-    should_draw_pipeline: ComputePipeline,
     descriptor_sets: Vec<DescriptorSet>,
     screen: Option<ScreenData>,
     descriptor_pool: Arc<DescriptorPool>,
     core: Arc<Core>,
     should_cull_buffer: Arc<TBuffer<u32>>,
+    draw_indexed_indirect_buffer: Arc<TBuffer<vk::DrawIndexedIndirectCommand>>,
+    vertex_buffer: Arc<TBuffer<MeshVert>>,
+    indices_buffer: Arc<TBuffer<u32>>,
 }
 
-impl ComputeCulledMesh {
+impl DrawIndirect {
     pub fn new(
         core: Arc<Core>,
         screen: &Screen,
@@ -51,9 +55,11 @@ impl ComputeCulledMesh {
         descriptor_pool: Arc<DescriptorPool>,
         uniform_transform_buffer: Arc<Buffer>,
         uniform_camera_buffers: &[Arc<impl AsBuffer>],
-        vertex_buffer: Arc<Buffer>,
+        vertex_buffer: Arc<TBuffer<MeshVert>>,
         meshlet_buffer: Arc<Buffer>,
         submesh_buffer: Arc<Buffer>,
+        indices_buffer: Arc<TBuffer<u32>>,
+        instance_count: usize,
         cluster_count: u32,
     ) -> Self {
         let ubo_layout = create_descriptor_set_layout(core.device.clone());
@@ -65,34 +71,48 @@ impl ComputeCulledMesh {
             ubo_layout.clone(),
         );
 
-        let should_draw_pipeline = ComputePipeline::create_compute_pipeline(
-            &core,
-            include_bytes!("../../shaders/spv/should_draw.comp"),
-            ubo_layout.clone(),
-            "Should Draw Pipeline",
-        );
-
         let should_cull_buffer = TBuffer::new_filled(
             &core,
             allocator.clone(),
             &core.command_pool,
             graphics_queue,
             vk::BufferUsageFlags::STORAGE_BUFFER,
-            &vec![1; cluster_count as _],
+            &vec![0; cluster_count as _],
             "Should Cull Buffer",
         );
 
-        let descriptor_sets = create_compute_culled_meshes_descriptor_sets(
+        let mut draw_indexed_commands = Vec::with_capacity(instance_count);
+
+        draw_indexed_commands.push(vk::DrawIndexedIndirectCommand {
+            index_count: indices_buffer.item_len() as _,
+            instance_count: instance_count as _,
+            first_index: 0,
+            vertex_offset: 0,
+            first_instance: 0,
+        });
+
+        let draw_indexed_indirect_buffer = TBuffer::new_filled(
+            &core,
+            allocator.clone(),
+            &core.command_pool,
+            graphics_queue,
+            vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::INDIRECT_BUFFER,
+            &draw_indexed_commands,
+            "Draw Indexed Indirect Buffer",
+        );
+
+        let descriptor_sets = create_compute_culled_indices_descriptor_sets(
             &core.device,
             &descriptor_pool,
             &ubo_layout,
             &uniform_transform_buffer,
             &uniform_camera_buffers,
             &should_cull_buffer,
-            &vertex_buffer,
             &meshlet_buffer,
             &submesh_buffer,
             //&texture_image,
+            &indices_buffer,
+            &draw_indexed_indirect_buffer,
             screen.swapchain().images.len(),
         );
 
@@ -103,12 +123,14 @@ impl ComputeCulledMesh {
             core,
             descriptor_pool,
             should_cull_buffer,
-            should_draw_pipeline,
+            vertex_buffer,
+            draw_indexed_indirect_buffer,
+            indices_buffer,
         }
     }
 }
 
-impl DrawPipeline for ComputeCulledMesh {
+impl DrawPipeline for DrawIndirect {
     fn draw(&self, frame_index: usize) -> vk::CommandBuffer {
         self.screen.as_ref().unwrap().command_buffers[frame_index]
     }
@@ -141,7 +163,7 @@ struct ScreenData {
 
 impl ScreenData {
     pub fn create_command_buffers(
-        core_draw: &ComputeCulledMesh,
+        core_draw: &DrawIndirect,
         core: &Core,
         screen: &Screen,
         submesh_count: u32,
@@ -192,25 +214,6 @@ impl ScreenData {
             let descriptor_sets_to_bind = [core_draw.descriptor_sets[i].handle()];
 
             unsafe {
-                device.handle.cmd_bind_pipeline(
-                    command_buffer,
-                    vk::PipelineBindPoint::COMPUTE,
-                    core_draw.should_draw_pipeline.handle(),
-                );
-
-                device.handle.cmd_bind_descriptor_sets(
-                    command_buffer,
-                    vk::PipelineBindPoint::COMPUTE,
-                    core_draw.should_draw_pipeline.layout(),
-                    0,
-                    &descriptor_sets_to_bind,
-                    &[],
-                );
-
-                device
-                    .handle
-                    .cmd_dispatch(command_buffer, submesh_count, 1, 1);
-
                 device.handle.cmd_begin_render_pass(
                     command_buffer,
                     &render_pass_begin_info,
@@ -263,11 +266,35 @@ impl ScreenData {
                     &[],
                 );
 
-                device.fn_mesh_shader.cmd_draw_mesh_tasks(
+                device.handle.cmd_bind_index_buffer(
                     command_buffer,
-                    submesh_count,
-                    instance_count,
+                    core_draw.indices_buffer.handle(),
+                    0,
+                    vk::IndexType::UINT32,
+                );
+
+                device.handle.cmd_bind_vertex_buffers(
+                    command_buffer,
+                    0,
+                    &[core_draw.vertex_buffer.handle()],
+                    &[0],
+                );
+                // device.handle.cmd_draw_indexed(
+                //     command_buffer,
+                //     core_draw.indices_buffer.item_len() as _,
+                //     instance_count,
+                //     0,
+                //     0,
+                //     0,
+                // );
+
+                // Each instance has their own indirect drawing buffer, tracing out their position in the result buffer
+                device.handle.cmd_draw_indexed_indirect(
+                    command_buffer,
+                    core_draw.draw_indexed_indirect_buffer.handle(),
+                    0,
                     1,
+                    core_draw.draw_indexed_indirect_buffer.stride() as _,
                 );
                 // device.cmd_draw_indexed(
                 //     command_buffer,
@@ -301,33 +328,22 @@ fn create_graphics_pipeline(
     swapchain_extent: vk::Extent2D,
     ubo_set_layout: Arc<DescriptorSetLayout>,
 ) -> GraphicsPipeline {
-    let task_shader_module = ShaderModule::new(
+    let vert_shader_module = ShaderModule::new(
         device.clone(),
-        bytemuck::cast_slice(include_bytes!(
-            "../../shaders/spv/mesh_shader_compute_cull.task"
-        )),
-    );
-    let mesh_shader_module = ShaderModule::new(
-        device.clone(),
-        bytemuck::cast_slice(include_bytes!("../../shaders/spv/mesh-shader.mesh")),
+        bytemuck::cast_slice(include_bytes!("../../shaders/spv/vert.vert")),
     );
     let frag_shader_module = ShaderModule::new(
         device.clone(),
-        bytemuck::cast_slice(include_bytes!("../../shaders/spv/frag_colour.frag")),
+        bytemuck::cast_slice(include_bytes!("../../shaders/spv/frag_pbr.frag")),
     );
 
     let main_function_name = CString::new("main").unwrap(); // the beginning function name in shader code.
 
     let shader_stages = [
         vk::PipelineShaderStageCreateInfo::builder()
-            .module(task_shader_module.handle())
+            .module(vert_shader_module.handle())
             .name(&main_function_name)
-            .stage(vk::ShaderStageFlags::TASK_EXT)
-            .build(),
-        vk::PipelineShaderStageCreateInfo::builder()
-            .module(mesh_shader_module.handle())
-            .name(&main_function_name)
-            .stage(vk::ShaderStageFlags::MESH_EXT)
+            .stage(vk::ShaderStageFlags::VERTEX)
             .build(),
         vk::PipelineShaderStageCreateInfo::builder()
             .module(frag_shader_module.handle())
@@ -336,25 +352,18 @@ fn create_graphics_pipeline(
             .build(),
     ];
 
-    // let binding_description = VertexV3::get_binding_descriptions();
-    // let attribute_description = VertexV3::get_attribute_descriptions();
+    let binding_description = MeshVert::get_binding_descriptions();
+    let attribute_description = MeshVert::get_attribute_descriptions();
 
-    // let vertex_input_state_create_info = vk::PipelineVertexInputStateCreateInfo {
-    //     s_type: vk::StructureType::PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-    //     p_next: ptr::null(),
-    //     flags: vk::PipelineVertexInputStateCreateFlags::empty(),
-    //     vertex_attribute_description_count: attribute_description.len() as u32,
-    //     p_vertex_attribute_descriptions: attribute_description.as_ptr(),
-    //     vertex_binding_description_count: binding_description.len() as u32,
-    //     p_vertex_binding_descriptions: binding_description.as_ptr(),
-    // };
-    // let vertex_input_assembly_state_info = vk::PipelineInputAssemblyStateCreateInfo {
-    //     s_type: vk::StructureType::PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-    //     flags: vk::PipelineInputAssemblyStateCreateFlags::empty(),
-    //     p_next: ptr::null(),
-    //     primitive_restart_enable: vk::FALSE,
-    //     topology: vk::PrimitiveTopology::TRIANGLE_LIST,
-    // };
+    let vertex_input_state_create_info = vk::PipelineVertexInputStateCreateInfo::builder()
+        .vertex_binding_descriptions(&binding_description)
+        .vertex_attribute_descriptions(&attribute_description);
+
+    let vertex_input_assembly_state_info = vk::PipelineInputAssemblyStateCreateInfo {
+        primitive_restart_enable: vk::FALSE,
+        topology: vk::PrimitiveTopology::TRIANGLE_LIST,
+        ..Default::default()
+    };
 
     let viewports = [vk::Viewport {
         x: 0.0,
@@ -412,6 +421,8 @@ fn create_graphics_pipeline(
         .depth_stencil_state(&depth_state_create_info)
         .color_blend_state(&color_blend_state)
         .dynamic_state(&dynamic_state_info)
+        .vertex_input_state(&vertex_input_state_create_info)
+        .input_assembly_state(&vertex_input_assembly_state_info)
         .layout(pipeline_layout)
         .render_pass(render_pass.handle())
         .build()];
@@ -460,7 +471,11 @@ fn create_descriptor_set_layout(device: Arc<Device>) -> Arc<DescriptorSetLayout>
             .binding(0)
             .descriptor_count(1)
             .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-            .stage_flags(vk::ShaderStageFlags::MESH_EXT | vk::ShaderStageFlags::COMPUTE)
+            .stage_flags(
+                vk::ShaderStageFlags::MESH_EXT
+                    | vk::ShaderStageFlags::COMPUTE
+                    | vk::ShaderStageFlags::VERTEX,
+            )
             .build(),
         // layout(binding = 1) buffer Clusters {
         // 	ClusterData clusters[];
@@ -487,7 +502,7 @@ fn create_descriptor_set_layout(device: Arc<Device>) -> Arc<DescriptorSetLayout>
             .binding(3)
             .descriptor_count(1)
             .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-            .stage_flags(vk::ShaderStageFlags::MESH_EXT | vk::ShaderStageFlags::COMPUTE)
+            .stage_flags(vk::ShaderStageFlags::COMPUTE | vk::ShaderStageFlags::VERTEX)
             .build(),
         // layout (std430, binding = 4) buffer InputBufferI {
         // 	s_meshlet meshlets[];
@@ -505,23 +520,36 @@ fn create_descriptor_set_layout(device: Arc<Device>) -> Arc<DescriptorSetLayout>
             .binding(5)
             .descriptor_count(1)
             .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-            .stage_flags(vk::ShaderStageFlags::MESH_EXT)
+            .stage_flags(vk::ShaderStageFlags::COMPUTE)
+            .build(),
+        vk::DescriptorSetLayoutBinding::builder()
+            .binding(6)
+            .descriptor_count(1)
+            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+            .stage_flags(vk::ShaderStageFlags::COMPUTE)
+            .build(),
+        vk::DescriptorSetLayoutBinding::builder()
+            .binding(7)
+            .descriptor_count(1)
+            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+            .stage_flags(vk::ShaderStageFlags::COMPUTE)
             .build(),
     ];
 
     Arc::new(DescriptorSetLayout::new(device, &ubo_layout_bindings))
 }
 
-fn create_compute_culled_meshes_descriptor_sets(
+fn create_compute_culled_indices_descriptor_sets(
     device: &Arc<Device>,
     descriptor_pool: &Arc<DescriptorPool>,
     descriptor_set_layout: &Arc<DescriptorSetLayout>,
     uniform_transform_buffer: &Arc<Buffer>,
     uniform_camera_buffers: &[Arc<impl AsBuffer>],
     should_draw_buffer: &Arc<impl AsBuffer>,
-    vertex_buffer: &Arc<Buffer>,
     meshlet_buffer: &Arc<Buffer>,
     submesh_buffer: &Arc<Buffer>,
+    indices_buffer: &Arc<impl AsBuffer>,
+    draw_indexed_indirect_buffer: &Arc<TBuffer<vk::DrawIndexedIndirectCommand>>,
     //texture: &Image,
     swapchain_images_size: usize,
 ) -> Vec<DescriptorSet> {
@@ -552,22 +580,33 @@ fn create_compute_culled_meshes_descriptor_sets(
                 device.clone(),
                 vec![
                     DescriptorWriteData::Buffer {
+                        // 0
                         buf: uniform_transform_buffer.clone(),
                     },
                     DescriptorWriteData::Buffer {
+                        // 1
                         buf: submesh_buffer.clone(), //
                     },
                     DescriptorWriteData::Buffer {
+                        // 2
                         buf: should_draw_buffer.buffer(),
                     },
                     DescriptorWriteData::Buffer {
+                        // 3
                         buf: uniform_camera_buffers[i].buffer(),
                     },
                     DescriptorWriteData::Buffer {
+                        // 4
                         buf: meshlet_buffer.clone(), //
                     },
+                    DescriptorWriteData::Empty,
                     DescriptorWriteData::Buffer {
-                        buf: vertex_buffer.clone(), //
+                        // 6
+                        buf: indices_buffer.buffer(), //
+                    },
+                    DescriptorWriteData::Buffer {
+                        // 6
+                        buf: draw_indexed_indirect_buffer.buffer(), //
                     },
                 ],
             )

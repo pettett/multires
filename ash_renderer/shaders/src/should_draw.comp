@@ -8,6 +8,7 @@
 
 #include "structs\cluster_data.glsl"
 #include "structs\camera.glsl"
+#include "structs\model.glsl"
 
 
 
@@ -24,7 +25,7 @@
 
 
 layout (binding = 0) readonly buffer ModelUniformBufferObject {
-    mat4 models[];
+    Model models[];
 };
 
 layout(binding = 1) readonly buffer Clusters {
@@ -41,12 +42,20 @@ layout (binding = 3) readonly uniform CameraUniformBufferObject {
 
 const float LARGE_ERROR = 100000000000000000.0;
 
-float cluster_error(uint idx, uint i) {
+float cluster_error(uint idx, uint idy) {
     bool out_of_range = false;
     if (out_of_range) {
         return LARGE_ERROR;
     } else {
-        return clusters[idx].error * (clusters[idx].radius / distance((models[i] * vec4(clusters[idx].center, 1.0)).xyz, ubo.camera_pos));
+		vec3 cam = (models[idy].inv_model * vec4(ubo.camera_pos, 1.0)).xyz ;
+		vec3 center = clusters[idx].center;
+		float radius = clusters[idx].radius;
+		float error = clusters[idx].error;
+
+		vec3 vec = center - cam;
+		float inv_center_distance = 1/(dot(vec, vec));
+        return error * error * radius * radius * inv_center_distance;
+		
     }
 }
 
