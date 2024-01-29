@@ -148,7 +148,7 @@ impl WingedMesh {
             edges: Pidge::with_capacity(faces * 3),
             verts: Pidge::with_capacity(verts),
             groups: vec![],
-            clusters: vec![ClusterInfo::default()],
+            clusters: vec![ClusterInfo::default()], 
         }
     }
     pub fn get_face(&self, face: FaceID) -> &Face {

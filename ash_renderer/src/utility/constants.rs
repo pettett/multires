@@ -19,9 +19,9 @@ pub const DEVICE_EXTENSIONS: DeviceExtension = DeviceExtension {};
 pub const MAX_FRAMES_IN_FLIGHT: usize = 2;
 
 impl DeviceExtension {
-    pub fn get_extensions_raw_names(&self) -> [*const c_char; 3] {
+    pub fn get_extensions_raw_names(&self) -> [*const c_char; 2] {
         [
-            ash::extensions::ext::MeshShader::name().as_ptr(),
+            // ash::extensions::ext::MeshShader::name().as_ptr(),
             ash::extensions::khr::Swapchain::name().as_ptr(),
             ash::extensions::khr::BufferDeviceAddress::name().as_ptr(),
         ]

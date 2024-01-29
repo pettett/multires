@@ -209,10 +209,13 @@ impl App {
 
         let data = MultiResMesh::load().unwrap();
 
-        let (clusters, meshlets) = multires::generate_meshlets(&data);
+		
+        let (cluster_order, cluster_groups) = data.order_clusters();
+        let mut cluster_data = data.generate_cluster_data(&cluster_order, &cluster_groups);
+        
+		let (clusters, meshlets) = multires::generate_meshlets( &cluster_order);
 
-        let mut cluster_data = data.generate_cluster_data();
-        let (indices, partitions, groups) = data.indices_partitions_groups();
+        let (indices, partitions, groups) = data.indices_partitions_groups(&cluster_order);
 
         for (i, submesh) in clusters.into_iter().enumerate() {
             cluster_data[i].meshlet_start = submesh.meshlet_start;

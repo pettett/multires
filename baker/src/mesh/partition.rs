@@ -110,7 +110,7 @@ impl WingedMesh {
         self.clusters = vec![
             common::ClusterInfo {
                 child_group_index: None,
-                group_index: usize::MAX,
+                group_index: usize::MAX, 
                 tight_bound: Default::default(),
                 num_colours: 0,
             };
@@ -126,59 +126,62 @@ impl WingedMesh {
         config: &metis::PartitioningConfig,
         verts: &[glam::Vec4],
     ) -> Result<usize, metis::PartitioningError> {
-        let group_count = self.clusters.len().div_ceil(4);
-
         assert!(config.force_contiguous_partitions.unwrap());
+
+        let cluster_graph = self.generate_cluster_graph();
+        let group_count = {
+            //std::mem::swap(&mut self.groups, &mut new_groups);
+            let (cluster_partitioning, group_count) =
+                config.exact_partition_onto_graph(4, &cluster_graph)?;
+
+            let group_count = group_count as usize;
+
+            // let non_contig_even_clustering_config = &metis::PartitioningConfig {
+            //     method: metis::PartitioningMethod::MultilevelRecursiveBisection,
+            //     force_contiguous_partitions: Some(true),
+            //     u_factor: Some(1),
+            //     //objective_type: Some(metis::ObjectiveType::Volume),
+            //     //    minimize_subgraph_degree: Some(true), // this will sometimes break contiguous partitions
+            //     ..Default::default()
+            // };
+
+            let mut occupancies = vec![0; group_count];
+            for &group in cluster_partitioning.node_weights() {
+                occupancies[group as usize] += 1;
+            }
+            println!(
+                "Generated groups with sizes {}<->{}",
+                occupancies.iter().min().unwrap(),
+                occupancies.iter().max().unwrap()
+            );
+
+            // Tell each partition what group they now belong to.
+            if group_count != 1 {
+                for (part, &group) in cluster_partitioning.node_weights().enumerate() {
+                    // Offset for previous groups, to ensure references such as child group
+                    // are correct across groupings 
+                    self.clusters[part].group_index = group as usize;
+                }
+            } else {
+                for p in &mut self.clusters {
+                    p.group_index = 0; 
+                }
+            };
+
+            group_count
+        };
 
         println!(
             "Partitioning into {group_count} groups from {} partitions",
             self.clusters.len()
         );
 
-        let cluster_graph = self.generate_cluster_graph();
-
-        //std::mem::swap(&mut self.groups, &mut new_groups);
-        let (cluster_partitioning, group_count) =
-            config.exact_partition_onto_graph(4, &cluster_graph)?;
-
-        let group_count = group_count as usize;
-
-        // let non_contig_even_clustering_config = &metis::PartitioningConfig {
-        //     method: metis::PartitioningMethod::MultilevelRecursiveBisection,
-        //     force_contiguous_partitions: Some(true),
-        //     u_factor: Some(1),
-        //     //objective_type: Some(metis::ObjectiveType::Volume),
-        //     //    minimize_subgraph_degree: Some(true), // this will sometimes break contiguous partitions
-        //     ..Default::default()
-        // };
-
-        let mut occupancies = vec![0; group_count];
-        for &group in cluster_partitioning.node_weights() {
-            occupancies[group as usize] += 1;
-        }
-        println!(
-            "Generated groups with sizes {}<->{}",
-            occupancies.iter().min().unwrap(),
-            occupancies.iter().max().unwrap()
-        );
-
-        // Tell each partition what group they now belong to.
-        if group_count != 1 {
-            for (part, &group) in cluster_partitioning.node_weights().enumerate() {
-                self.clusters[part].group_index = group as usize;
-            }
-        } else {
-            for p in &mut self.clusters {
-                p.group_index = 0;
-            }
-        };
-
         // create new array of groups, and remember the old groups
         let mut new_groups = vec![
             common::GroupInfo {
                 tris: 0,
                 monotonic_bound: Default::default(),
-                partitions: Vec::new(),
+                clusters: Vec::new(),
                 group_neighbours: BTreeSet::new(),
             };
             group_count
@@ -186,7 +189,7 @@ impl WingedMesh {
 
         // Record the partitions that each of these groups come from
         for (part, info) in self.clusters.iter().enumerate() {
-            new_groups[info.group_index].partitions.push(part);
+            new_groups[info.group_index].clusters.push(part);
 
             for n in cluster_graph.neighbors(petgraph::graph::node_index(part)) {
                 new_groups[info.group_index]
@@ -229,7 +232,7 @@ impl WingedMesh {
             // Each group also must envelop all the groups it is descended from,
             // as our partitions must do the same, as we base them off group info
 
-            for p in &g.partitions {
+            for p in &g.clusters {
                 if let Some(child_group_index) = self.clusters[*p].child_group_index {
                     let child_group = &self.groups[child_group_index];
                     // combine groups radius
@@ -239,7 +242,7 @@ impl WingedMesh {
             }
         }
 
-        self.groups = new_groups;
+        self.groups = new_groups; 
 
         //#[cfg(test)]
         //{
@@ -321,7 +324,7 @@ impl WingedMesh {
                     new_partitions.len() + part[x.index()] as usize;
             }
             // If we have not been grouped yet,
-            let child_group_index = if self.groups.len() == 0 {
+            let static_child_group_index = if self.groups.len() == 0 {
                 None
             } else {
                 Some(group_idx)
@@ -337,8 +340,8 @@ impl WingedMesh {
                 //    self.groups[group].partitions.push(new_partitions.len());
 
                 new_partitions.push(common::ClusterInfo {
-                    child_group_index,
-                    group_index: usize::MAX,
+                    child_group_index: static_child_group_index,
+                    group_index: usize::MAX, 
                     tight_bound: Default::default(), //TODO:
                     num_colours: 0,
                 })

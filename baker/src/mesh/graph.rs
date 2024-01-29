@@ -383,7 +383,7 @@ pub mod test {
             for (new_p_i, new_p) in mesh.clusters.iter().enumerate() {
                 let g_i = new_p.child_group_index.unwrap();
 
-                for &old_p_i in &mesh.groups[g_i].partitions {
+                for &old_p_i in &mesh.groups[g_i].clusters {
                     graph.add_edge(old_part_nodes[old_p_i], new_part_nodes[new_p_i], ());
                 }
             }

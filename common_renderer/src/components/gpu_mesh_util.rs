@@ -1,4 +1,4 @@
-use common::{asset::Asset, MultiResMesh};
+use common::{asset::Asset, MeshCluster, MultiResMesh};
 
 #[repr(C)]
 #[derive(
@@ -53,82 +53,100 @@ impl ClusterData {
 }
 
 pub trait MultiResData {
-    fn generate_cluster_data(&self) -> Vec<ClusterData>;
-    fn indices_partitions_groups(&self) -> (Vec<u32>, Vec<i32>, Vec<i32>);
+    /// Generate the cluster ordering for the mesh. This indexing should be respected by all functions creating
+    /// arrays of data due to clusters for the GPU, to ensure consistent indexing on whichever ordering this imposes
+    fn order_clusters(&self) -> (Vec<&MeshCluster>, Vec<Vec<usize>>);
+    fn generate_cluster_data(
+        &self,
+        cluster_order: &[&MeshCluster],
+        cluster_groups: &Vec<Vec<usize>>,
+    ) -> Vec<ClusterData>;
+    fn indices_partitions_groups(
+        &self,
+        cluster_order: &[&MeshCluster],
+    ) -> (Vec<u32>, Vec<i32>, Vec<i32>);
 }
 
 impl MultiResData for MultiResMesh {
-    fn generate_cluster_data(&self) -> Vec<ClusterData> {
+    fn order_clusters(&self) -> (Vec<&MeshCluster>, Vec<Vec<usize>>) {
+        let mut clusters = Vec::new();
+        let mut groups = vec![Vec::new(); self.group_count];
+        for (level, r) in self.lods.iter().enumerate().rev() {
+            println!("Loading layer {level}:");
+
+            for (cluster_layer_idx, cluster) in r.clusters.iter().enumerate() {
+                groups[cluster.info.group_index].push(clusters.len());
+                clusters.push(cluster);
+            }
+        }
+        (clusters, groups)
+    }
+
+    fn generate_cluster_data(
+        &self,
+        cluster_order: &[&MeshCluster],
+        cluster_groups: &Vec<Vec<usize>>,
+    ) -> Vec<ClusterData> {
         let mut clusters = Vec::new();
 
         let mut dag = petgraph::Graph::new();
-        let mut clusters_per_lod = vec![Vec::new(); self.lods.len()];
+        let mut cluster_nodes = Vec::new();
 
         let mut index_sum = 0;
 
-        for (level, r) in self.lods.iter().enumerate().rev() {
-            println!("Loading layer {level}:");
-            let cluster_nodes = &mut clusters_per_lod[level];
+        for (i, cluster) in cluster_order.iter().enumerate() {
+            // Map index buffer to global vertex range
 
-            for (_cluster_layer_idx, submesh) in r.submeshes.iter().enumerate() {
-                // Map index buffer to global vertex range
+            let index_count = cluster.index_count() as u32;
 
-                let index_count = submesh.index_count() as u32;
+            clusters.push(ClusterData {
+                index_offset: index_sum,
+                index_count,
+                error: cluster.error,
+                center_x: cluster.saturated_sphere.center().x,
+                center_y: cluster.saturated_sphere.center().y,
+                center_z: cluster.saturated_sphere.center().z,
+                parent0: -1,
+                parent1: -1,
+                co_parent: -1,
+                radius: cluster.saturated_sphere.radius(),
+                layer: cluster.lod as _,
+                ..ClusterData::default()
+            });
 
-                clusters.push(ClusterData {
-                    index_offset: index_sum,
-                    index_count,
-                    error: submesh.error,
-                    center_x: submesh.saturated_sphere.center().x,
-                    center_y: submesh.saturated_sphere.center().y,
-                    center_z: submesh.saturated_sphere.center().z,
-                    parent0: -1,
-                    parent1: -1,
-                    co_parent: -1,
-                    radius: submesh.saturated_sphere.radius(),
-                    layer: level as _,
-                    ..ClusterData::default()
-                });
+            index_sum += index_count;
 
-                index_sum += index_count;
-
-                cluster_nodes.push(dag.add_node(level));
-            }
+            cluster_nodes.push(dag.add_node(i));
         }
 
         // Search for [dependencies], group members, and dependants
-        for (level, cluster_nodes) in clusters_per_lod.iter().enumerate() {
-            for (cluster_idx, &cluster_node_idx) in cluster_nodes.iter().enumerate() {
-                let cluster_group_idx = self.lods[level].clusters[cluster_idx].group_index;
 
-                assert!(self.lods[level].groups[cluster_group_idx]
-                    .partitions
-                    .contains(&cluster_idx));
+        for (cluster_idx, &cluster_node_idx) in cluster_nodes.iter().enumerate() {
+            let i = *dag.node_weight(cluster_node_idx).unwrap();
 
-                let Some(child_group_idx) =
-                    self.lods[level].clusters[cluster_idx].child_group_index
-                else {
-                    continue;
-                };
+            let cluster_group_idx = cluster_order[i].info.group_index;
 
-                // To have a child group, level > 0
+            assert!(cluster_groups[cluster_group_idx].contains(&cluster_idx));
 
-                let child_clusters: Vec<_> = self.lods[level - 1].groups[child_group_idx]
-                    .partitions
-                    .iter()
-                    .map(|&child_partition| clusters_per_lod[level - 1][child_partition])
-                    .collect();
+            let Some(child_group_idx) = cluster_order[i].info.child_group_index else {
+                continue;
+            };
 
-                // println!("{}", child_partitions.len());
+            // To have a child group, level > 0
 
-                for &child in &child_clusters {
-                    // only the partitions with a shared boundary should be listed as dependants
+            let child_clusters: Vec<_> = cluster_groups[child_group_idx]
+                .iter()
+                .map(|&child_cluster| cluster_nodes[child_cluster])
+                .collect();
 
-                    dag.add_edge(cluster_node_idx, child, ());
-                }
+            // println!("{}", child_partitions.len());
+
+            for &child in &child_clusters {
+                // only the partitions with a shared boundary should be listed as dependants
+
+                dag.add_edge(cluster_node_idx, child, ());
             }
         }
-
         // petgraph_to_svg(
         //     &dag,
         //     "svg\\asset_dag.svg",
@@ -186,7 +204,10 @@ impl MultiResData for MultiResMesh {
         clusters
     }
 
-    fn indices_partitions_groups(&self) -> (Vec<u32>, Vec<i32>, Vec<i32>) {
+    fn indices_partitions_groups(
+        &self,
+        cluster_order: &[&MeshCluster],
+    ) -> (Vec<u32>, Vec<i32>, Vec<i32>) {
         let mut indices = Vec::new();
         // Face indexed array
         let mut partitions = Vec::new();
@@ -195,25 +216,21 @@ impl MultiResData for MultiResMesh {
 
         let mut cluster_idx = 0;
 
-        for (level, r) in self.lods.iter().enumerate().rev() {
-            println!("Loading layer {level}:");
+        for cluster in cluster_order {
+            // Map index buffer to global vertex range
 
-            for (_cluster_layer_idx, submesh) in r.submeshes.iter().enumerate() {
-                // Map index buffer to global vertex range
+            let index_count = cluster.index_count() as u32;
 
-                let index_count = submesh.index_count() as u32;
+            for _ in 0..(index_count / 3) {
+                partitions.push(cluster_idx as i32);
+            }
+            groups.push(cluster.info.group_index as i32);
 
-                for _ in 0..(index_count / 3) {
-                    partitions.push(cluster_idx as i32);
-                }
-                groups.push(submesh.debug_group as i32);
+            cluster_idx += 1;
 
-                cluster_idx += 1;
-
-                // Push to indices *after* recording the offset above
-                for i in 0..submesh.colour_count() {
-                    indices.extend_from_slice(&submesh.indices_for_colour(i));
-                }
+            // Push to indices *after* recording the offset above
+            for i in 0..cluster.colour_count() {
+                indices.extend_from_slice(&cluster.indices_for_colour(i));
             }
         }
 
@@ -237,7 +254,8 @@ mod tests {
     fn test_co_parents() {
         let mesh = MultiResMesh::load_from_cargo_manifest_dir().unwrap();
 
-        let clusters = mesh.generate_cluster_data();
+        let (cluster_order, groups) = mesh.order_clusters();
+        let clusters = mesh.generate_cluster_data(&cluster_order, &groups);
 
         for c in &clusters {
             if let Some((p0id, p1id)) = c.get_parents() {
@@ -256,7 +274,8 @@ mod tests {
     fn test_max_children() {
         let mesh = MultiResMesh::load_from_cargo_manifest_dir().unwrap();
 
-        let clusters = mesh.generate_cluster_data();
+        let (cluster_order, groups) = mesh.order_clusters();
+        let clusters = mesh.generate_cluster_data(&cluster_order, &groups);
 
         for i in 0..clusters.len() {
             if let Some((p0id, p1id)) = clusters[i].get_parents() {

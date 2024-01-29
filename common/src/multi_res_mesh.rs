@@ -42,7 +42,7 @@ impl BoundingSphere {
 }
 
 #[derive(Debug, Clone, Decode, Encode)]
-pub struct SubMesh {
+pub struct MeshCluster {
     indices: Vec<Vec<u32>>,
     // Bounding sphere for the submesh
     // TODO: bounding sphere radii
@@ -51,18 +51,20 @@ pub struct SubMesh {
     // Similarly, the bounding sphere must be enlarged to enclose the bounding spheres of all its children in the DAG,
     // in order to ensure a monotonic view-dependent error function.
     pub saturated_sphere: BoundingSphere,
-    pub debug_group: usize,
+	pub lod : usize, //TODO: In future, we should not need this - group indexes should be consistent across LOD
     pub error: f32,
+	pub info : ClusterInfo,
 }
 
-impl SubMesh {
+impl MeshCluster {
     pub fn new(
         colours: usize,
         error: f32,
         center: Vec3,
         monotonic_radius: f32,
         _radius: f32,
-        group: usize,
+        lod: usize,
+        info: ClusterInfo,
     ) -> Self {
         Self {
             indices: vec![Vec::new(); colours],
@@ -74,8 +76,9 @@ impl SubMesh {
                 center: center.to_array(),
                 radius: monotonic_radius,
             },
-            error,
-            debug_group: group,
+            error, 
+			lod,
+			info
         }
     }
     pub fn push_tri(&mut self, colour: usize, tri: [usize; 3]) {
@@ -111,6 +114,7 @@ pub struct MultiResMesh {
     pub name: String,
     pub verts: Vec<MeshVert>,
     pub lods: Vec<MeshLevel>,
+    pub group_count : usize
 }
 
 /// Information for a group on layer n
@@ -119,7 +123,7 @@ pub struct GroupInfo {
     /// Partitions in LOD`n-1` that we were created from. Will be empty in LOD0
     //pub child_partitions: Vec<usize>,
     // Partitions that we created by subdividing ourselves
-    pub partitions: Vec<usize>,
+    pub clusters: Vec<usize>,
 
     /// Indexes of all groups that touch this one and could be effected by an edge collapse in this group
     pub group_neighbours: BTreeSet<usize>,
@@ -147,11 +151,9 @@ pub struct ClusterInfo {
 pub struct MeshLevel {
     pub partition_indices: Vec<usize>,
     pub group_indices: Vec<usize>,
-    pub clusters: Vec<ClusterInfo>,
-    pub groups: Vec<GroupInfo>,
     /// used by the layer below to tell what dependant tris means
     pub indices: Vec<u32>,
-    pub submeshes: Vec<SubMesh>,
+    pub clusters: Vec<MeshCluster>,
 }
 
 impl asset::Asset for MultiResMesh {}

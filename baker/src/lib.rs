@@ -7,7 +7,7 @@ use std::{
     vec,
 };
 
-use common::{asset::Asset, graph, MeshLevel, MeshVert, MultiResMesh, SubMesh};
+use common::{asset::Asset, graph, GroupInfo, MeshCluster, MeshLevel, MeshVert, MultiResMesh};
 
 use glam::Vec4;
 use mesh::winged_mesh::WingedMesh;
@@ -22,14 +22,18 @@ const COLOUR_CLUSTER_SIZE: usize = 60;
 //TODO: Curb random sized groups and the like to bring this number to more reasonable amounts
 //const MAX_TRIS_PER_CLUSTER: usize = 126 * 3;
 
-pub fn to_mesh_layer(mesh: &WingedMesh, verts: &[Vec4]) -> MeshLevel {
+pub fn to_mesh_layer(
+    mesh: &WingedMesh,
+    lod: usize,
+    verts: &[Vec4],
+    child_group_offset: usize,
+    group_offset: usize,
+) -> MeshLevel {
     MeshLevel {
         partition_indices: mesh.get_partition(),
         group_indices: mesh.get_group(),
-        indices: grab_indicies(&mesh),
-        submeshes: generate_submeshes(mesh, verts),
-        clusters: mesh.clusters.clone(),
-        groups: mesh.groups.clone(),
+        indices: grab_indices(&mesh),
+        clusters: generate_clusters(mesh, lod, verts, child_group_offset, group_offset),
     }
 }
 
@@ -90,15 +94,34 @@ pub fn group_and_partition_and_simplify(
 
     mesh.group(grouping_config, &verts).unwrap();
 
-    let mut layers = Vec::new();
-
     mesh.colour_within_clusters(&non_contig_even_clustering_config, COLOUR_CLUSTER_SIZE)
         .unwrap();
 
-    layers.push(to_mesh_layer(&mesh, &verts));
+    let mut multi_res = MultiResMesh {
+        name,
+        verts: verts
+            .iter()
+            .zip(normals)
+            .map(|(v, n)| MeshVert {
+                pos: [v.x, v.y, v.z, 1.0],
+                normal: [n.x, n.y, n.z, 1.0],
+            })
+            .collect(),
+        // layer_1_indices: indices.clone(),
+        lods: Vec::new(),
+        group_count : 0,
+    };
 
-    // Generate 2 more meshes
-    for i in 0..10 {
+    let mut lower_group_range = 0;
+    multi_res.group_count += &mesh.groups.len();
+    let mut upper_group_range = multi_res.group_count;
+
+    let mut cluster_count = 0;
+
+    multi_res.lods.push(to_mesh_layer(&mesh, 0, &verts, 0, 0));
+
+    // Generate more meshes
+    for i in 1..10 {
         // i = index of previous mesh layer
         //working_mesh = reduce_mesh(working_mesh);
 
@@ -182,7 +205,26 @@ pub fn group_and_partition_and_simplify(
 
         println!("{group_count} Groups from partitions");
 
-        layers.push(to_mesh_layer(&mesh, &verts));
+        multi_res.lods.push(to_mesh_layer(
+            &mesh,
+            i,
+            &verts,
+            lower_group_range,
+            upper_group_range,
+        ));
+
+        multi_res.group_count += mesh.groups.len();
+        cluster_count += multi_res.lods[i].clusters.len();
+
+        lower_group_range = upper_group_range;
+        upper_group_range = multi_res.group_count;
+
+		// Patch cluster indexes within groups
+        // for gi in lower_group_range..upper_group_range {
+        //     for c in &mut multi_res.groups[gi].clusters {
+        //         *c += cluster_count;
+        //     }
+        // }
 
         if group_count == 1 {
             println!("Finished with single group");
@@ -192,8 +234,8 @@ pub fn group_and_partition_and_simplify(
 
     let mut min_tris = 10000;
     let mut max_tris = 0;
-    for l in &layers {
-        for m in &l.submeshes {
+    for l in &multi_res.lods {
+        for m in &l.clusters {
             min_tris = min_tris.min(m.index_count() / 3);
             max_tris = max_tris.max(m.index_count() / 3);
         }
@@ -203,21 +245,7 @@ pub fn group_and_partition_and_simplify(
 
     //assert_eq!(partitions1.len() * 3, layer_1_indices.len());
 
-    MultiResMesh {
-        name,
-        verts: verts
-            .iter()
-            .zip(normals)
-            .map(|(v, n)| MeshVert {
-                pos: [v.x, v.y, v.z, 1.0],
-                normal: [n.x, n.y, n.z, 1.0],
-            })
-            .collect(),
-        // layer_1_indices: indices.clone(),
-        lods: layers,
-    }
-    .save()
-    .unwrap();
+    multi_res.save().unwrap();
 }
 
 pub fn apply_simplification(mut mesh: WingedMesh, verts: &[Vec4], name: String) -> WingedMesh {
@@ -227,19 +255,33 @@ pub fn apply_simplification(mut mesh: WingedMesh, verts: &[Vec4], name: String) 
         common::GroupInfo {
             tris: 0,
             monotonic_bound: Default::default(),
-            partitions: vec![0],
+            clusters: vec![0],
             group_neighbours: BTreeSet::new()
         };
         1
     ];
 
-    let mut layers = Vec::new();
+    let mut multi_res = MultiResMesh {
+        name,
+        verts: verts
+            .iter()
+            .map(|v| MeshVert {
+                pos: [v.x, v.y, v.z, 1.0],
+                normal: [0.0; 4],
+            })
+            .collect(),
+        // layer_1_indices: indices.clone(),
+        lods: Vec::new(),
+        group_count : 0,
+    };
 
-    layers.push(to_mesh_layer(&mesh, &verts));
+    multi_res
+        .lods
+        .push(to_mesh_layer(&mesh, 0, &verts,  0, 0));
 
     let mut quadrics = mesh.create_quadrics(verts);
     // Generate 2 more meshes
-    for i in 0..8 {
+    for i in 1..8 {
         // i = index of previous mesh layer
         println!(
             "Face count LOD{}: {}, beginning generating LOD{}",
@@ -261,7 +303,9 @@ pub fn apply_simplification(mut mesh: WingedMesh, verts: &[Vec4], name: String) 
 
         // View a snapshot of the mesh without any re-groupings applied
 
-        layers.push(to_mesh_layer(&mesh, &verts));
+        multi_res
+            .lods
+            .push(to_mesh_layer(&mesh, i, &verts,  0, 0));
 
         if mesh.face_count() < 10 {
             println!("Reduced to low enough amount of faces, ending");
@@ -273,25 +317,12 @@ pub fn apply_simplification(mut mesh: WingedMesh, verts: &[Vec4], name: String) 
 
     //assert_eq!(partitions1.len() * 3, layer_1_indices.len());
 
-    MultiResMesh {
-        name,
-        verts: verts
-            .iter()
-            .map(|v| MeshVert {
-                pos: [v.x, v.y, v.z, 1.0],
-                normal: [0.0; 4],
-            })
-            .collect(),
-        // layer_1_indices: indices.clone(),
-        lods: layers,
-    }
-    .save()
-    .unwrap();
+    multi_res.save().unwrap();
 
     mesh
 }
 
-pub fn grab_indicies(mesh: &WingedMesh) -> Vec<u32> {
+pub fn grab_indices(mesh: &WingedMesh) -> Vec<u32> {
     let mut indices = Vec::with_capacity(mesh.face_count() * 3);
 
     for (_fid, f) in mesh.iter_faces() {
@@ -309,28 +340,42 @@ pub fn grab_indicies(mesh: &WingedMesh) -> Vec<u32> {
     indices
 }
 
-/// Debug code to generate meshlets with no max size. Used for testing partition trees with no remeshing
-pub fn generate_submeshes(mesh: &WingedMesh, _verts: &[Vec4]) -> Vec<SubMesh> {
+/// Generate clusters, splitting too large meshlets by colour
+/// Also fix group indexing to be global scope, both in our own data and the global group array
+pub fn generate_clusters(
+    mesh: &WingedMesh,
+    lod: usize,
+    _verts: &[Vec4],
+    child_group_offset: usize,
+    group_offset: usize,
+) -> Vec<MeshCluster> {
     println!("Generating meshlets!");
 
     let inds = 5.0 / mesh.face_count() as f32;
 
     // Precondition: partition indexes completely span in some range 0..N
-    let mut submeshes: Vec<_> = mesh
+    let mut clusters: Vec<_> = mesh
         .clusters
         .iter()
-        .map(|cluster| {
+        .enumerate()
+        .map(|(i, cluster)| {
             let gi = cluster.group_index;
             let g = &mesh.groups[gi];
 
-            SubMesh::new(
+            let mut info = cluster.clone();
+
+            info.group_index += group_offset;
+            info.child_group_index = info.child_group_index.map(|c| c + child_group_offset);
+
+            MeshCluster::new(
                 cluster.num_colours,
                 //TODO: Connect to quadric error or something
                 1.0,
                 g.monotonic_bound.center(),
                 g.monotonic_bound.radius(),
                 cluster.tight_bound.radius(),
-                gi,
+                lod,
+                info,
             )
         })
         .collect();
@@ -338,14 +383,14 @@ pub fn generate_submeshes(mesh: &WingedMesh, _verts: &[Vec4]) -> Vec<SubMesh> {
     for (_fid, face) in mesh.iter_faces() {
         let verts = mesh.triangle_from_face(&face);
 
-        let m = submeshes.get_mut(face.cluster_idx as usize).unwrap();
+        let m = clusters.get_mut(face.cluster_idx as usize).unwrap();
 
         m.push_tri(face.colour, verts);
 
         m.error += inds;
     }
 
-    for s in &submeshes {
+    for s in &clusters {
         for i in 0..s.colour_count() {
             assert!(s.colour_vert_count(i) <= 64)
         }
@@ -358,7 +403,7 @@ pub fn generate_submeshes(mesh: &WingedMesh, _verts: &[Vec4]) -> Vec<SubMesh> {
     //     s.indices = meshopt::simplify(&s.indices, &data, s.indices.len() / 2, 0.01);
     // }
 
-    submeshes
+    clusters
 }
 
 // pub fn reduce_mesh(mut mesh: WingedMesh) -> WingedMesh {
