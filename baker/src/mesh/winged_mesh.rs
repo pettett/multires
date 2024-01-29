@@ -1,5 +1,5 @@
 use anyhow::Context;
-use common::{tri_mesh::TriMesh, BoundingSphere, ClusterInfo, GroupInfo};
+use common::{tri_mesh::TriMesh, BoundingSphere, ClusterInfo};
 use glam::{Vec3, Vec4};
 use idmap::IntegerId;
 use std::{collections::HashSet, fs};
@@ -7,9 +7,7 @@ use std::{collections::HashSet, fs};
 use crate::pidge::Pidge;
 
 use super::{
-    edge::{EdgeID, EdgeIter, HalfEdge},
-    face::{Face, FaceID},
-    vertex::{VertID, Vertex},
+    edge::{EdgeID, EdgeIter, HalfEdge}, face::{Face, FaceID}, group_info::GroupInfo, vertex::{VertID, Vertex}
 };
 
 #[derive(thiserror::Error, Debug)]

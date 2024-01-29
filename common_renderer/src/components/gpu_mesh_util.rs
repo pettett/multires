@@ -69,16 +69,17 @@ pub trait MultiResData {
 
 impl MultiResData for MultiResMesh {
     fn order_clusters(&self) -> (Vec<&MeshCluster>, Vec<Vec<usize>>) {
-        let mut clusters = Vec::new();
-        let mut groups = vec![Vec::new(); self.group_count];
-        for (level, r) in self.lods.iter().enumerate().rev() {
-            println!("Loading layer {level}:");
+        let mut clusters : Vec<_> = self.clusters.iter().collect();
+        
 
-            for (cluster_layer_idx, cluster) in r.clusters.iter().enumerate() {
-                groups[cluster.info.group_index].push(clusters.len());
-                clusters.push(cluster);
-            }
+        // Sorting by group index allows us to
+        clusters.sort_unstable_by_key(|x| x.info.group_index);
+
+        let mut groups = vec![Vec::new(); self.group_count];
+        for i in 0..clusters.len() {
+            groups[clusters[i].info.group_index].push(i);
         }
+
         (clusters, groups)
     }
 

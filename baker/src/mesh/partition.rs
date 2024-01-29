@@ -2,6 +2,8 @@ use std::collections::BTreeSet;
 
 //use crate::MAX_TRIS_PER_CLUSTER;
 
+use crate::mesh::group_info::GroupInfo;
+
 use super::winged_mesh::WingedMesh;
 use common::graph::{
     assert_graph_contiguous, filter_nodes_by_weight, graph_contiguous, petgraph_to_svg,
@@ -185,7 +187,7 @@ impl WingedMesh {
 
         // create new array of groups, and remember the old groups
         let mut new_groups = vec![
-            common::GroupInfo {
+            GroupInfo {
                 tris: 0,
                 monotonic_bound: Default::default(),
                 clusters: Vec::new(),
@@ -239,8 +241,8 @@ impl WingedMesh {
             // Each group also must envelop all the groups it is descended from,
             // as our partitions must do the same, as we base them off group info
 
-            for p in &g.clusters {
-                if let Some(child_group_index) = self.clusters[*p].child_group_index {
+            for cluster in &g.clusters {
+                if let Some(child_group_index) = self.clusters[*cluster].child_group_index {
                     let child_group = &self.groups[child_group_index];
                     // combine groups radius
                     g.monotonic_bound
@@ -331,7 +333,7 @@ impl WingedMesh {
                     new_partitions.len() + part[x.index()] as usize;
             }
             // If we have not been grouped yet,
-            let static_child_group_index = if self.groups.len() == 0 {
+            let child_group_index = if self.groups.len() == 0 {
                 None
             } else {
                 Some(group_idx)
@@ -347,7 +349,7 @@ impl WingedMesh {
                 //    self.groups[group].partitions.push(new_partitions.len());
 
                 new_partitions.push(common::ClusterInfo {
-                    child_group_index: static_child_group_index,
+                    child_group_index,
                     group_index: usize::MAX, 
                     tight_bound: Default::default(), //TODO:
                     num_colours: 0,

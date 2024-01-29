@@ -225,7 +225,7 @@ impl App {
 
         println!("Loading verts");
 
-        let data = MultiResMesh::load("assets/torrin_main.bin").unwrap();
+        let data = MultiResMesh::load("assets/torrin_main.glb.bin").unwrap();
 
 		
         let (cluster_order, cluster_groups) = data.order_clusters();
@@ -289,8 +289,8 @@ impl App {
 
         let mut mid = Vec3A::ZERO;
 
-        for i in 0..30 {
-            for j in 0..30 {
+        for i in 0..1 {
+            for j in 0..1 {
                 let p = glam::Vec3A::X * i as f32 * 20.0 + glam::Vec3A::Z * j as f32 * 40.0;
                 mid += p;
                 let mut transform = Transform::new_pos(p);
@@ -397,7 +397,7 @@ impl App {
             render_pass,
 
             draw_pipeline: Box::new(mesh_draw),
-            switch_pipeline: MeshDrawingPipelineType::IndirectTasks,
+            switch_pipeline: MeshDrawingPipelineType::ComputeCulledIndices,
             current_pipeline: MeshDrawingPipelineType::None,
 
             uniform_transforms,

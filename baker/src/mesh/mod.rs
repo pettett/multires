@@ -9,3 +9,4 @@ mod partition;
 mod plane;
 mod quadric_error;
 mod reduction;
+mod group_info;

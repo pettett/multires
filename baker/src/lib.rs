@@ -1,17 +1,10 @@
 pub mod mesh;
 pub mod pidge;
 
-use std::{
-    collections::{BTreeSet, HashSet},
-    ops::Range,
-    vec,
-};
-
-use common::{asset::Asset, graph, GroupInfo, MeshCluster, MeshLevel, MeshVert, MultiResMesh};
+use common::{graph, MeshCluster, MeshLevel, MeshVert, MultiResMesh};
 
 use glam::Vec4;
 use mesh::winged_mesh::WingedMesh;
-use petgraph::visit::IntoNeighbors;
 
 // use meshopt::VertexDataAdapter;
 
@@ -22,18 +15,11 @@ const COLOUR_CLUSTER_SIZE: usize = 55;
 //TODO: Curb random sized groups and the like to bring this number to more reasonable amounts
 //const MAX_TRIS_PER_CLUSTER: usize = 126 * 3;
 
-pub fn to_mesh_layer(
-    mesh: &WingedMesh,
-    lod: usize,
-    verts: &[Vec4],
-    child_group_offset: usize,
-    group_offset: usize,
-) -> MeshLevel {
+pub fn to_mesh_layer(mesh: &WingedMesh) -> MeshLevel {
     MeshLevel {
         partition_indices: mesh.get_partition(),
         group_indices: mesh.get_group(),
         indices: grab_indices(&mesh),
-        clusters: generate_clusters(mesh, lod, verts, child_group_offset, group_offset),
     }
 }
 
@@ -41,7 +27,8 @@ pub fn group_and_partition_and_simplify(
     mut mesh: WingedMesh,
     verts: &[Vec4],
     normals: &[Vec4],
-) -> Vec<MeshLevel> {
+    name: String,
+) -> MultiResMesh {
     let triangle_clustering_config = &metis::MultilevelKWayPartitioningConfig {
         //u_factor: Some(10),
         //minimize_subgraph_degree: Some(true), // this will sometimes break contiguous partitions
@@ -108,16 +95,19 @@ pub fn group_and_partition_and_simplify(
             .collect(),
         // layer_1_indices: indices.clone(),
         lods: Vec::new(),
-        group_count : 0,
+        clusters: Vec::new(),
+        group_count: 0,
     };
 
     let mut lower_group_range = 0;
     multi_res.group_count += &mesh.groups.len();
     let mut upper_group_range = multi_res.group_count;
 
-    let mut cluster_count = 0;
+    multi_res.lods.push(to_mesh_layer(&mesh));
 
-    multi_res.lods.push(to_mesh_layer(&mesh, 0, &verts, 0, 0));
+    multi_res
+        .clusters
+        .extend_from_slice(&generate_clusters(&mesh, 0, verts, 0, 0));
 
     // Generate more meshes
     for i in 1..10 {
@@ -204,21 +194,22 @@ pub fn group_and_partition_and_simplify(
 
         println!("{group_count} Groups from partitions");
 
-        multi_res.lods.push(to_mesh_layer(
+        multi_res.lods.push(to_mesh_layer(&mesh));
+
+        multi_res.clusters.extend_from_slice(&generate_clusters(
             &mesh,
             i,
-            &verts,
+            verts,
             lower_group_range,
             upper_group_range,
         ));
 
         multi_res.group_count += mesh.groups.len();
-        cluster_count += multi_res.lods[i].clusters.len();
 
         lower_group_range = upper_group_range;
         upper_group_range = multi_res.group_count;
 
-		// Patch cluster indexes within groups
+        // Patch cluster indexes within groups
         // for gi in lower_group_range..upper_group_range {
         //     for c in &mut multi_res.groups[gi].clusters {
         //         *c += cluster_count;
@@ -233,93 +224,89 @@ pub fn group_and_partition_and_simplify(
 
     let mut min_tris = 10000;
     let mut max_tris = 0;
-    for l in &multi_res.lods {
-        for m in &l.clusters {
-            min_tris = min_tris.min(m.index_count() / 3);
-            max_tris = max_tris.max(m.index_count() / 3);
-        }
+    for m in &multi_res.clusters {
+        min_tris = min_tris.min(m.index_count() / 3);
+        max_tris = max_tris.max(m.index_count() / 3);
     }
 
     println!("Done with partitioning. Min tris: {min_tris}, Max tris: {max_tris}");
 
     //assert_eq!(partitions1.len() * 3, layer_1_indices.len());
 
-    multi_res.save().unwrap();
-}
-
-pub fn apply_simplification(mut mesh: WingedMesh, verts: &[Vec4], name: String) -> WingedMesh {
-    // Apply primary partition, that will define the lowest level clusterings
-
-    mesh.groups = vec![
-        common::GroupInfo {
-            tris: 0,
-            monotonic_bound: Default::default(),
-            clusters: vec![0],
-            group_neighbours: BTreeSet::new()
-        };
-        1
-    ];
-
-    let mut multi_res = MultiResMesh {
-        name,
-        verts: verts
-            .iter()
-            .map(|v| MeshVert {
-                pos: [v.x, v.y, v.z, 1.0],
-                normal: [0.0; 4],
-            })
-            .collect(),
-        // layer_1_indices: indices.clone(),
-        lods: Vec::new(),
-        group_count : 0,
-    };
-
     multi_res
-        .lods
-        .push(to_mesh_layer(&mesh, 0, &verts,  0, 0));
-
-    let mut quadrics = mesh.create_quadrics(verts);
-    // Generate 2 more meshes
-    for i in 1..8 {
-        // i = index of previous mesh layer
-        println!(
-            "Face count LOD{}: {}, beginning generating LOD{}",
-            i,
-            mesh.face_count(),
-            i + 1
-        );
-
-        let _e = match mesh.reduce_within_groups(verts, &mut quadrics, &[mesh.face_count() / 4]) {
-            Ok(e) => e,
-            Err(e) => {
-                println!(
-                    "Experience error {} with reducing, exiting early with what we have",
-                    e
-                );
-                break;
-            }
-        };
-
-        // View a snapshot of the mesh without any re-groupings applied
-
-        multi_res
-            .lods
-            .push(to_mesh_layer(&mesh, i, &verts,  0, 0));
-
-        if mesh.face_count() < 10 {
-            println!("Reduced to low enough amount of faces, ending");
-            break;
-        }
-    }
-
-    println!("Done with partitioning");
-
-    //assert_eq!(partitions1.len() * 3, layer_1_indices.len());
-
-    multi_res.save().unwrap();
-
-    mesh
 }
+
+// pub fn apply_simplification(mut mesh: WingedMesh, verts: &[Vec4], name: String) -> WingedMesh {
+//     // Apply primary partition, that will define the lowest level clusterings
+
+//     mesh.groups = vec![
+//         GroupInfo {
+//             tris: 0,
+//             monotonic_bound: Default::default(),
+//             clusters: vec![0],
+//             group_neighbours: BTreeSet::new()
+//         };
+//         1
+//     ];
+
+//     let mut multi_res = MultiResMesh {
+//         name,
+//         verts: verts
+//             .iter()
+//             .map(|v| MeshVert {
+//                 pos: [v.x, v.y, v.z, 1.0],
+//                 normal: [0.0; 4],
+//             })
+//             .collect(),
+//         // layer_1_indices: indices.clone(),
+//         lods: Vec::new(),
+//         group_count : 0,
+//     };
+
+//     multi_res
+//         .lods
+//         .push(to_mesh_layer(&mesh, 0, &verts,  0, 0));
+
+//     let mut quadrics = mesh.create_quadrics(verts);
+//     // Generate 2 more meshes
+//     for i in 1..8 {
+//         // i = index of previous mesh layer
+//         println!(
+//             "Face count LOD{}: {}, beginning generating LOD{}",
+//             i,
+//             mesh.face_count(),
+//             i + 1
+//         );
+
+//         let _e = match mesh.reduce_within_groups(verts, &mut quadrics, &[mesh.face_count() / 4]) {
+//             Ok(e) => e,
+//             Err(e) => {
+//                 println!(
+//                     "Experience error {} with reducing, exiting early with what we have",
+//                     e
+//                 );
+//                 break;
+//             }
+//         };
+
+//         // View a snapshot of the mesh without any re-groupings applied
+
+//         multi_res
+//             .lods
+//             .push(to_mesh_layer(&mesh, i, &verts,  0, 0));
+
+//         if mesh.face_count() < 10 {
+//             println!("Reduced to low enough amount of faces, ending");
+//             break;
+//         }
+//     }
+
+//     println!("Done with partitioning");
+
+//     //assert_eq!(partitions1.len() * 3, layer_1_indices.len());
+
+//     mesh
+// }
 
 pub fn grab_indices(mesh: &WingedMesh) -> Vec<u32> {
     let mut indices = Vec::with_capacity(mesh.face_count() * 3);
@@ -476,21 +463,21 @@ mod test {
 
         //group_and_partition_full_res(working_mesh, &verts, mesh_name.to_owned());
         //apply_simplification(working_mesh, &verts, mesh_name.to_owned());
-        group_and_partition_and_simplify(mesh, &verts, &norms);
+        group_and_partition_and_simplify(mesh, &verts, &norms, "".to_owned());
     }
 
-    #[test]
-    fn test_apply_simplification() {
-        let (mesh, verts, norms) = WingedMesh::from_gltf(TEST_MESH_CONE);
+    // #[test]
+    // fn test_apply_simplification() {
+    //     let (mesh, verts, norms) = WingedMesh::from_gltf(TEST_MESH_CONE);
 
-        // WE know the circle is contiguous
-        //assert_contiguous_graph(&working_mesh.generate_face_graph());
+    //     // WE know the circle is contiguous
+    //     //assert_contiguous_graph(&working_mesh.generate_face_graph());
 
-        // group_and_partition_full_res(working_mesh, &verts, mesh_name.to_owned());
-        let mesh = apply_simplification(mesh, &verts, TEST_MESH_CONE.to_owned());
+    //     // group_and_partition_full_res(working_mesh, &verts, mesh_name.to_owned());
+    //     let mesh = apply_simplification(mesh, &verts, TEST_MESH_CONE.to_owned());
 
-        println!("Asserting face graph is contiguous");
-        // It should still be contiguous
-        graph::assert_graph_contiguous(&mesh.generate_face_graph());
-    }
+    //     println!("Asserting face graph is contiguous");
+    //     // It should still be contiguous
+    //     graph::assert_graph_contiguous(&mesh.generate_face_graph());
+    // }
 }
