@@ -180,7 +180,7 @@ pub mod test {
 
         let parts = 4;
 
-        let (p, all_parts) = test_config
+        let (p, _all_parts) = test_config
             .exact_partition_onto_graph(parts, &graph)
             .unwrap();
 

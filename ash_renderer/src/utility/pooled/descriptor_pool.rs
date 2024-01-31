@@ -3,17 +3,43 @@ use std::{ptr, sync::Arc};
 use ash::vk::{self, DescriptorSetLayoutCreateInfo};
 use egui::ahash::HashMap;
 
-use crate::{VkHandle};
+use crate::{utility::macros::*, VkHandle};
 
 use super::super::{
     buffer::{AsBuffer, Buffer},
-    device::Device, 
+    device::Device,
 };
 
-pub struct DescriptorPool {
+vk_device_owned_wrapper!(DescriptorPool, destroy_descriptor_pool);
+
+// pub struct DescriptorPool {
+//     device: Arc<Device>,
+//     handle: vk::DescriptorPool,
+// }
+
+pub struct DescriptorSet {
+    handle: vk::DescriptorSet,
+    pool: Arc<DescriptorPool>,
     device: Arc<Device>,
-    pub handle: vk::DescriptorPool,
+    buffers: Vec<Arc<Buffer>>,
 }
+vk_handle_wrapper!(DescriptorSet);
+
+pub struct DescriptorSetLayout {
+    handle: vk::DescriptorSetLayout,
+    device: Arc<Device>,
+    types: HashMap<usize, vk::DescriptorType>,
+}
+vk_handle_wrapper!(DescriptorSetLayout);
+vk_device_drop!(DescriptorSetLayout, destroy_descriptor_set_layout);
+
+pub enum DescriptorWriteData {
+    Buffer { buf: Arc<Buffer> },
+    Empty,
+    //TODO:
+    Image,
+}
+
 impl DescriptorPool {
     pub fn new(device: Arc<Device>, swapchain_images_size: u32) -> Arc<DescriptorPool> {
         let pool_sizes = [
@@ -39,52 +65,15 @@ impl DescriptorPool {
             .max_sets(swapchain_images_size as u32)
             .flags(vk::DescriptorPoolCreateFlags::FREE_DESCRIPTOR_SET);
 
-        let pool = unsafe {
+        let handle = unsafe {
             device
                 .handle
                 .create_descriptor_pool(&descriptor_pool_create_info, None)
                 .expect("Failed to create Descriptor Pool!")
         };
 
-        Arc::new(Self {
-            handle: pool,
-            device,
-        })
+        Arc::new(Self { handle, device })
     }
-}
-
-pub struct DescriptorSet {
-    handle: vk::DescriptorSet,
-    pool: Arc<DescriptorPool>,
-    device: Arc<Device>,
-    buffers: Vec<Arc<Buffer>>,
-}
-impl VkHandle for DescriptorSet {
-    type VkItem = vk::DescriptorSet;
-
-    fn handle(&self) -> Self::VkItem {
-        self.handle
-    }
-}
-pub struct DescriptorSetLayout {
-    handle: vk::DescriptorSetLayout,
-    device: Arc<Device>,
-    types: HashMap<usize, vk::DescriptorType>,
-}
-
-impl VkHandle for DescriptorSetLayout {
-    type VkItem = vk::DescriptorSetLayout;
-
-    fn handle(&self) -> Self::VkItem {
-        self.handle
-    }
-}
-
-pub enum DescriptorWriteData {
-    Buffer { buf: Arc<Buffer> },
-    Empty,
-    //TODO:
-    Image,
 }
 
 impl DescriptorSet {
@@ -162,26 +151,6 @@ impl DescriptorSetLayout {
     }
 }
 
-impl Drop for DescriptorPool {
-    fn drop(&mut self) {
-        unsafe {
-            self.device
-                .handle
-                .destroy_descriptor_pool(self.handle, None);
-        }
-    }
-}
-
-impl Drop for DescriptorSetLayout {
-    fn drop(&mut self) {
-        unsafe {
-            self.device
-                .handle
-                .destroy_descriptor_set_layout(self.handle, None);
-        }
-    }
-}
-//FIXME:
 impl Drop for DescriptorSet {
     fn drop(&mut self) {
         unsafe {

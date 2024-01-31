@@ -1,8 +1,6 @@
 use bytemuck::Zeroable;
 use common::MeshCluster;
 
-use crate::{utility::buffer::Buffer, ModelUniformBufferObject};
-
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct PackedTri {
@@ -38,9 +36,7 @@ unsafe impl bytemuck::Pod for GpuCluster {}
 //     dirty: bool,
 // }
 
-pub fn generate_meshlets( 
-    cluster_order: &[&MeshCluster],
-) -> (Vec<GpuCluster>, Vec<GpuMeshlet>) {
+pub fn generate_meshlets(cluster_order: &[&MeshCluster]) -> (Vec<GpuCluster>, Vec<GpuMeshlet>) {
     println!("Generating meshlets!");
 
     // Precondition: partition indexes completely span in some range 0..N

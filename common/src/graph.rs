@@ -1,7 +1,7 @@
 use anyhow::Context;
 use core::fmt;
 use petgraph::dot;
-use std::{collections::HashSet, fs, ops::Range, path, process, vec};
+use std::{fs, ops::Range, path, process, vec};
 
 /// Generate a graph corresponding to the dual mesh of a mesh generated from triangulating a grid
 ///
@@ -113,8 +113,7 @@ where
 {
     let mut root = std::env::current_dir().unwrap();
 
-    #[cfg(test)]
-    {
+    if cfg!(test) {
         root = root.parent().unwrap().to_owned();
     }
 
@@ -294,7 +293,7 @@ pub mod test {
 
     #[test]
     fn test_contiguous_empty_graph() {
-        let mut g: petgraph::prelude::Graph<(), ()> = petgraph::Graph::new();
+        let g: petgraph::prelude::Graph<(), ()> = petgraph::Graph::new();
 
         assert!(graph_contiguous(&g));
     }
@@ -305,7 +304,7 @@ pub mod test {
 
         let a = g.add_node(());
         let b = g.add_node(());
-        let c = g.add_node(());
+        g.add_node(());
 
         g.add_edge(a, b, ());
 

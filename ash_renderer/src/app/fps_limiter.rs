@@ -2,11 +2,14 @@ use std::thread;
 use std::time::Duration;
 use std::time::Instant;
 
+use bevy_ecs::system::Resource;
+
 use super::frame_measure::RollingMeasure;
 
 const NANOS_PER_SEC: f32 = NANOS_PER_SEC_64 as _;
 const NANOS_PER_SEC_64: f64 = 1000_000_000.0;
 
+#[derive(Resource)]
 pub struct FPSMeasure {
     delta_time_counter: Instant,
     fps_measure_counter: Instant,

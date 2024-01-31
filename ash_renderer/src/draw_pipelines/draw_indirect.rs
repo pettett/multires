@@ -11,6 +11,7 @@ use common_renderer::components::transform::Transform;
 use gpu_allocator::vulkan::Allocator;
 
 use crate::{
+    app::mesh_data::MeshDataBuffers,
     core::Core,
     screen::Screen,
     utility::{
@@ -24,7 +25,7 @@ use crate::{
         {ComputePipeline, GraphicsPipeline, ShaderModule},
     },
     vertex::Vertex,
-    VkHandle, TASK_GROUP_SIZE,
+    ModelUniformBufferObject, VkHandle, TASK_GROUP_SIZE,
 };
 
 use super::{
@@ -42,25 +43,22 @@ pub struct DrawIndirect {
     draw_indexed_indirect_buffer: Arc<TBuffer<vk::DrawIndexedIndirectCommand>>,
     vertex_buffer: Arc<TBuffer<MeshVert>>,
     indices_buffer: Arc<TBuffer<u32>>,
+    query: bool,
 }
 
 impl DrawIndirect {
     pub fn new(
         core: Arc<Core>,
         screen: &Screen,
-        world: &mut World,
+        mesh_data: &MeshDataBuffers,
         allocator: Arc<Mutex<Allocator>>,
         render_pass: &RenderPass,
         graphics_queue: vk::Queue,
         descriptor_pool: Arc<DescriptorPool>,
-        uniform_transform_buffer: Arc<Buffer>,
+        uniform_transform_buffer: Arc<TBuffer<ModelUniformBufferObject>>,
         uniform_camera_buffers: &[Arc<impl AsBuffer>],
-        vertex_buffer: Arc<TBuffer<MeshVert>>,
-        meshlet_buffer: Arc<Buffer>,
-        submesh_buffer: Arc<Buffer>,
-        indices_buffer: Arc<TBuffer<u32>>,
-        instance_count: usize,
         cluster_count: u32,
+        query: bool,
     ) -> Self {
         let ubo_layout = create_descriptor_set_layout(core.device.clone());
 
@@ -81,10 +79,12 @@ impl DrawIndirect {
             "Should Cull Buffer",
         );
 
+        let instance_count = uniform_transform_buffer.item_len();
+
         let mut draw_indexed_commands = Vec::with_capacity(instance_count);
 
         draw_indexed_commands.push(vk::DrawIndexedIndirectCommand {
-            index_count: indices_buffer.item_len() as _,
+            index_count: mesh_data.index_buffer.item_len() as _,
             instance_count: instance_count as _,
             first_index: 0,
             vertex_offset: 0,
@@ -108,10 +108,10 @@ impl DrawIndirect {
             &uniform_transform_buffer,
             &uniform_camera_buffers,
             &should_cull_buffer,
-            &meshlet_buffer,
-            &submesh_buffer,
+            &mesh_data.meshlet_buffer,
+            &mesh_data.cluster_buffer,
             //&texture_image,
-            &indices_buffer,
+            &mesh_data.index_buffer,
             &draw_indexed_indirect_buffer,
             screen.swapchain().images.len(),
         );
@@ -123,9 +123,10 @@ impl DrawIndirect {
             core,
             descriptor_pool,
             should_cull_buffer,
-            vertex_buffer,
+            query,
+            vertex_buffer: mesh_data.vertex_buffer.clone(),
             draw_indexed_indirect_buffer,
-            indices_buffer,
+            indices_buffer: mesh_data.index_buffer.clone(),
         }
     }
 }
@@ -543,11 +544,11 @@ fn create_compute_culled_indices_descriptor_sets(
     device: &Arc<Device>,
     descriptor_pool: &Arc<DescriptorPool>,
     descriptor_set_layout: &Arc<DescriptorSetLayout>,
-    uniform_transform_buffer: &Arc<Buffer>,
+    uniform_transform_buffer: &Arc<TBuffer<ModelUniformBufferObject>>,
     uniform_camera_buffers: &[Arc<impl AsBuffer>],
     should_draw_buffer: &Arc<impl AsBuffer>,
-    meshlet_buffer: &Arc<Buffer>,
-    submesh_buffer: &Arc<Buffer>,
+    meshlet_buffer: &Arc<impl AsBuffer>,
+    submesh_buffer: &Arc<impl AsBuffer>,
     indices_buffer: &Arc<impl AsBuffer>,
     draw_indexed_indirect_buffer: &Arc<TBuffer<vk::DrawIndexedIndirectCommand>>,
     //texture: &Image,
@@ -559,7 +560,7 @@ fn create_compute_culled_indices_descriptor_sets(
     }
 
     let descriptor_set_allocate_info = vk::DescriptorSetAllocateInfo::builder()
-        .descriptor_pool(descriptor_pool.handle)
+        .descriptor_pool(descriptor_pool.handle())
         .set_layouts(&layouts);
 
     let vk_descriptor_sets = unsafe {
@@ -581,11 +582,11 @@ fn create_compute_culled_indices_descriptor_sets(
                 vec![
                     DescriptorWriteData::Buffer {
                         // 0
-                        buf: uniform_transform_buffer.clone(),
+                        buf: uniform_transform_buffer.buffer(),
                     },
                     DescriptorWriteData::Buffer {
                         // 1
-                        buf: submesh_buffer.clone(), //
+                        buf: submesh_buffer.buffer(), //
                     },
                     DescriptorWriteData::Buffer {
                         // 2
@@ -597,7 +598,7 @@ fn create_compute_culled_indices_descriptor_sets(
                     },
                     DescriptorWriteData::Buffer {
                         // 4
-                        buf: meshlet_buffer.clone(), //
+                        buf: meshlet_buffer.buffer(), //
                     },
                     DescriptorWriteData::Empty,
                     DescriptorWriteData::Buffer {

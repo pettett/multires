@@ -4,20 +4,14 @@ use ash::vk;
 
 use crate::VkHandle;
 
-use super::instance::Instance;
+use super::{instance::Instance, macros::vk_handle_wrapper};
 
 pub struct PhysicalDevice {
-    handle: vk::PhysicalDevice,
     instance: Arc<Instance>,
+    handle: vk::PhysicalDevice,
 }
 
-impl VkHandle for PhysicalDevice {
-    type VkItem = vk::PhysicalDevice;
-
-    fn handle(&self) -> Self::VkItem {
-        self.handle
-    }
-}
+vk_handle_wrapper!(PhysicalDevice);
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Hash)]
 pub struct PhysicalDeviceSubgroupProperties {

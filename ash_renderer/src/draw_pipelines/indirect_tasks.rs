@@ -6,12 +6,14 @@ use std::{
 };
 
 use ash::vk::{self};
-use bevy_ecs::world::World;
+use bevy_ecs::{system::Query, world::World};
+use common::MeshVert;
 use common_renderer::components::transform::Transform;
 use gpu_allocator::vulkan::Allocator;
 
 use crate::{
     app::frame_measure::RollingMeasure,
+    app::mesh_data::MeshDataBuffers,
     core::Core,
     screen::Screen,
     utility::{
@@ -27,7 +29,7 @@ use crate::{
         render_pass::RenderPass,
         {GraphicsPipeline, ShaderModule},
     },
-    VkHandle, TASK_GROUP_SIZE,
+    ModelUniformBufferObject, VkHandle, TASK_GROUP_SIZE,
 };
 
 use super::{
@@ -40,36 +42,44 @@ pub struct IndirectTasksQueryResults {
     mesh: u32,
     avail: u32,
 }
+
+pub struct DrawMeshTasksIndirect {
+    pub group_count_x: u32,
+    pub group_count_y: u32,
+    pub group_count_z: u32,
+    pub offset: u32,
+}
+
 pub struct IndirectTasks {
     graphics_pipeline: GraphicsPipeline,
     descriptor_sets: Vec<DescriptorSet>,
     screen: Option<ScreenData>,
     descriptor_pool: Arc<DescriptorPool>,
     core: Arc<Core>,
-    indirect_task_buffer: Arc<TBuffer<vk::DrawMeshTasksIndirectCommandEXT>>,
+    indirect_task_buffer: Arc<TBuffer<DrawMeshTasksIndirect>>,
 
     // Evaluation data
     last_sample: time::Instant,
     mesh_invocations: RollingMeasure<u32, 60>,
     task_invocations: RollingMeasure<u32, 60>,
     query_pool: Arc<QueryPool<IndirectTasksQueryResults>>,
+    query: bool,
 }
 
 impl IndirectTasks {
     pub fn new(
         core: Arc<Core>,
         screen: &Screen,
-        world: &mut World,
+        transforms: Query<&Transform>,
+        mesh_data: &MeshDataBuffers,
         allocator: Arc<Mutex<Allocator>>,
         render_pass: &RenderPass,
         graphics_queue: vk::Queue,
         descriptor_pool: Arc<DescriptorPool>,
-        uniform_transform_buffer: Arc<Buffer>,
+        uniform_transform_buffer: Arc<TBuffer<ModelUniformBufferObject>>,
         uniform_camera_buffers: &[Arc<impl AsBuffer>],
-        vertex_buffer: Arc<Buffer>,
-        meshlet_buffer: Arc<Buffer>,
-        submesh_buffer: Arc<Buffer>,
         cluster_count: u32,
+        query: bool,
     ) -> Self {
         let ubo_layout = create_descriptor_set_layout(core.device.clone());
 
@@ -81,13 +91,15 @@ impl IndirectTasks {
         );
         let mut task_indirect_data = Vec::new();
 
-        for e in world.query::<&Transform>().iter(world) {
-            task_indirect_data.push(vk::DrawMeshTasksIndirectCommandEXT {
+        for e in transforms.iter() {
+            task_indirect_data.push(DrawMeshTasksIndirect {
                 group_count_x: 8,
                 group_count_y: 1,
                 group_count_z: 1,
+                offset: 0,
             });
         }
+
         let indirect_task_buffer = TBuffer::new_filled(
             &core,
             allocator.clone(),
@@ -104,9 +116,9 @@ impl IndirectTasks {
             &ubo_layout,
             &uniform_transform_buffer,
             &uniform_camera_buffers,
-            &vertex_buffer,
-            &meshlet_buffer,
-            &submesh_buffer,
+            &mesh_data.vertex_buffer,
+            &mesh_data.meshlet_buffer,
+            &mesh_data.cluster_buffer,
             &indirect_task_buffer,
             //&texture_image,
             screen.swapchain().images.len(),
@@ -121,7 +133,7 @@ impl IndirectTasks {
             screen: None,
             indirect_task_buffer,
             query_pool,
-
+            query,
             core,
             last_sample: time::Instant::now(),
             mesh_invocations: Default::default(),
@@ -180,7 +192,7 @@ impl Drop for ScreenData {
         unsafe {
             self.device
                 .handle
-                .free_command_buffers(self.command_pool.handle, &self.command_buffers);
+                .free_command_buffers(self.command_pool.handle(), &self.command_buffers);
         }
     }
 }
@@ -192,7 +204,7 @@ impl ScreenData {
         submesh_count: u32,
         instance_count: u32,
         render_pass: &RenderPass,
-        indirect_task_buffer: &TBuffer<vk::DrawMeshTasksIndirectCommandEXT>,
+        indirect_task_buffer: &TBuffer<DrawMeshTasksIndirect>,
     ) -> Self {
         let device = core.device.clone();
         let command_buffers = core
@@ -237,7 +249,8 @@ impl ScreenData {
 
             unsafe {
                 let q = i as _;
-                if q == 0 {
+                let query = core_draw.query && q == 0;
+                if query {
                     core_draw.query_pool.reset(command_buffer, q);
                 }
                 device.handle.cmd_begin_render_pass(
@@ -268,7 +281,7 @@ impl ScreenData {
                 );
 
                 // ---------- Pipeline bound, use queries
-                if q == 0 {
+                if query {
                     device.handle.cmd_begin_query(
                         command_buffer,
                         core_draw.query_pool.handle(),
@@ -300,7 +313,7 @@ impl ScreenData {
                     instance_count,
                     indirect_task_buffer.stride() as _,
                 );
-                if q == 0 {
+                if query {
                     device
                         .handle
                         .cmd_end_query(command_buffer, core_draw.query_pool.handle(), q);
@@ -389,11 +402,11 @@ fn create_descriptor_sets(
     device: &Arc<Device>,
     descriptor_pool: &Arc<DescriptorPool>,
     descriptor_set_layout: &Arc<DescriptorSetLayout>,
-    uniform_transform_buffer: &Arc<Buffer>,
+    uniform_transform_buffer: &Arc<TBuffer<ModelUniformBufferObject>>,
     uniform_camera_buffers: &[Arc<impl AsBuffer>],
-    vertex_buffer: &Arc<Buffer>,
-    meshlet_buffer: &Arc<Buffer>,
-    cluster_buffer: &Arc<Buffer>,
+    vertex_buffer: &Arc<TBuffer<MeshVert>>,
+    meshlet_buffer: &Arc<impl AsBuffer>,
+    cluster_buffer: &Arc<impl AsBuffer>,
     indirect_draw_array_buffer: &Arc<impl AsBuffer>,
     //texture: &Image,
     swapchain_images_size: usize,
@@ -404,7 +417,7 @@ fn create_descriptor_sets(
     }
 
     let descriptor_set_allocate_info = vk::DescriptorSetAllocateInfo::builder()
-        .descriptor_pool(descriptor_pool.handle)
+        .descriptor_pool(descriptor_pool.handle())
         .set_layouts(&layouts);
 
     let vk_descriptor_sets = unsafe {
@@ -426,7 +439,7 @@ fn create_descriptor_sets(
                 vec![
                     DescriptorWriteData::Buffer {
                         //  0
-                        buf: uniform_transform_buffer.clone(),
+                        buf: uniform_transform_buffer.buffer(),
                     },
                     DescriptorWriteData::Empty,
                     DescriptorWriteData::Buffer {
@@ -439,11 +452,11 @@ fn create_descriptor_sets(
                     },
                     DescriptorWriteData::Buffer {
                         //  4
-                        buf: meshlet_buffer.clone(),
+                        buf: meshlet_buffer.buffer(),
                     },
                     DescriptorWriteData::Buffer {
                         //  5
-                        buf: vertex_buffer.clone(),
+                        buf: vertex_buffer.buffer(),
                     },
                     DescriptorWriteData::Buffer {
                         //  6

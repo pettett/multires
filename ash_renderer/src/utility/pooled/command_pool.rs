@@ -2,14 +2,9 @@ use std::{ptr, sync::Arc};
 
 use ash::vk;
 
-use crate::{CameraUniformBufferObject, VkHandle};
+use crate::{utility::macros::vk_device_owned_wrapper, VkHandle};
 
-use super::super::{
-    buffer::{AsBuffer, Buffer},
-    device::Device,
-    image::Image,
-    structures::ModelUniformBufferObject,
-};
+use super::super::device::Device;
 
 pub struct SingleTimeCommandBuffer {
     pool: Arc<CommandPool>,
@@ -86,17 +81,7 @@ impl Drop for OneShotCommandBuffer {
     }
 }
 
-pub struct CommandPool {
-    device: Arc<Device>,
-    pub handle: vk::CommandPool,
-}
-impl VkHandle for CommandPool {
-    type VkItem = vk::CommandPool;
-
-    fn handle(&self) -> Self::VkItem {
-        self.handle
-    }
-}
+vk_device_owned_wrapper!(CommandPool, destroy_command_pool);
 
 impl CommandPool {
     pub fn new(device: Arc<Device>, queue_family_index: u32) -> Arc<Self> {
@@ -194,15 +179,6 @@ impl CommandPool {
         OneShotCommandBuffer {
             pool: self.clone(),
             handle: command_buffer,
-        }
-    }
-}
-
-impl Drop for CommandPool {
-    fn drop(&mut self) {
-        //TODO: Command buffers will be freed when the pool is dropped, so any buffers created from this pool must be invalidated
-        unsafe {
-            self.device.handle.destroy_command_pool(self.handle, None);
         }
     }
 }

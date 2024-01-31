@@ -7,17 +7,14 @@
 #extension GL_KHR_shader_subgroup_arithmetic: enable
 
 #include "structs\mesh_task_payload.glsl"
+#include "structs\indirect_draw_data.glsl"
 #include "structs\cluster_data.glsl"
 #include "structs\camera.glsl"
 #include "structs\model.glsl"
 
 const float LARGE_ERROR = 100000000000000000.0;
 
-struct IndirectDrawData {
-    uint group_size_x;
-	uint group_size_y;
-	uint group_size_z;
-};
+
 // Bindings and layout
 
 
@@ -70,13 +67,15 @@ float cluster_error(uint idx, uint idy) {
 }
 
 void main() {
-    uint cluster_index = gl_GlobalInvocationID.x;
     uint local_index = gl_LocalInvocationID.x;
     uint instance_index = gl_DrawID;
+    // uint cluster_index = gl_GlobalInvocationID.x + indirect_draw.data[instance_index].offset;
+    uint cluster_index = gl_GlobalInvocationID.x;
 	
-	if (cluster_index == 0){
+	if (gl_GlobalInvocationID.x == 0){
 		// Agressively lower the amount of tasks being invoked, and allow atomic max function below to pick it up
 		indirect_draw.data[instance_index].group_size_x -= 1;
+		//indirect_draw.data[instance_index].offset += 1;
 	}
 	memoryBarrierBuffer();
 
@@ -150,6 +149,14 @@ void main() {
 				)
 			) / TASK_GROUP_SIZE + 2;												
 
+	// uint min_needed_index = (draw ? 
+	// 			cluster_index :  // Perfect error, continue doing this
+	// 			(error < this_error ? 
+	// 				max(clusters[cluster_index].min_child_index, cluster_index)  : // Error is lower then ours, draw a child if we have one
+	// 				parent1 == -1 ? cluster_index : parent0  // Error is higher then ours, only need to draw the parent (parent1 > parent0)
+	// 			)
+	// 		);	
+
 	//max_needed_workgroups = min(max_needed_workgroups, max_cluster() / TASK_GROUP_SIZE + 1);
 
 	//max_count = 0;
@@ -163,9 +170,11 @@ void main() {
 	uint max_count = subgroupMax(payload.meshlet_count[local_index]);
 	
 	uint subroup_max_needed_workgroups = subgroupMax(max_needed_workgroups);
+	//uint subroup_min_needed_index = subgroupMax(min_needed_index);
 
 	if (subgroupElect()){
 		atomicMax(indirect_draw.data[instance_index].group_size_x, subroup_max_needed_workgroups);
+		//atomicMin(indirect_draw.data[instance_index].offset, subroup_min_needed_index);
     	EmitMeshTasksEXT(max_count, TASK_GROUP_SIZE, 1);
 	}
 

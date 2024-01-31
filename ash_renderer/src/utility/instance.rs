@@ -244,7 +244,7 @@ impl Instance {
                 self.fn_surface.get_physical_device_surface_support(
                     physical_device,
                     index as u32,
-                    surface.handle,
+                    surface.handle(),
                 )
             }
             .unwrap();

@@ -6,10 +6,12 @@ use std::{
 
 use ash::vk::{self};
 use bevy_ecs::world::World;
+use common::MeshVert;
 use common_renderer::components::transform::Transform;
 use gpu_allocator::vulkan::Allocator;
 
 use crate::{
+    app::mesh_data::MeshDataBuffers,
     core::Core,
     screen::Screen,
     utility::{
@@ -22,7 +24,7 @@ use crate::{
         render_pass::RenderPass,
         {ComputePipeline, GraphicsPipeline, ShaderModule},
     },
-    VkHandle, TASK_GROUP_SIZE,
+    ModelUniformBufferObject, VkHandle, TASK_GROUP_SIZE,
 };
 
 use super::{
@@ -44,16 +46,14 @@ impl ComputeCulledMesh {
     pub fn new(
         core: Arc<Core>,
         screen: &Screen,
-        world: &mut World,
+
+        mesh_data: &MeshDataBuffers,
         allocator: Arc<Mutex<Allocator>>,
         render_pass: &RenderPass,
         graphics_queue: vk::Queue,
         descriptor_pool: Arc<DescriptorPool>,
-        uniform_transform_buffer: Arc<Buffer>,
+        uniform_transform_buffer: Arc<TBuffer<ModelUniformBufferObject>>,
         uniform_camera_buffers: &[Arc<impl AsBuffer>],
-        vertex_buffer: Arc<Buffer>,
-        meshlet_buffer: Arc<Buffer>,
-        submesh_buffer: Arc<Buffer>,
         cluster_count: u32,
     ) -> Self {
         let ubo_layout = create_descriptor_set_layout(core.device.clone());
@@ -89,9 +89,9 @@ impl ComputeCulledMesh {
             &uniform_transform_buffer,
             &uniform_camera_buffers,
             &should_cull_buffer,
-            &vertex_buffer,
-            &meshlet_buffer,
-            &submesh_buffer,
+            &mesh_data.vertex_buffer,
+            &mesh_data.meshlet_buffer,
+            &mesh_data.cluster_buffer,
             //&texture_image,
             screen.swapchain().images.len(),
         );
@@ -516,12 +516,12 @@ fn create_compute_culled_meshes_descriptor_sets(
     device: &Arc<Device>,
     descriptor_pool: &Arc<DescriptorPool>,
     descriptor_set_layout: &Arc<DescriptorSetLayout>,
-    uniform_transform_buffer: &Arc<Buffer>,
+    uniform_transform_buffer: &Arc<TBuffer<ModelUniformBufferObject>>,
     uniform_camera_buffers: &[Arc<impl AsBuffer>],
     should_draw_buffer: &Arc<impl AsBuffer>,
-    vertex_buffer: &Arc<Buffer>,
-    meshlet_buffer: &Arc<Buffer>,
-    submesh_buffer: &Arc<Buffer>,
+    vertex_buffer: &Arc<TBuffer<MeshVert>>,
+    meshlet_buffer: &Arc<impl AsBuffer>,
+    submesh_buffer: &Arc<impl AsBuffer>,
     //texture: &Image,
     swapchain_images_size: usize,
 ) -> Vec<DescriptorSet> {
@@ -531,7 +531,7 @@ fn create_compute_culled_meshes_descriptor_sets(
     }
 
     let descriptor_set_allocate_info = vk::DescriptorSetAllocateInfo::builder()
-        .descriptor_pool(descriptor_pool.handle)
+        .descriptor_pool(descriptor_pool.handle())
         .set_layouts(&layouts);
 
     let vk_descriptor_sets = unsafe {
@@ -552,10 +552,10 @@ fn create_compute_culled_meshes_descriptor_sets(
                 device.clone(),
                 vec![
                     DescriptorWriteData::Buffer {
-                        buf: uniform_transform_buffer.clone(),
+                        buf: uniform_transform_buffer.buffer(),
                     },
                     DescriptorWriteData::Buffer {
-                        buf: submesh_buffer.clone(), //
+                        buf: submesh_buffer.buffer(), //
                     },
                     DescriptorWriteData::Buffer {
                         buf: should_draw_buffer.buffer(),
@@ -564,10 +564,10 @@ fn create_compute_culled_meshes_descriptor_sets(
                         buf: uniform_camera_buffers[i].buffer(),
                     },
                     DescriptorWriteData::Buffer {
-                        buf: meshlet_buffer.clone(), //
+                        buf: meshlet_buffer.buffer(), //
                     },
                     DescriptorWriteData::Buffer {
-                        buf: vertex_buffer.clone(), //
+                        buf: vertex_buffer.buffer(), //
                     },
                 ],
             )

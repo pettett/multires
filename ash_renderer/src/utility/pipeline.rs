@@ -4,7 +4,11 @@ use ash::vk;
 
 use crate::{core::Core, VkHandle};
 
-use super::{pooled::descriptor_pool::DescriptorSetLayout, device::Device};
+use super::{
+    device::Device,
+    macros::{vk_device_owned_wrapper, vk_handle_wrapper},
+    pooled::descriptor_pool::DescriptorSetLayout,
+};
 
 pub struct Pipeline<const T: bool> {
     device: Arc<Device>,
@@ -108,18 +112,7 @@ impl<const T: bool> Drop for Pipeline<T> {
     }
 }
 
-pub struct ShaderModule {
-    device: Arc<Device>,
-    handle: vk::ShaderModule,
-}
-
-impl VkHandle for ShaderModule {
-    type VkItem = vk::ShaderModule;
-
-    fn handle(&self) -> Self::VkItem {
-        self.handle
-    }
-}
+vk_device_owned_wrapper!(ShaderModule, destroy_shader_module);
 
 impl ShaderModule {
     pub fn new(device: Arc<Device>, code: &[u32]) -> Self {
@@ -133,14 +126,6 @@ impl ShaderModule {
                     .expect("Failed to create Shader Module!")
             },
             device,
-        }
-    }
-}
-
-impl Drop for ShaderModule {
-    fn drop(&mut self) {
-        unsafe {
-            self.device.handle.destroy_shader_module(self.handle, None);
         }
     }
 }

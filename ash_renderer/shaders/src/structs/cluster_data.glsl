@@ -18,8 +18,8 @@ struct ClusterData {
     uint layer;
     int max_child_index;
 
-	int _3;
     int _4;
+	int min_child_index;
     uint meshlet_start;
 	uint meshlet_count;
 };

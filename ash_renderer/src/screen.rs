@@ -6,7 +6,7 @@ use gpu_allocator::vulkan::Allocator;
 use crate::{
     core::Core,
     utility::{
-        device::Device, image::Image, physical_device::PhysicalDevice, render_pass::RenderPass,
+        image::Image, physical_device::PhysicalDevice, render_pass::RenderPass,
         swapchain::Swapchain,
     },
     VkHandle,

@@ -2,7 +2,13 @@ use std::{marker::PhantomData, sync::Arc};
 
 use ash::vk;
 
-use crate::{utility::device::Device, VkHandle};
+use crate::{
+    utility::{
+        device::Device,
+        macros::{vk_handle_wrapper, vk_handle_wrapper_g},
+    },
+    VkHandle,
+};
 
 pub struct QueryPool<R> {
     device: Arc<Device>,
@@ -11,13 +17,7 @@ pub struct QueryPool<R> {
     _p: PhantomData<R>,
 }
 
-impl<P> VkHandle for QueryPool<P> {
-    type VkItem = vk::QueryPool;
-
-    fn handle(&self) -> Self::VkItem {
-        self.handle
-    }
-}
+vk_handle_wrapper_g!(QueryPool);
 
 impl<R> QueryPool<R>
 where

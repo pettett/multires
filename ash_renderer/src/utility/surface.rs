@@ -2,14 +2,17 @@ use std::sync::Arc;
 
 use ash::vk;
 
-use super::{instance::Instance, platforms};
+use super::{instance::Instance, macros::vk_handle_wrapper, platforms};
 
 pub struct Surface {
     pub instance: Arc<Instance>,
-    pub handle: vk::SurfaceKHR,
+    handle: vk::SurfaceKHR,
     screen_width: u32,
     screen_height: u32,
 }
+
+vk_handle_wrapper!(Surface, SurfaceKHR);
+
 impl Drop for Surface {
     fn drop(&mut self) {
         unsafe {

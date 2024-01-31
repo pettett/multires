@@ -14,7 +14,8 @@ use gpu_allocator::{
 use crate::{core::Core, VkHandle};
 
 use super::{
-    device::Device, pooled::command_pool::CommandPool, pooled::descriptor_pool::DescriptorSet,
+    device::Device, macros::vk_handle_wrapper, pooled::command_pool::CommandPool,
+    pooled::descriptor_pool::DescriptorSet,
 };
 
 pub const STAGING_BUFFER: &str = "Staging Buffer";
@@ -236,13 +237,7 @@ impl Drop for Buffer {
     }
 }
 
-impl VkHandle for Buffer {
-    type VkItem = vk::Buffer;
-
-    fn handle(&self) -> Self::VkItem {
-        self.handle
-    }
-}
+vk_handle_wrapper!(Buffer);
 
 impl Buffer {
     pub fn new(

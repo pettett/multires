@@ -32,7 +32,7 @@ pub trait Asset: Sized + enc::Encode + de::Decode {
 
         let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         path.push("..");
-        path.push("asset.bin");
+        path.push("assets/torrin_main.glb.bin");
 
         let file = fs::File::open(&path).with_context(|| format!("{:?}", path.canonicalize()))?;
         let mut buf = BufReader::new(file);

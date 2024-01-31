@@ -5,8 +5,13 @@ use ash::vk::{self};
 use crate::VkHandle;
 
 use super::{
-    device::Device, image::Image, instance::Instance, physical_device::PhysicalDevice,
-    structures::QueueFamilyIndices, surface::Surface,
+    device::Device,
+    image::Image,
+    instance::Instance,
+    macros::{vk_device_drop, vk_handle_wrapper},
+    physical_device::PhysicalDevice,
+    structures::QueueFamilyIndices,
+    surface::Surface,
 };
 pub struct SwapChainSupportDetail {
     pub capabilities: vk::SurfaceCapabilitiesKHR,
@@ -20,17 +25,17 @@ impl SwapChainSupportDetail {
             let capabilities = surface
                 .instance
                 .fn_surface
-                .get_physical_device_surface_capabilities(physical_device, surface.handle)
+                .get_physical_device_surface_capabilities(physical_device, surface.handle())
                 .expect("Failed to query for surface capabilities.");
             let formats = surface
                 .instance
                 .fn_surface
-                .get_physical_device_surface_formats(physical_device, surface.handle)
+                .get_physical_device_surface_formats(physical_device, surface.handle())
                 .expect("Failed to query for surface formats.");
             let present_modes = surface
                 .instance
                 .fn_surface
-                .get_physical_device_surface_present_modes(physical_device, surface.handle)
+                .get_physical_device_surface_present_modes(physical_device, surface.handle())
                 .expect("Failed to query for surface present mode.");
 
             Self {
@@ -62,6 +67,8 @@ pub struct Swapchain {
     pub surface_format: vk::SurfaceFormatKHR,
     pub extent: vk::Extent2D,
 }
+
+vk_handle_wrapper!(Swapchain, SwapchainKHR);
 
 impl Drop for Swapchain {
     fn drop(&mut self) {
@@ -115,7 +122,7 @@ impl Swapchain {
             .unwrap_or(vk::SwapchainKHR::null());
 
         let swapchain_create_info = vk::SwapchainCreateInfoKHR {
-            surface: surface.handle,
+            surface: surface.handle(),
             min_image_count: image_count,
             image_color_space: surface_format.color_space,
             image_format: surface_format.format,

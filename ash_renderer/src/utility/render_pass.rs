@@ -4,19 +4,10 @@ use ash::vk;
 
 use crate::{App, VkHandle};
 
-use super::{device::Device, physical_device::PhysicalDevice};
+use super::{device::Device, macros::vk_device_owned_wrapper, physical_device::PhysicalDevice};
 
-pub struct RenderPass {
-    device: Arc<Device>,
-    handle: vk::RenderPass,
-}
-impl VkHandle for RenderPass {
-    type VkItem = vk::RenderPass;
+vk_device_owned_wrapper!(RenderPass, destroy_render_pass);
 
-    fn handle(&self) -> Self::VkItem {
-        self.handle
-    }
-}
 impl RenderPass {
     pub fn new(device: Arc<Device>, surface_format: vk::Format, depth_format: vk::Format) -> Self {
         let color_attachment = vk::AttachmentDescription {
@@ -97,11 +88,5 @@ impl RenderPass {
                 .expect("Failed to create render pass!")
         };
         Self { device, handle }
-    }
-}
-
-impl Drop for RenderPass {
-    fn drop(&mut self) {
-        unsafe { self.device.handle.destroy_render_pass(self.handle, None) };
     }
 }

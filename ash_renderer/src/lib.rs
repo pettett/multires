@@ -7,11 +7,19 @@ pub mod utility;
 pub mod vertex;
 
 pub mod app;
+pub mod spiral;
 
 use crate::{
+    app::{
+        draw_systems::{draw_frame, tick_clocks, update_pipeline},
+        mesh_data::MeshDataBuffers,
+        renderer::{MeshDrawingPipelineType, Renderer},
+        scene::{process_scene_events, SceneEvent},
+    },
     core::Core,
     gui::allocator_visualiser_window::AllocatorVisualiserWindow,
     screen::find_depth_format,
+    spiral::Spiral,
     utility::{
         // the mod define some fixed functions that have been learned before.
         constants::*,
@@ -23,9 +31,10 @@ use crate::{
     },
 };
 
-use app::fps_limiter::FPSMeasure;
+use app::{fps_limiter::FPSMeasure, scene::Scene};
 use ash::vk;
-use bevy_ecs::{entity::Entity, event::Events, schedule::Schedule, world::World};
+
+use bevy_ecs::prelude::*;
 use common::{asset::Asset, MeshVert, MultiResMesh};
 use common_renderer::{
     components::{
@@ -50,8 +59,11 @@ use screen::Screen;
 use utility::buffer::{AsBuffer, Buffer, TBuffer};
 use winit::event::WindowEvent;
 
-use std::sync::{Mutex, MutexGuard};
 use std::{f32::consts::PI, sync::Arc};
+use std::{
+    mem::take,
+    sync::{Mutex, MutexGuard},
+};
 
 // Constants
 const WINDOW_TITLE: &'static str = "Multires Mesh Renderer";
@@ -64,62 +76,13 @@ pub trait VkHandle {
 }
 pub trait VkDeviceOwned: VkHandle<VkItem = vk::Device> {}
 
-#[derive(Debug, Clone, Copy)]
-pub enum MeshDrawingPipelineType {
-    IndirectTasks,
-    DrawIndirect,
-    ComputeCulledMesh,
-    ComputeCulledIndices,
-    None,
-}
-
 pub struct App {
     world: bevy_ecs::world::World,
     schedule: bevy_ecs::schedule::Schedule,
+    draw_schedule: bevy_ecs::schedule::Schedule,
     camera: Entity,
-
-    pub allocator: Arc<Mutex<Allocator>>,
-    graphics_queue: vk::Queue,
-    present_queue: vk::Queue,
-
-    //texture_image: Image,
-    uniform_transforms: Vec<ModelUniformBufferObject>,
-    uniform_transform_buffer: Arc<Buffer>,
-    uniform_camera: CameraUniformBufferObject,
-    uniform_camera_buffers: Vec<Arc<TBuffer<CameraUniformBufferObject>>>,
-
-    render_pass: RenderPass,
-
-    draw_pipeline: Box<dyn DrawPipeline>,
-
-    descriptor_pool: Arc<DescriptorPool>,
-
-    gui: Gui,
-    windows: Vec<Box<dyn GuiWindow>>,
-    switch_pipeline: MeshDrawingPipelineType,
-    current_pipeline: MeshDrawingPipelineType,
-
-    sync_objects: SyncObjects,
-
-    current_frame: usize,
-
-    vertex_buffer: Arc<TBuffer<MeshVert>>,
-    meshlet_buffer: Arc<Buffer>,
-    submesh_buffer: Arc<Buffer>,
-    indices_buffer: Arc<TBuffer<u32>>,
-
-    is_framebuffer_resized: bool,
-
-    submesh_count: u32,
-    app_info_open: bool,
-
-    // Make sure to drop the core last
-    screen: Screen,
-    core: Arc<Core>,
-
-    target_error: f32,
-    freeze_pos: bool,
 }
+
 /// https://karthikkaranth.me/blog/generating-random-points-in-a-sphere/
 fn random_point_on_sphere(rng: &mut impl rand::Rng) -> glam::Vec3A {
     let u = rng.gen_range(0.0..=1.0);
@@ -139,8 +102,22 @@ fn random_point_on_sphere(rng: &mut impl rand::Rng) -> glam::Vec3A {
 }
 
 impl App {
+    pub fn renderer(&self) -> &Renderer {
+        self.world.get_non_send_resource().as_ref().unwrap()
+    }
+    pub fn scene(&self) -> &Scene {
+        self.world.get_resource().as_ref().unwrap()
+    }
+
     pub fn input(&mut self, event: &WindowEvent) -> bool {
-        if self.gui.handle_event(event) {
+        if self
+            .world
+            .get_non_send_resource_mut::<Renderer>()
+            .as_mut()
+            .unwrap()
+            .gui
+            .handle_event(event)
+        {
             return true;
         }
 
@@ -223,64 +200,6 @@ impl App {
         // .create_texture_sampler()
         // .create_texture_image_view(1);
 
-        println!("Loading verts");
-
-        let data = MultiResMesh::load("assets/torrin_main.glb.bin").unwrap();
-
-		
-        let (cluster_order, cluster_groups) = data.order_clusters();
-        let mut cluster_data = data.generate_cluster_data(&cluster_order, &cluster_groups);
-        
-		let (clusters, meshlets) = multires::generate_meshlets( &cluster_order);
-
-        let (indices, partitions, groups) = data.indices_partitions_groups(&cluster_order);
-
-        for (i, submesh) in clusters.into_iter().enumerate() {
-            cluster_data[i].meshlet_start = submesh.meshlet_start;
-            cluster_data[i].meshlet_count = submesh.meshlet_count;
-        }
-
-        println!("V: {:?} M: {:?}", data.verts.len(), meshlets.len());
-
-        let vertex_buffer = TBuffer::new_filled(
-            &core,
-            allocator.clone(),
-            &core.command_pool,
-            graphics_queue,
-            vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::VERTEX_BUFFER,
-            &data.verts,
-            "Vertex Buffer",
-        );
-
-        let meshlet_buffer = Buffer::new_storage_filled(
-            &core,
-            allocator.clone(),
-            &core.command_pool,
-            graphics_queue,
-            &meshlets,
-            "Meshlet Buffer",
-        );
-
-        let submesh_buffer = Buffer::new_storage_filled(
-            &core,
-            allocator.clone(),
-            &core.command_pool,
-            graphics_queue,
-            &cluster_data,
-            "Submesh Buffer",
-        );
-
-        let indices_buffer = TBuffer::new_filled(
-            &core,
-            allocator.clone(),
-            &core.command_pool,
-            graphics_queue,
-            // Allow index use for testing
-            vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::INDEX_BUFFER,
-            &indices,
-            "Indices Buffer",
-        );
-
         let mut uniform_transforms = Vec::new();
 
         let mut world: World = World::new();
@@ -289,32 +208,34 @@ impl App {
 
         let mut mid = Vec3A::ZERO;
 
-        for i in 0..1 {
-            for j in 0..1 {
-                let p = glam::Vec3A::X * i as f32 * 20.0 + glam::Vec3A::Z * j as f32 * 40.0;
-                mid += p;
-                let mut transform = Transform::new_pos(p);
+        let instances = 100;
 
-                //if i == 10 && j == 10 {
-                //*transform.scale_mut() *= 10.0;
-                //transform.scale_mut().z *= 10.0;
-                //};
+        for (i, j) in Spiral::default().take(instances) {
+            let p = glam::Vec3A::X * i as f32 * 20.0 + glam::Vec3A::Z * j as f32 * 40.0;
+            mid += p;
+            let mut transform = Transform::new_pos(p);
 
-                uniform_transforms.push(ModelUniformBufferObject {
-                    model: transform.get_local_to_world(),
-                    inv_model: transform.get_local_to_world().inverse(),
-                });
+            //if i == 10 && j == 10 {
+            //*transform.scale_mut() *= 10.0;
+            //transform.scale_mut().z *= 10.0;
+            //};
 
-                world.spawn(transform);
-            }
+            uniform_transforms.push(ModelUniformBufferObject {
+                model: transform.get_local_to_world(),
+                inv_model: transform.get_local_to_world().inverse(),
+            });
+
+            world.spawn(transform);
         }
-        mid /= (30 * 15) as f32;
 
-        let uniform_transform_buffer = Buffer::new_storage_filled(
+        mid /= (instances) as f32;
+
+        let uniform_transform_buffer = TBuffer::new_filled(
             &core,
             allocator.clone(),
             &core.command_pool,
             graphics_queue,
+            vk::BufferUsageFlags::STORAGE_BUFFER,
             &uniform_transforms,
             "Transform Buffer",
         );
@@ -351,6 +272,8 @@ impl App {
         world.insert_resource(Events::<MouseIn>::default());
         world.insert_resource(Events::<MouseMv>::default());
         world.insert_resource(Events::<KeyIn>::default());
+        world.insert_resource(Events::<SceneEvent>::default());
+        world.insert_resource(Events::<MeshDrawingPipelineType>::default());
         world.insert_resource(Time::default());
 
         let camera = world
@@ -358,7 +281,14 @@ impl App {
             .id();
 
         let mut schedule = Schedule::default();
-        schedule.add_systems((camera_handle_input, update_camera));
+        schedule.add_systems((
+            camera_handle_input,
+            update_camera,
+            process_scene_events,
+            update_pipeline,
+        ));
+        let mut draw_schedule = Schedule::default();
+        draw_schedule.add_systems((tick_clocks, draw_frame));
 
         let gui = Gui::new(
             device.clone(),
@@ -370,370 +300,70 @@ impl App {
             graphics_queue,
             &screen.swapchain(),
         );
+        let mesh = MeshDataBuffers::new(&core, &allocator, graphics_queue);
 
-        // cleanup(); the 'drop' function will take care of it.
-        App {
+        world.insert_resource(Scene {
+            uniform_transform_buffer,
+            uniform_camera,
+            uniform_camera_buffers,
+            target_error: 0.5,
+            freeze_pos: false,
+            instances,
+        });
+
+        world.insert_non_send_resource(Renderer {
+            graphics_queue,
+            present_queue,
+            render_pass,
+            draw_pipeline: Box::new(mesh_draw),
+            descriptor_pool,
             gui,
             windows: vec![Box::new(AllocatorVisualiserWindow::new(allocator.clone()))],
 
+            allocator,
+            current_pipeline: MeshDrawingPipelineType::None,
+            sync_objects,
+            query: true,
+            current_frame: 0,
+            is_framebuffer_resized: false,
+            app_info_open: true,
+            //FIXME: This should be used directly
+            cluster_count: mesh.cluster_buffer.item_len() as _,
             core,
             screen,
+        });
+        world.insert_resource(mesh);
+        world.insert_resource(FPSMeasure::new());
 
+        world.send_event(MeshDrawingPipelineType::IndirectTasks);
+
+        // cleanup(); the 'drop' function will take care of it.
+        App {
             world,
             schedule,
+            draw_schedule,
             camera,
-            allocator,
-
-            // vulkan stuff
-            graphics_queue,
-            present_queue,
-            uniform_camera,
-
-            vertex_buffer,
-            submesh_buffer,
-            meshlet_buffer,
-            indices_buffer,
-
-            render_pass,
-
-            draw_pipeline: Box::new(mesh_draw),
-            switch_pipeline: MeshDrawingPipelineType::ComputeCulledIndices,
-            current_pipeline: MeshDrawingPipelineType::None,
-
-            uniform_transforms,
-            uniform_transform_buffer,
-            uniform_camera_buffers,
-
-            //texture_image,
-            descriptor_pool,
-
-            sync_objects,
-            current_frame: 0,
-
-            is_framebuffer_resized: false,
-
-            submesh_count: cluster_data.len() as u32,
-            app_info_open: true,
-
-            target_error: 0.5,
-            freeze_pos: false,
         }
     }
 }
 
 // Fix content -------------------------------------------------------------------------------
-impl App {
-    fn update_camera_uniform_buffer(&mut self, current_image: usize) {
-        let cam = self.world.entity(self.camera);
 
-        self.uniform_camera.view_proj = cam
-            .get::<Camera>()
-            .unwrap()
-            .build_view_projection_matrix(cam.get().unwrap());
+// fn update_model_uniform_buffer(&mut self, current_image: usize, _delta_time: f32) {
+//     unsafe {
+//         self.uniform_transform_buffer
+//             .update_uniform_buffer(self.uniform_transform);
+//     }
+// }
 
-        if !self.freeze_pos {
-            self.uniform_camera.cam_pos = (*cam.get::<Transform>().unwrap().get_pos()).into();
+#[cfg(test)]
+mod tests {
+    use crate::Spiral;
+
+    #[test]
+    fn test_spiral() {
+        for (x, y) in Spiral::default().skip(10).take(50) {
+            print!("({} {})", x, y)
         }
-
-        self.uniform_camera.target_error = self.target_error;
-
-        self.uniform_camera_buffers[current_image].update_uniform_buffer(self.uniform_camera);
-    }
-
-    // fn update_model_uniform_buffer(&mut self, current_image: usize, _delta_time: f32) {
-    //     unsafe {
-    //         self.uniform_transform_buffer
-    //             .update_uniform_buffer(self.uniform_transform);
-    //     }
-    // }
-
-    fn draw_frame(&mut self, fps: &FPSMeasure) {
-        let wait_fences = [self.sync_objects.in_flight_fences[self.current_frame]];
-
-        unsafe {
-            self.core
-                .device
-                .handle
-                .wait_for_fences(&wait_fences, true, std::u64::MAX)
-                .expect("Failed to wait for Fence!");
-        }
-
-        let (image_index, is_sub_optimal) = unsafe {
-            let result = self.core.device.fn_swapchain.acquire_next_image(
-                self.screen.swapchain().handle,
-                std::u64::MAX,
-                self.sync_objects.image_available_semaphores[self.current_frame],
-                vk::Fence::null(),
-            );
-
-            match result {
-                Ok(image_index) => image_index,
-                Err(vk_result) => match vk_result {
-                    vk::Result::ERROR_OUT_OF_DATE_KHR => {
-                        self.recreate_swapchain();
-                        return;
-                    }
-                    _ => panic!("Failed to acquire Swap Chain Image!"),
-                },
-            }
-        };
-
-        // if self.transform_dirty[image_index as usize] {
-        //     self.update_model_uniform_buffer(image_index as usize, delta_time);
-        //     self.transform_dirty[image_index as usize] = false;
-        // }
-
-        self.update_camera_uniform_buffer(image_index as usize);
-
-        let wait_semaphores = [self.sync_objects.image_available_semaphores[self.current_frame]];
-        let wait_stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
-        let signal_semaphores = [self.sync_objects.render_finished_semaphores[self.current_frame]];
-
-        let ui_cmd = self.draw_gui(image_index as usize, fps);
-
-        let submit_infos = [vk::SubmitInfo::builder()
-            .command_buffers(&[self.draw_pipeline.draw(image_index as usize), ui_cmd])
-            .wait_dst_stage_mask(&wait_stages)
-            .signal_semaphores(&signal_semaphores)
-            .wait_semaphores(&wait_semaphores)
-            .build()];
-
-        unsafe {
-            self.core
-                .device
-                .handle
-                .reset_fences(&wait_fences)
-                .expect("Failed to reset Fence!");
-
-            self.core
-                .device
-                .handle
-                .queue_submit(
-                    self.graphics_queue,
-                    &submit_infos,
-                    self.sync_objects.in_flight_fences[self.current_frame],
-                )
-                .expect("Failed to execute queue submit.");
-        }
-
-        let swapchains = [self.screen.swapchain().handle];
-        let image_indices = [image_index];
-
-        let present_info = vk::PresentInfoKHR::builder()
-            .swapchains(&swapchains)
-            .wait_semaphores(&signal_semaphores)
-            .image_indices(&image_indices);
-
-        let result = unsafe {
-            self.core
-                .device
-                .fn_swapchain
-                .queue_present(self.present_queue, &present_info)
-        };
-
-        let is_resized = match result {
-            Ok(_) => self.is_framebuffer_resized,
-            Err(vk_result) => match vk_result {
-                vk::Result::ERROR_OUT_OF_DATE_KHR | vk::Result::SUBOPTIMAL_KHR => true,
-                _ => panic!("Failed to execute queue present."),
-            },
-        };
-        if is_resized || is_sub_optimal {
-            self.is_framebuffer_resized = false;
-            self.recreate_swapchain();
-        }
-
-        self.current_frame = (self.current_frame + 1) % MAX_FRAMES_IN_FLIGHT;
-    }
-
-    pub fn update_pipeline(&mut self) {
-        match self.switch_pipeline {
-            MeshDrawingPipelineType::None => return,
-            _ => self.core.device.wait_device_idle(),
-        }
-
-        self.draw_pipeline = Box::new(Stub);
-
-        match self.switch_pipeline {
-            MeshDrawingPipelineType::IndirectTasks => {
-                self.draw_pipeline = Box::new(IndirectTasks::new(
-                    self.core.clone(),
-                    &self.screen,
-                    &mut self.world,
-                    self.allocator.clone(),
-                    &self.render_pass,
-                    self.graphics_queue,
-                    self.descriptor_pool.clone(),
-                    self.uniform_transform_buffer.clone(),
-                    &self.uniform_camera_buffers,
-                    self.vertex_buffer.buffer(),
-                    self.meshlet_buffer.clone(),
-                    self.submesh_buffer.clone(),
-                    self.submesh_count,
-                ));
-            }
-            MeshDrawingPipelineType::ComputeCulledMesh => {
-                self.draw_pipeline = Box::new(ComputeCulledMesh::new(
-                    self.core.clone(),
-                    &self.screen,
-                    &mut self.world,
-                    self.allocator.clone(),
-                    &self.render_pass,
-                    self.graphics_queue,
-                    self.descriptor_pool.clone(),
-                    self.uniform_transform_buffer.clone(),
-                    &self.uniform_camera_buffers,
-                    self.vertex_buffer.buffer(),
-                    self.meshlet_buffer.clone(),
-                    self.submesh_buffer.clone(),
-                    self.submesh_count,
-                ));
-            }
-            MeshDrawingPipelineType::ComputeCulledIndices => {
-                self.draw_pipeline = Box::new(ComputeCulledIndices::new(
-                    self.core.clone(),
-                    &self.screen,
-                    &mut self.world,
-                    self.allocator.clone(),
-                    &self.render_pass,
-                    self.graphics_queue,
-                    self.descriptor_pool.clone(),
-                    self.uniform_transform_buffer.clone(),
-                    &self.uniform_camera_buffers,
-                    self.vertex_buffer.clone(),
-                    self.meshlet_buffer.clone(),
-                    self.submesh_buffer.clone(),
-                    self.indices_buffer.clone(),
-                    self.uniform_transforms.len(),
-                    self.submesh_count,
-                ));
-            }
-            MeshDrawingPipelineType::DrawIndirect => {
-                self.draw_pipeline = Box::new(DrawIndirect::new(
-                    self.core.clone(),
-                    &self.screen,
-                    &mut self.world,
-                    self.allocator.clone(),
-                    &self.render_pass,
-                    self.graphics_queue,
-                    self.descriptor_pool.clone(),
-                    self.uniform_transform_buffer.clone(),
-                    &self.uniform_camera_buffers,
-                    self.vertex_buffer.clone(),
-                    self.meshlet_buffer.clone(),
-                    self.submesh_buffer.clone(),
-                    self.indices_buffer.clone(),
-                    self.uniform_transforms.len(),
-                    self.submesh_count,
-                ));
-            }
-            MeshDrawingPipelineType::None => (),
-        }
-
-        self.draw_pipeline.init_swapchain(
-            &self.core,
-            &self.screen,
-            self.submesh_count,
-            self.uniform_transforms.len() as _,
-            &self.render_pass,
-        );
-
-        self.current_pipeline = self.switch_pipeline;
-        self.switch_pipeline = MeshDrawingPipelineType::None
-    }
-
-    fn recreate_swapchain(&mut self) {
-        self.core.device.wait_device_idle();
-
-        let size = self.window_ref().inner_size();
-        {
-            let mut cam = self.world.entity_mut(self.camera);
-            let mut camera = cam.get_mut::<Camera>().unwrap();
-            camera.on_resize(&size);
-        }
-
-        //self.cleanup_swapchain();
-
-        self.screen.remake_swapchain(
-            self.graphics_queue,
-            &self.render_pass,
-            self.allocator.clone(),
-        );
-
-        self.draw_pipeline.init_swapchain(
-            &self.core,
-            &self.screen,
-            self.submesh_count,
-            self.uniform_transforms.len() as _,
-            &self.render_pass,
-        );
-
-        // Egui Integration
-        self.gui.update_swapchain(&self.screen.swapchain());
-    }
-
-    fn resize_framebuffer(&mut self) {
-        self.is_framebuffer_resized = true;
-    }
-
-    fn window_ref(&self) -> &winit::window::Window {
-        &self.core.window
-    }
-    pub fn get_allocator(&self) -> MutexGuard<Allocator> {
-        self.allocator.lock().unwrap()
-    }
-    fn draw_gui(&mut self, image_index: usize, fps: &FPSMeasure) -> vk::CommandBuffer {
-        self.gui.draw(image_index, |ctx| {
-            for w in &mut self.windows {
-                w.draw(ctx);
-            }
-            egui::Window::new("App Config")
-                .open(&mut self.app_info_open)
-                .show(ctx, |ui| {
-                    {
-                        ui.checkbox(&mut self.freeze_pos, "Freeze");
-                        ui.add(
-                            egui::Slider::new(&mut self.target_error, 0.0..=1.0)
-                                .text("Target Error"),
-                        );
-                    }
-
-                    ui.add(fps);
-
-                    self.draw_pipeline.stats_gui(ui, image_index);
-
-                    ui.label(format!("Current Pipeline: {:?}", self.current_pipeline));
-
-                    ui.add_enabled_ui(self.core.device.features.mesh_shader, |ui| {
-                        if ui.button("Indirect Tasks").clicked() {
-                            self.switch_pipeline = MeshDrawingPipelineType::IndirectTasks;
-                        }
-                    });
-
-                    ui.add_enabled_ui(false, |ui| {
-                        if ui.button("Compute Culled Mesh").clicked() {
-                            self.switch_pipeline = MeshDrawingPipelineType::ComputeCulledMesh;
-                        }
-                    });
-
-                    if ui.button("Compute Culled Indices").clicked() {
-                        self.switch_pipeline = MeshDrawingPipelineType::ComputeCulledIndices;
-                    }
-
-                    if ui.button("Draw Full Res").clicked() {
-                        self.switch_pipeline = MeshDrawingPipelineType::DrawIndirect;
-                    }
-                });
-
-            egui::TopBottomPanel::top("test").show(ctx, |ui| {
-                egui::menu::bar(ui, |ui| {
-                    for w in &mut self.windows {
-                        let (open, name) = w.state();
-                        ui.checkbox(open, name);
-                    }
-                    ui.checkbox(&mut self.app_info_open, "App Info");
-                });
-            });
-        })
     }
 }

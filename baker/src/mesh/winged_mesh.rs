@@ -7,7 +7,10 @@ use std::{collections::HashSet, fs};
 use crate::pidge::Pidge;
 
 use super::{
-    edge::{EdgeID, EdgeIter, HalfEdge}, face::{Face, FaceID}, group_info::GroupInfo, vertex::{VertID, Vertex}
+    edge::{EdgeID, EdgeIter, HalfEdge},
+    face::{Face, FaceID},
+    group_info::GroupInfo,
+    vertex::{VertID, Vertex},
 };
 
 #[derive(thiserror::Error, Debug)]
@@ -58,7 +61,7 @@ impl WingedMesh {
             edges: Pidge::with_capacity(faces * 3),
             verts: Pidge::with_capacity(verts),
             groups: vec![],
-            clusters: vec![ClusterInfo::default()], 
+            clusters: vec![ClusterInfo::default()],
         }
     }
     pub fn get_face(&self, face: FaceID) -> &Face {
@@ -542,9 +545,9 @@ impl WingedMesh {
 
         let fid = edge.face;
 
-        // we are pinching edge to nothing, so make the other two edges twins
         let (f, eids, [e0, e1, e2]) = self.wipe_face(fid);
 
+        // we are pinching edge `eid` to nothing, so make the other two edges twins
         let (o1, o0, t) = match eid {
             eid if eid == eids[0] => (e1, e2, e0),
             eid if eid == eids[1] => (e0, e2, e1),

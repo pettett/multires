@@ -1,4 +1,6 @@
-use common::{asset::Asset, MeshCluster, MultiResMesh};
+use std::cmp;
+
+use common::{MeshCluster, MultiResMesh};
 
 #[repr(C)]
 #[derive(
@@ -30,7 +32,7 @@ pub struct ClusterData {
     pub layer: u32,
     pub max_child_index: i32,
 
-    _3: i32,
+    pub min_child_index: i32,
     _4: i32,
     pub meshlet_start: u32,
     pub meshlet_count: u32,
@@ -69,11 +71,11 @@ pub trait MultiResData {
 
 impl MultiResData for MultiResMesh {
     fn order_clusters(&self) -> (Vec<&MeshCluster>, Vec<Vec<usize>>) {
-        let mut clusters : Vec<_> = self.clusters.iter().collect();
-        
+        let mut clusters: Vec<_> = self.clusters.iter().collect();
 
-        // Sorting by group index allows us to
-        clusters.sort_unstable_by_key(|x| x.info.group_index);
+        // Sorting by group index allows us to represent all children with a min/max child pair
+        // As they have also share some properties, this will also slightly improve GPU compute efficiency
+        clusters.sort_unstable_by_key(|x| cmp::Reverse(x.info.group_index));
 
         let mut groups = vec![Vec::new(); self.group_count];
         for i in 0..clusters.len() {
@@ -190,16 +192,16 @@ impl MultiResData for MultiResMesh {
                 }
             };
 
-            let max_child_idx = dag
-                .neighbors_directed(
-                    petgraph::graph::node_index(i),
-                    petgraph::Direction::Outgoing,
-                )
-                .max()
-                .map(|x| x.index() as i32)
-                .unwrap_or(-1);
+            if let Some(child_group) = cluster_order[i].info.child_group_index {
+                let min_child_index = *cluster_groups[child_group].iter().min().unwrap();
+                let max_child_index = *cluster_groups[child_group].iter().max().unwrap();
 
-            clusters[i].max_child_index = max_child_idx;
+                clusters[i].min_child_index = min_child_index as _;
+                clusters[i].max_child_index = max_child_index as _;
+            } else {
+                clusters[i].min_child_index = -1;
+                clusters[i].max_child_index = -1;
+            }
         }
 
         clusters
@@ -245,7 +247,6 @@ impl MultiResData for MultiResMesh {
 
 #[cfg(test)]
 mod tests {
-    use std::{path, str::FromStr};
 
     use common::{asset::Asset, MultiResMesh};
 
@@ -272,19 +273,19 @@ mod tests {
     }
 
     #[test]
-    fn test_max_children() {
+    fn test_children_range() {
         let mesh = MultiResMesh::load_from_cargo_manifest_dir().unwrap();
 
         let (cluster_order, groups) = mesh.order_clusters();
         let clusters = mesh.generate_cluster_data(&cluster_order, &groups);
 
         for i in 0..clusters.len() {
-            if let Some((p0id, p1id)) = clusters[i].get_parents() {
-                let p0 = &clusters[p0id];
-                let p1 = &clusters[p1id];
+            if clusters[i].max_child_index >= 0 {
+                for c in clusters[i].min_child_index..(clusters[i].max_child_index + 1) {
+                    let (p0, p1) = clusters[c as usize].get_parents().unwrap();
 
-                assert!(p0.max_child_index >= i as i32);
-                assert!(p1.max_child_index >= i as i32);
+                    assert!(p0 == i || p1 == i);
+                }
             }
         }
     }

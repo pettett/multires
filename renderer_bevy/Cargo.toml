@@ -1,9 +1,0 @@
-[package]
-name = "renderer_bevy"
-version.workspace = true
-edition.workspace = true
-
-
-[dependencies]
-bevy = "0.12"
-wgpu = "0.17"

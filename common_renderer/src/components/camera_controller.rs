@@ -33,7 +33,7 @@ pub fn camera_handle_input(
     mut ev_mousein: EventReader<MouseIn>,
     mut ev_mousemv: EventReader<MouseMv>,
 ) {
-    for KeyIn(input) in ev_keyin.iter() {
+    for KeyIn(input) in ev_keyin.read() {
         let KeyboardInput {
             state,
             virtual_keycode: Some(keycode),
@@ -57,7 +57,7 @@ pub fn camera_handle_input(
         }
     }
 
-    for MouseIn(state, button) in ev_mousein.iter() {
+    for MouseIn(state, button) in ev_mousein.read() {
         for (mut c,) in controllers.iter_mut() {
             match button {
                 winit::event::MouseButton::Left => {
@@ -71,7 +71,7 @@ pub fn camera_handle_input(
         }
     }
 
-    for MouseMv(position) in ev_mousemv.iter() {
+    for MouseMv(position) in ev_mousemv.read() {
         for (mut c,) in controllers.iter_mut() {
             c.mouse_delta.x = (c.last_mouse_pos.x - position.x) as f32;
             c.mouse_delta.y = (c.last_mouse_pos.y - position.y) as f32;

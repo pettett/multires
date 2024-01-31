@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashSet};
+use std::collections::HashSet;
 
 use bincode::{Decode, Encode};
 use glam::Vec3;
@@ -13,7 +13,6 @@ pub struct BoundingSphere {
     radius: f32,
 }
 
-
 #[derive(Debug, Clone, Decode, Encode)]
 pub struct MeshCluster {
     indices: Vec<Vec<u32>>,
@@ -24,9 +23,9 @@ pub struct MeshCluster {
     // Similarly, the bounding sphere must be enlarged to enclose the bounding spheres of all its children in the DAG,
     // in order to ensure a monotonic view-dependent error function.
     pub saturated_sphere: BoundingSphere,
-	pub lod : usize, //TODO: In future, we should not need this - group indexes should be consistent across LOD
+    pub lod: usize, //TODO: In future, we should not need this - group indexes should be consistent across LOD
     pub error: f32,
-	pub info : ClusterInfo,
+    pub info: ClusterInfo,
 }
 
 #[repr(C)]
@@ -42,9 +41,8 @@ pub struct MultiResMesh {
     pub verts: Vec<MeshVert>,
     pub lods: Vec<MeshLevel>,
     pub clusters: Vec<MeshCluster>,
-    pub group_count : usize
+    pub group_count: usize,
 }
-
 
 /// Information for a partition on layer n
 #[derive(Debug, Clone, Decode, Encode, PartialEq, Default)]
@@ -69,7 +67,6 @@ pub struct MeshLevel {
 
 impl asset::Asset for MultiResMesh {}
 
-
 impl MeshCluster {
     pub fn new(
         colours: usize,
@@ -90,9 +87,9 @@ impl MeshCluster {
                 center: center.to_array(),
                 radius: monotonic_radius,
             },
-            error, 
-			lod,
-			info
+            error,
+            lod,
+            info,
         }
     }
     pub fn push_tri(&mut self, colour: usize, tri: [usize; 3]) {
@@ -195,7 +192,6 @@ impl BoundingSphere {
         )
     }
 }
-
 
 #[cfg(test)]
 pub mod test {

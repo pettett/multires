@@ -16,20 +16,23 @@ use crate::{core::Core, VkHandle};
 
 use super::{
     buffer::{AsBuffer, Buffer, STAGING_BUFFER},
-    pooled::command_pool::CommandPool,
     device::Device,
     instance::Instance,
+    macros::vk_handle_wrapper,
+    pooled::command_pool::CommandPool,
 };
 
 pub struct Image {
     device: Arc<Device>,
-    image: vk::Image,
+    handle: vk::Image,
     image_memory: Allocation,
     format: vk::Format,
     allocator: Arc<Mutex<Allocator>>,
     image_view: Option<vk::ImageView>,
     sampler: Option<vk::Sampler>,
 }
+
+vk_handle_wrapper!(Image);
 
 impl Drop for Image {
     fn drop(&mut self) {
@@ -40,7 +43,7 @@ impl Drop for Image {
             if let Some(image_view) = self.image_view {
                 self.device.handle.destroy_image_view(image_view, None);
             }
-            self.device.handle.destroy_image(self.image, None);
+            self.device.handle.destroy_image(self.handle, None);
 
             let mut allocation = Default::default();
 
@@ -119,7 +122,7 @@ impl Image {
 
         Image {
             device: core.device.clone(),
-            image,
+            handle: image,
             image_memory: allocation,
             allocator,
             format,
@@ -321,7 +324,7 @@ impl Image {
             new_layout,
             src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
             dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-            image: image.image,
+            image: image.handle,
             subresource_range: vk::ImageSubresourceRange {
                 aspect_mask: vk::ImageAspectFlags::COLOR,
                 base_mip_level: 0,
@@ -577,7 +580,7 @@ impl Image {
         unsafe {
             self.image_view = Some(Image::create_raw_image_view(
                 &self.device,
-                self.image,
+                self.handle,
                 format,
                 aspect_flags,
                 mip_levels,
@@ -587,7 +590,7 @@ impl Image {
     }
 
     pub fn image(&self) -> vk::Image {
-        self.image
+        self.handle
     }
 
     pub fn format(&self) -> vk::Format {
