@@ -1,6 +1,7 @@
-use std::collections::{HashMap, HashSet};
-
-use petgraph::visit::EdgeRef;
+use std::{
+    cmp,
+    collections::{HashMap, HashSet},
+};
 
 use super::{
     face::{Face, FaceID},
@@ -135,7 +136,7 @@ impl WingedMesh {
 
                         let n1 = petgraph::graph::NodeIndex::new(other_face.cluster_idx);
 
-                        let w = graph
+                        let _w = graph
                             .find_edge(n0, n1)
                             .map(|e| graph.edge_weight(e))
                             .flatten();
@@ -207,23 +208,123 @@ impl WingedMesh {
 
         graph
     }
+
+    /// Generate combinations of groups that can possibly effect each other in terms of quadric error changing
+    /// I.E. a group can effect another group if it shares a vertex
+    pub fn generate_group_effect_graph(&self) -> petgraph::Graph<(), (), petgraph::Undirected> {
+        let mut effect_graph = petgraph::Graph::new_undirected();
+
+        for g in 0..self.groups.len() {
+            effect_graph.add_node(());
+        }
+
+        let mut groups = HashSet::new();
+
+        for (_, vert) in self.iter_verts() {
+            for &out in vert.outgoing_edges() {
+                groups.insert(
+                    self.clusters[self.get_face(self.get_edge(out).face).cluster_idx].group_index,
+                );
+            }
+            for &out in vert.incoming_edges() {
+                groups.insert(
+                    self.clusters[self.get_face(self.get_edge(out).face).cluster_idx].group_index,
+                );
+            }
+
+            for g1 in &groups {
+                for g2 in &groups {
+                    if g1 != g2 {
+                        effect_graph.update_edge(
+                            petgraph::graph::node_index(*g1),
+                            petgraph::graph::node_index(*g2),
+                            (),
+                        );
+                    }
+                }
+            }
+
+            groups.clear()
+        }
+        effect_graph
+    }
+}
+
+pub fn colour_graph<Ty: petgraph::EdgeType>(
+    graph: &petgraph::Graph<(), (), Ty>,
+) -> Vec<Vec<usize>> {
+    let mut neighbours = priority_queue::PriorityQueue::with_capacity(graph.node_count());
+
+    let mut colour_graph = graph.map(|n, m| None, |e, i| ());
+
+    let mut colours = Vec::new();
+    let mut banned_colours = vec![false];
+
+    //init list to neighbour counts
+    for n in graph.node_indices() {
+        neighbours.push(n, cmp::Reverse(graph.neighbors(n).count()));
+    }
+
+    // Get the node with the least remaining nodes, and apply a colour to it
+    while let Some((node, _)) = neighbours.pop() {
+        // Find colours that are not allowed
+
+        for n in colour_graph.neighbors(node) {
+            if let Some(c) = colour_graph.node_weight(n).unwrap() {
+                banned_colours[*c] = true;
+            }
+        }
+
+        // There will always be one `false` entry at the end of banned colours, which represents adding a new colour
+        let col = banned_colours.iter().position(|&x| !x).unwrap();
+
+        if col == colours.len() {
+            colours.push(Vec::new());
+            banned_colours.push(false);
+        }
+
+        *colour_graph.node_weight_mut(node).unwrap() = Some(col);
+        colours[col].push(node.index());
+
+        for n in graph.neighbors(node) {
+            // Update this one's priority
+            if colour_graph.node_weight(n).unwrap().is_none() {
+                neighbours.push(
+                    n,
+                    cmp::Reverse(
+                        colour_graph
+                            .neighbors(n)
+                            .filter(|n| colour_graph.node_weight(*n).unwrap().is_none())
+                            .count(),
+                    ),
+                );
+            }
+        }
+
+        banned_colours.fill(false);
+    }
+
+    colours
 }
 
 #[cfg(test)]
 pub mod test {
     use std::{collections::HashMap, error};
 
-    use common::graph;
+    use common::graph::{self, petgraph_to_svg};
 
-    use crate::mesh::winged_mesh::{
-        test::{TEST_MESH_LOW, TEST_MESH_PLANE_LOW},
-        WingedMesh,
+    use crate::mesh::{
+        graph::colour_graph,
+        winged_mesh::{
+            test::{TEST_MESH_LOW, TEST_MESH_PLANE_LOW},
+            WingedMesh,
+        },
     };
 
     pub const DOT_OUT: &str = "baker\\graph.gv";
 
     pub const HIERARCHY_SVG_OUT: &str = "baker\\hierarchy_graph.svg";
-    pub const PART_SVG_OUT: &str = "baker\\part_graph.svg";
+    pub const PART_SVG_OUT: &str = "..\\baker\\part_graph.svg";
 
     pub const FACE_SVG_OUT: &str = "baker\\face_graph.svg";
 
@@ -252,7 +353,7 @@ pub mod test {
             ..Default::default()
         };
         let mesh = TEST_MESH_PLANE_LOW;
-        let (mut mesh, verts, norms) = WingedMesh::from_gltf(mesh);
+        let (mut mesh, verts, _norms) = WingedMesh::from_gltf(mesh);
 
         // Apply primary partition, that will define the lowest level clusterings
         mesh.partition_full_mesh(test_config, 9)?;
@@ -325,9 +426,7 @@ pub mod test {
             ..Default::default()
         };
         let mesh = TEST_MESH_PLANE_LOW;
-        let (mut mesh, _verts, norms) = WingedMesh::from_gltf(mesh);
-
-        println!("Faces: {}, Verts: {}", mesh.face_count(), mesh.vert_count());
+        let (mut mesh, _verts, _norms) = WingedMesh::from_gltf(mesh);
 
         // Apply primary partition, that will define the lowest level clusterings
         mesh.partition_within_groups(test_config, None, Some(60))?;
@@ -345,6 +444,53 @@ pub mod test {
     }
 
     #[test]
+    pub fn color_group_effect_graph() {
+        let test_config = &metis::PartitioningConfig {
+            method: metis::PartitioningMethod::MultilevelKWay,
+            force_contiguous_partitions: Some(true),
+            minimize_subgraph_degree: Some(true),
+            ..Default::default()
+        };
+        let mesh = TEST_MESH_PLANE_LOW;
+        let (mut mesh, verts, _norms) = WingedMesh::from_gltf(mesh);
+
+        println!("Faces: {}, Verts: {}", mesh.face_count(), mesh.vert_count());
+
+        // Apply primary partition, that will define the lowest level clusterings
+        mesh.partition_full_mesh(test_config, 60).unwrap();
+        mesh.group(test_config, &verts).unwrap();
+
+        let effect_graph = mesh.generate_group_effect_graph();
+
+        graph::petgraph_to_svg(
+            &effect_graph,
+            PART_SVG_OUT,
+            &|_, _| "".to_owned(),
+            graph::GraphSVGRender::Undirected {
+                edge_label: common::graph::Label::None,
+                positions: false,
+            },
+        )
+        .unwrap();
+
+        let colours = colour_graph::<petgraph::Undirected>(&effect_graph);
+        println!("Generated {} colours", colours.len());
+
+        for colour in colours {
+            for n1 in &colour {
+                for n2 in &colour {
+                    assert!(effect_graph
+                        .find_edge(
+                            petgraph::graph::node_index(*n1),
+                            petgraph::graph::node_index(*n2)
+                        )
+                        .is_none());
+                }
+            }
+        }
+    }
+
+    #[test]
     pub fn generate_partition_hierarchy_graph() -> Result<(), Box<dyn error::Error>> {
         let test_config = &metis::PartitioningConfig {
             method: metis::PartitioningMethod::MultilevelKWay,
@@ -353,7 +499,7 @@ pub mod test {
             ..Default::default()
         };
         let mesh = TEST_MESH_LOW;
-        let (mut mesh, verts, norms) = WingedMesh::from_gltf(mesh);
+        let (mut mesh, verts, _norms) = WingedMesh::from_gltf(mesh);
 
         println!("Faces: {}, Verts: {}", mesh.face_count(), mesh.vert_count());
 

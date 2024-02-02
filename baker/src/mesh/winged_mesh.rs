@@ -1,7 +1,7 @@
 use anyhow::Context;
-use common::{tri_mesh::TriMesh, BoundingSphere, ClusterInfo};
+use common::{tri_mesh::TriMesh, ClusterInfo};
 use glam::{Vec3, Vec4};
-use idmap::IntegerId;
+
 use std::{collections::HashSet, fs};
 
 use crate::pidge::Pidge;
@@ -545,7 +545,7 @@ impl WingedMesh {
 
         let fid = edge.face;
 
-        let (f, eids, [e0, e1, e2]) = self.wipe_face(fid);
+        let (_f, eids, [e0, e1, e2]) = self.wipe_face(fid);
 
         // we are pinching edge `eid` to nothing, so make the other two edges twins
         let (o1, o0, t) = match eid {
@@ -611,7 +611,7 @@ impl WingedMesh {
         // Because of this, we need to store all ingoing and outgoings per vertex, which isn't the worst in the world
         // Although it would save a bit of memory to just store every fan
 
-        let (incomings, outgoings) = self.verts.wipe(vid).unpack();
+        let (_incomings, outgoings) = self.verts.wipe(vid).unpack();
 
         for outgoing in outgoings {
             let outgoing_edge = self.get_edge(outgoing);
@@ -825,7 +825,7 @@ pub mod test {
             ..Default::default()
         };
 
-        let (mut mesh, verts, norms) = WingedMesh::from_gltf(TEST_MESH_MID);
+        let (mut mesh, verts, _norms) = WingedMesh::from_gltf(TEST_MESH_MID);
 
         mesh.assert_valid().unwrap();
 
@@ -858,7 +858,7 @@ pub mod test {
         };
 
         let mesh = TEST_MESH_MID;
-        let (mut mesh, _verts, norms) = WingedMesh::from_gltf(mesh);
+        let (mut mesh, _verts, _norms) = WingedMesh::from_gltf(mesh);
 
         // Apply primary partition, that will define the lowest level clusterings
         mesh.partition_within_groups(test_config, None, Some(60))?;
@@ -992,7 +992,7 @@ pub mod test {
 
     #[test]
     fn mesh_stats_readout() {
-        let (mut mesh, _verts, norms) = WingedMesh::from_gltf(TEST_MESH_CONE);
+        let (mut mesh, _verts, _norms) = WingedMesh::from_gltf(TEST_MESH_CONE);
 
         let mut avg_outgoing = 0.0;
         let mut avg_incoming = 0.0;
@@ -1039,7 +1039,7 @@ pub mod test {
 
         for mesh_name in &mesh_names {
             println!("Loading from gltf!");
-            let (mesh, _, norms) = WingedMesh::from_gltf(mesh_name);
+            let (mesh, _, _norms) = WingedMesh::from_gltf(mesh_name);
 
             mesh.assert_valid().unwrap();
         }
@@ -1047,7 +1047,7 @@ pub mod test {
 
     #[test]
     fn test_reduce_contiguous() {
-        let (mut mesh, verts, norms) = WingedMesh::from_gltf(TEST_MESH_CONE);
+        let (mut mesh, verts, _norms) = WingedMesh::from_gltf(TEST_MESH_CONE);
 
         println!("Asserting contiguous");
         // WE know the circle is contiguous
@@ -1077,7 +1077,7 @@ pub mod test {
             minimize_subgraph_degree: Some(true),
             ..Default::default()
         };
-        let (mut mesh, _verts, norms) = WingedMesh::from_gltf(TEST_MESH_LOW);
+        let (mut mesh, _verts, _norms) = WingedMesh::from_gltf(TEST_MESH_LOW);
 
         // Apply primary partition, that will define the lowest level clusterings
         for i in 9..50 {

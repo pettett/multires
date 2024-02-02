@@ -19,7 +19,7 @@ pub fn to_mesh_layer(mesh: &WingedMesh) -> MeshLevel {
     MeshLevel {
         partition_indices: mesh.get_partition(),
         group_indices: mesh.get_group(),
-        indices: grab_indices(&mesh),
+        indices: grab_indices(mesh),
     }
 }
 
@@ -78,9 +78,9 @@ pub fn group_and_partition_and_simplify(
     )
     .unwrap();
 
-    mesh.group(grouping_config, &verts).unwrap();
+    mesh.group(grouping_config, verts).unwrap();
 
-    mesh.colour_within_clusters(&non_contig_even_clustering_config, COLOUR_CLUSTER_SIZE)
+    mesh.colour_within_clusters(non_contig_even_clustering_config, COLOUR_CLUSTER_SIZE)
         .unwrap();
 
     let mut multi_res = MultiResMesh {
@@ -169,7 +169,7 @@ pub fn group_and_partition_and_simplify(
         //layers.push(to_mesh_layer(&working_mesh, &verts));
 
         let partition_count = match mesh.partition_within_groups(
-            &group_clustering_config,
+            group_clustering_config,
             Some(CLUSTERS_PER_SIMPLIFIED_GROUP as _),
             None,
         ) {
@@ -184,9 +184,9 @@ pub fn group_and_partition_and_simplify(
 
         println!("{partition_count} Partitions from groups");
 
-        let group_count = mesh.group(&grouping_config, &verts).unwrap();
+        let group_count = mesh.group(grouping_config, verts).unwrap();
 
-        mesh.colour_within_clusters(&non_contig_even_clustering_config, COLOUR_CLUSTER_SIZE)
+        mesh.colour_within_clusters(non_contig_even_clustering_config, COLOUR_CLUSTER_SIZE)
             .unwrap();
 
         // view a snapshot of the mesh ready to create the next layer
@@ -312,7 +312,7 @@ pub fn grab_indices(mesh: &WingedMesh) -> Vec<u32> {
     let mut indices = Vec::with_capacity(mesh.face_count() * 3);
 
     for (_fid, f) in mesh.iter_faces() {
-        let [a, b, c] = mesh.triangle_from_face(&f);
+        let [a, b, c] = mesh.triangle_from_face(f);
         indices.push(a as _);
         indices.push(b as _);
         indices.push(c as _);
@@ -344,7 +344,7 @@ pub fn generate_clusters(
         .clusters
         .iter()
         .enumerate()
-        .map(|(i, cluster)| {
+        .map(|(_i, cluster)| {
             let gi = cluster.group_index;
             let g = &mesh.groups[gi];
 
@@ -367,9 +367,9 @@ pub fn generate_clusters(
         .collect();
 
     for (_fid, face) in mesh.iter_faces() {
-        let verts = mesh.triangle_from_face(&face);
+        let verts = mesh.triangle_from_face(face);
 
-        let m = clusters.get_mut(face.cluster_idx as usize).unwrap();
+        let m = clusters.get_mut(face.cluster_idx).unwrap();
 
         m.push_tri(face.colour, verts);
 
@@ -438,7 +438,6 @@ pub fn generate_clusters(
 
 #[cfg(test)]
 mod test {
-    use crate::mesh::winged_mesh::test::TEST_MESH_CONE;
 
     use super::*;
     use common::graph;
@@ -446,7 +445,7 @@ mod test {
     #[test]
     fn test_contiguous_meshes() {
         println!("Loading from gltf!");
-        let (mesh, _verts, norms) = WingedMesh::from_gltf("../../assets/dragon_1m.glb");
+        let (mesh, _verts, _norms) = WingedMesh::from_gltf("../../assets/dragon_1m.glb");
 
         let mesh_dual = mesh.generate_face_graph();
 

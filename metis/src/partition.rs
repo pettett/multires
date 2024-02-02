@@ -344,14 +344,15 @@ impl PartitioningConfig {
         &self,
         partition_size: usize,
         graph: &petgraph::graph::UnGraph<V, E>,
-    ) -> Result<(petgraph::graph::UnGraph<i32, E>, u32), PartitioningError>
+    ) -> Result<(petgraph::graph::UnGraph<u32, E>, u32), PartitioningError>
     where
         E: Copy,
     {
         if graph.node_count() > partition_size as usize * 4 + 1 {
-            let mut partitioned_graph = self.partition_onto_graph(2, graph)?;
+            let partitions = 2;
+            let mut partitioned_graph = self.partition_onto_graph(partitions, graph)?;
 
-            let graphs = filter_nodes_by_weight(&partitioned_graph, 0..2);
+            let graphs = filter_nodes_by_weight(&partitioned_graph, 0..partitions);
 
             assert_eq!(graphs.len(), 2);
 
@@ -363,7 +364,7 @@ impl PartitioningConfig {
 
                 for n in g.node_indices() {
                     let original_index = g.node_weight(n).unwrap();
-                    let new_part = (total_parts as i32) + exact_graph.node_weight(n).unwrap();
+                    let new_part = total_parts + exact_graph.node_weight(n).unwrap();
 
                     *partitioned_graph
                         .node_weight_mut(petgraph::graph::node_index(*original_index))
@@ -383,7 +384,7 @@ impl PartitioningConfig {
         &self,
         partitions: u32,
         graph: &petgraph::graph::UnGraph<V, E>,
-    ) -> Result<petgraph::graph::UnGraph<i32, E>, PartitioningError>
+    ) -> Result<petgraph::graph::UnGraph<u32, E>, PartitioningError>
     where
         E: Copy,
     {
@@ -396,7 +397,7 @@ impl PartitioningConfig {
         &self,
         partitions: u32,
         graph: &petgraph::graph::UnGraph<V, E>,
-    ) -> Result<Vec<idx_t>, PartitioningError> {
+    ) -> Result<Vec<u32>, PartitioningError> {
         if partitions == 1 {
             return Ok(vec![0; graph.node_count()]);
         }
@@ -438,7 +439,7 @@ impl PartitioningConfig {
         &self,
         partitions: u32,
         graph: &petgraph::graph::UnGraph<idx_t, E>,
-    ) -> Result<Vec<idx_t>, PartitioningError> {
+    ) -> Result<Vec<u32>, PartitioningError> {
         let mut adjacency = Vec::with_capacity(graph.edge_count());
         let mut adjacency_idx = Vec::with_capacity(graph.node_count() + 1);
         let mut vertex_sizes = Vec::with_capacity(graph.node_count());
@@ -479,7 +480,7 @@ impl PartitioningConfig {
         &self,
         partitions: u32,
         graph: &petgraph::graph::UnGraph<V, idx_t>,
-    ) -> Result<Vec<idx_t>, PartitioningError> {
+    ) -> Result<Vec<u32>, PartitioningError> {
         let mut adjacency = Vec::with_capacity(2 * graph.edge_count());
         let mut adjacency_weight = Vec::with_capacity(2 * graph.edge_count());
 
@@ -527,13 +528,13 @@ impl PartitioningConfig {
         vertex_weight: Option<Vec<idx_t>>,
         vertex_size: Option<Vec<idx_t>>,
         adjacency_weight: Option<Vec<idx_t>>,
-    ) -> Result<Vec<idx_t>, PartitioningError> {
+    ) -> Result<Vec<u32>, PartitioningError> {
         if adjacency.len() == 0 {
             return Ok(vec![]);
         }
 
         let mut n = nodes as idx_t;
-        let mut part = vec![0 as idx_t; nodes];
+        let mut part = vec![0 as u32; nodes];
         let mut edge_cut = 0 as idx_t;
         let mut nparts = partitions as idx_t;
         let mut num_constraints = 1 as idx_t;
@@ -580,7 +581,7 @@ impl PartitioningConfig {
                     null_mut(),
                     options.as_mut_ptr(),
                     &mut edge_cut,
-                    part.as_mut_ptr(),
+                    part.as_mut_ptr() as *mut i32,
                 )
             }
         } else {
@@ -610,7 +611,7 @@ impl PartitioningConfig {
                     null_mut(),
                     options.as_mut_ptr(),
                     &mut edge_cut,
-                    part.as_mut_ptr(),
+                    part.as_mut_ptr() as *mut i32,
                 )
             }
         };

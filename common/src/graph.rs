@@ -210,8 +210,8 @@ where
 }
 
 pub fn filter_nodes_by_weight<E: Copy, Ty: petgraph::EdgeType>(
-    graph: &petgraph::Graph<i32, E, Ty>,
-    weights: Range<i32>,
+    graph: &petgraph::Graph<u32, E, Ty>,
+    weights: Range<u32>,
 ) -> Vec<petgraph::Graph<usize, E, Ty>> {
     weights
         .into_iter()

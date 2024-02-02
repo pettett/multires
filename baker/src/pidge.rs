@@ -44,7 +44,7 @@ impl<'a, V> Iterator for Iter<'a, V> {
                     self.idx += 1;
                     return Some(v);
                 }
-                PidgeHole::Empty { span_end, .. } => {
+                PidgeHole::Empty { .. } => {
                     if self.idx + 1 >= self.data.len() {
                         // Break the iterator, no data after this span
                         return None;
@@ -74,14 +74,14 @@ impl<V> Into<Option<V>> for PidgeHole<V> {
 }
 
 impl<V> PidgeHole<V> {
-    fn as_ref<'a>(&'a self) -> Option<&'a V> {
+    fn as_ref(&self) -> Option<&V> {
         match self {
             PidgeHole::Filled(v) => Some(v),
             PidgeHole::Empty { .. } => None,
         }
     }
 
-    fn as_mut<'a>(&'a mut self) -> Option<&'a mut V> {
+    fn as_mut(&mut self) -> Option<&mut V> {
         match self {
             PidgeHole::Filled(v) => Some(v),
             PidgeHole::Empty { .. } => None,
@@ -121,8 +121,8 @@ impl<K: Key, V> Pidge<K, V> {
     pub fn wipe(&mut self, key: K) -> V {
         let id = key.into();
 
-        let mut new_span_start = None;
-        let mut new_span_end = None;
+        let new_span_start = None;
+        let new_span_end = None;
 
         //TODO: test if this improves performance
 

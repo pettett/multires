@@ -5,9 +5,7 @@ use std::collections::BTreeSet;
 use crate::mesh::group_info::GroupInfo;
 
 use super::winged_mesh::WingedMesh;
-use common::graph::{
-    assert_graph_contiguous, filter_nodes_by_weight, graph_contiguous, petgraph_to_svg,
-};
+use common::graph::{assert_graph_contiguous, petgraph_to_svg};
 use glam::Vec4Swizzles;
 
 impl WingedMesh {
@@ -119,7 +117,7 @@ impl WingedMesh {
         self.clusters = vec![
             common::ClusterInfo {
                 child_group_index: None,
-                group_index: usize::MAX, 
+                group_index: usize::MAX,
                 tight_bound: Default::default(),
                 num_colours: 0,
             };
@@ -168,12 +166,12 @@ impl WingedMesh {
             if group_count != 1 {
                 for (part, &group) in cluster_partitioning.node_weights().enumerate() {
                     // Offset for previous groups, to ensure references such as child group
-                    // are correct across groupings 
+                    // are correct across groupings
                     self.clusters[part].group_index = group as usize;
                 }
             } else {
                 for p in &mut self.clusters {
-                    p.group_index = 0; 
+                    p.group_index = 0;
                 }
             };
 
@@ -191,7 +189,7 @@ impl WingedMesh {
                 tris: 0,
                 monotonic_bound: Default::default(),
                 clusters: Vec::new(),
-                group_neighbours: BTreeSet::new(),
+                //group_neighbours: BTreeSet::new(),
             };
             group_count
         ];
@@ -200,11 +198,11 @@ impl WingedMesh {
         for (part, info) in self.clusters.iter().enumerate() {
             new_groups[info.group_index].clusters.push(part);
 
-            for n in cluster_graph.neighbors(petgraph::graph::node_index(part)) {
-                new_groups[info.group_index]
-                    .group_neighbours
-                    .insert(self.clusters[n.index()].group_index);
-            }
+            // for n in cluster_graph.neighbors(petgraph::graph::node_index(part)) {
+            //     new_groups[info.group_index]
+            //         .group_neighbours
+            //         .insert(self.clusters[n.index()].group_index);
+            // }
         }
 
         // MONOTONIC BOUND ------ get sums of positions
@@ -251,7 +249,7 @@ impl WingedMesh {
             }
         }
 
-        self.groups = new_groups; 
+        self.groups = new_groups;
 
         //#[cfg(test)]
         //{
@@ -350,7 +348,7 @@ impl WingedMesh {
 
                 new_partitions.push(common::ClusterInfo {
                     child_group_index,
-                    group_index: usize::MAX, 
+                    group_index: usize::MAX,
                     tight_bound: Default::default(), //TODO:
                     num_colours: 0,
                 })
@@ -437,7 +435,7 @@ pub mod tests {
 
     use crate::{
         mesh::winged_mesh::{
-            test::{TEST_MESH_DRAGON, TEST_MESH_HIGH, TEST_MESH_LOW},
+            test::{TEST_MESH_DRAGON, TEST_MESH_LOW},
             MeshError,
         },
         STARTING_CLUSTER_SIZE,
@@ -452,7 +450,7 @@ pub mod tests {
             ..Default::default()
         }
         .into();
-        let (mut mesh, verts, norms) = WingedMesh::from_gltf(TEST_MESH_DRAGON);
+        let (mut mesh, verts, _norms) = WingedMesh::from_gltf(TEST_MESH_DRAGON);
 
         println!("{:?}", mesh.partition_contiguous());
 
@@ -476,7 +474,7 @@ pub mod tests {
             ..Default::default()
         }
         .into();
-        let (mut mesh, verts, norms) = WingedMesh::from_gltf(TEST_MESH_LOW);
+        let (mut mesh, verts, _norms) = WingedMesh::from_gltf(TEST_MESH_LOW);
 
         mesh.partition_full_mesh(
             test_config,
@@ -508,20 +506,20 @@ pub mod tests {
                 );
             }
 
-            for &g in &groups {
-                for &g2 in &groups {
-                    if g != g2 {
-                        if !mesh.groups[g].group_neighbours.contains(&g2) {
-                            println!("{:?}", mesh.groups[g].group_neighbours);
-                            println!("{:?}", mesh.groups[g2].group_neighbours);
-                            println!("{:?}", groups);
+            // for &g in &groups {
+            //     for &g2 in &groups {
+            //         if g != g2 {
+            //             if !mesh.groups[g].group_neighbours.contains(&g2) {
+            //                 println!("{:?}", mesh.groups[g].group_neighbours);
+            //                 println!("{:?}", mesh.groups[g2].group_neighbours);
+            //                 println!("{:?}", groups);
 
-                            Err(MeshError::InvalidNeighbours(g, g2))
-                                .context(MeshError::InvalidGroup(g))?;
-                        }
-                    }
-                }
-            }
+            //                 Err(MeshError::InvalidNeighbours(g, g2))
+            //                     .context(MeshError::InvalidGroup(g))?;
+            //             }
+            //         }
+            //     }
+            // }
         }
 
         Ok(())

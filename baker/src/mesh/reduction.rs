@@ -1,19 +1,18 @@
-use std::{cmp, ops};
+use std::cmp;
 
-use glam::vec4;
 #[cfg(feature = "progress")]
 use indicatif::ProgressStyle;
 
+use parking_lot::Mutex;
 use rayon::prelude::*;
 
+use crate::mesh::graph::colour_graph;
+
 use super::{
-    edge::EdgeID,
-    quadric::Quadric,
-    quadric_error::QuadricError,
-    vertex::VertID,
-    winged_mesh::{MeshError, WingedMesh},
+    edge::EdgeID, face::FaceID, quadric::Quadric, quadric_error::QuadricError, vertex::VertID,
+    winged_mesh::WingedMesh,
 };
-use anyhow::{Context, Result};
+use anyhow::Result;
 
 /// Similar to `Quadric`, this data is for internal use only.
 #[derive(Clone)]
@@ -44,49 +43,37 @@ impl WingedMesh {
         quadrics
     }
 
-    /// Generate a vector of priority queues for the mesh, based on errors calculated in `edge_collapse_error`.
-    ///
-    /// `queue_lookup` -  Function to index a face into the queue it should have its error placed into. Must output `0..=queue_count`.
-    pub fn initialise_collapse_queues(
+    fn group_faces(&self) -> Vec<Vec<FaceID>> {
+        let mut groups = vec![Vec::new(); self.groups.len()];
+
+        for (fid, face) in self.iter_faces() {
+            groups[self.clusters[face.cluster_idx].group_index].push(fid);
+        }
+        groups
+    }
+
+    fn initialise_collapse_queue(
         &self,
         verts: &[glam::Vec4],
         quadrics: &[Quadric],
-        queue_count: usize,
-    ) -> Vec<CollapseQueue> {
-        println!("Generating Collapse Queues...");
-        let mut pq = Vec::with_capacity(queue_count);
+        faces: &[FaceID],
+    ) -> CollapseQueue {
+        let mut queue = priority_queue::PriorityQueue::with_capacity(faces.len() * 3);
 
-        #[cfg(feature = "progress")]
-        let bar = indicatif::ProgressBar::new(self.edge_count() as _);
+        for &fid in faces {
+            let face = self.get_face(fid);
+            for eid in [
+                face.edge,
+                self.get_edge(face.edge).edge_left_cw,
+                self.get_edge(face.edge).edge_left_ccw,
+            ] {
+                let error = eid.edge_collapse_error(&self, verts, &quadrics).unwrap();
 
-        let queue_t = priority_queue::PriorityQueue::with_capacity(self.edge_count() / queue_count);
-        for _ in 0..queue_count {
-            pq.push(CollapseQueue {
-                queue: queue_t.clone(),
-            });
-
-            #[cfg(feature = "progress")]
-            bar.inc(1);
+                queue.push(eid, error);
+            }
         }
-        #[cfg(feature = "progress")]
-        bar.finish();
-        #[cfg(feature = "progress")]
-        let bar = indicatif::ProgressBar::new(self.edge_count() as _);
 
-        for (eid, edge) in self.iter_edges() {
-            let error = eid.edge_collapse_error(&self, verts, &quadrics).unwrap();
-
-            pq[self.clusters[self.get_face(edge.face).cluster_idx].group_index]
-                .queue
-                .push(eid, error);
-
-            #[cfg(feature = "progress")]
-            bar.inc(1);
-        }
-        #[cfg(feature = "progress")]
-        bar.finish();
-
-        pq
+        CollapseQueue { queue }
     }
 
     /// Returns estimate of error introduced by halving the number of triangles
@@ -96,10 +83,20 @@ impl WingedMesh {
         quadrics: &mut [Quadric],
         collapse_requirements: &[usize],
     ) -> Result<f64> {
-        let mut collapse_queues =
-            self.initialise_collapse_queues(verts, quadrics, collapse_requirements.len());
+        assert_eq!(
+            self.groups.len(),
+            collapse_requirements.len(),
+            "must have one required collapse count per group"
+        );
 
-        assert_eq!(collapse_queues.len(), collapse_requirements.len());
+        let grouped_faces = self.group_faces();
+        let group_effects = self.generate_group_effect_graph();
+        let colours = colour_graph(&group_effects);
+
+        //let mut collapse_queues =
+        //    self.initialise_collapse_queues(verts, quadrics, collapse_requirements.len());
+
+        //assert_eq!(collapse_queues.len(), collapse_requirements.len());
         assert_eq!(verts.len(), quadrics.len());
 
         // Priority queue with every vertex and their errors.
@@ -110,33 +107,50 @@ impl WingedMesh {
         // // Need to remove half the triangles - each reduction removes 2
         // let required_reductions = (tris / 4);
         #[cfg(feature = "progress")]
-        let bar = indicatif::ProgressBar::new(collapse_queues.len() as _);
+        let bar = indicatif::ProgressBar::new(grouped_faces.len() as _);
         #[cfg(feature = "progress")]
         bar.set_style(ProgressStyle::with_template("{wide_bar} {pos}/{len} ({per_sec})").unwrap());
 
-        for (qi, &requirement) in collapse_requirements.iter().enumerate() {
-            //#[cfg(test)]
-            //{
-            //    //self.assert_valid();
-            //    for (&q, _e) in collapse_queues[qi].queue.iter() {
-            //        assert!(
-            //            self.try_get_edge(q).is_ok(),
-            //            "Invalid edge in collapse queue {}",
-            //            qi
-            //        );
-            //        self.assert_edge_valid(q)
-            //            .context("Invalid edge in collapse queue: ")
-            //            .unwrap();
-            //    }
-            //}
+        let mut collapses = Vec::new();
 
-            //#[cfg(feature = "progress")]
-            //bar.set_message(format!("{err:.3e}"));
+        for colour_group in colours {
+            // Calculate collapsing queues in parallel for this batch
 
-            'outer: for i in 0..requirement {
-                let (orig, dest, eid, err) = loop {
-                    let (_, QuadricError(cmp::Reverse(err), eid)) =
-                        match collapse_queues[qi].queue.pop() {
+            colour_group
+                .par_iter()
+                .map(|&group_index| {
+                    self.initialise_collapse_queue(verts, quadrics, &grouped_faces[group_index])
+                })
+                .collect_into_vec(&mut collapses);
+
+            for (collapses, group_index) in collapses.iter_mut().zip(colour_group.into_iter()) {
+                let requirement = collapse_requirements[group_index];
+
+                //#[cfg(test)]
+                //{
+                //    //self.assert_valid();
+                //    for (&q, _e) in collapse_queues[qi].queue.iter() {
+                //        assert!(
+                //            self.try_get_edge(q).is_ok(),
+                //            "Invalid edge in collapse queue {}",
+                //            qi
+                //        );
+                //        self.assert_edge_valid(q)
+                //            .context("Invalid edge in collapse queue: ")
+                //            .unwrap();
+                //    }
+                //}
+
+                //#[cfg(feature = "progress")]
+                //bar.set_message(format!("{err:.3e}"));
+
+                //let mut collapses =
+                //    self.initialise_collapse_queue(verts, quadrics, &grouped_faces[group_index]);
+
+                'outer: for i in 0..requirement {
+                    let (orig, dest, eid, err) = loop {
+                        let (_, QuadricError(cmp::Reverse(err), eid)) = match collapses.queue.pop()
+                        {
                             Some(err) => err,
                             None => {
                                 // FIXME: how to handle early exits
@@ -149,66 +163,69 @@ impl WingedMesh {
                             }
                         };
 
-                    let Ok((orig, dest)) = eid.src_dst(&self) else {
-                        // Invalid edges are allowed to show up in the search
-                        continue;
+                        let Ok((orig, dest)) = eid.src_dst(&self) else {
+                            // Invalid edges are allowed to show up in the search
+                            continue;
+                        };
+
+                        // TODO: We check these here, as many operations can influence if an edge can be collapsed due to these factors,
+                        //		 but really an edge collapse should update errors of more edges in the region around it.
+                        // 		 - However is is slightly faster to manage this here
+
+                        if !eid.can_collapse_edge(self, verts).unwrap() {
+                            continue;
+                        }
+
+                        break (orig, dest, eid, err);
                     };
 
-                    // TODO: We check these here, as many operations can influence if an edge can be collapsed due to these factors,
-                    //		 but really an edge collapse should update errors of more edges in the region around it.
-                    // 		 - However is is slightly faster to manage this here
+                    new_error += err;
 
-                    if !eid.can_collapse_edge(self, verts).unwrap() {
-                        continue;
+                    // Collapse edge, and update quadrics (update before collapsing, as vertex becomes invalid)
+
+                    //#[cfg(test)]
+                    //{
+                    //    assert!(orig.is_group_embedded(&self));
+                    //}
+
+                    quadrics[dest.0].0 += quadrics[orig.0].0;
+
+                    #[allow(unreachable_patterns)]
+                    match self.collapse_edge(eid) {
+                        Ok(()) => (),
+                        #[cfg(test)]
+                        e => e.unwrap(),
+                        Err(e) => {
+                            println!("{e} - Exiting early from de-meshing");
+                            break 'outer;
+                        }
                     }
 
-                    break (orig, dest, eid, err);
-                };
+                    // All the edges from src are now in dest, so we only need to check those
+                    let effected_edges = self
+                        .get_vert(dest)
+                        .outgoing_edges()
+                        .iter()
+                        .chain(self.get_vert(dest).incoming_edges());
 
-                new_error += err;
+                    // Update priority queue with new errors
+                    for &eid in effected_edges {
+                        if let Ok(edge) = self.try_get_edge(eid) {
+                            if self.clusters[self.get_face(edge.face).cluster_idx].group_index
+                                == group_index
+                            {
+                                let error =
+                                    eid.edge_collapse_error(&self, verts, &quadrics).unwrap();
 
-                // Collapse edge, and update quadrics (update before collapsing, as vertex becomes invalid)
-
-                //#[cfg(test)]
-                //{
-                //    assert!(orig.is_group_embedded(&self));
-                //}
-
-                quadrics[dest.0].0 += quadrics[orig.0].0;
-
-                #[allow(unreachable_patterns)]
-                match self.collapse_edge(eid) {
-                    Ok(()) => (),
-                    #[cfg(test)]
-                    e => e.unwrap(),
-                    Err(e) => {
-                        println!("{e} - Exiting early from de-meshing");
-                        break 'outer;
-                    }
-                }
-
-                // All the edges from src are now in dest, so we only need to check those
-                let effected_edges = self
-                    .get_vert(dest)
-                    .outgoing_edges()
-                    .iter()
-                    .chain(self.get_vert(dest).incoming_edges());
-
-                // Update priority queue with new errors
-                for &eid in effected_edges {
-                    if let Ok(edge) = self.try_get_edge(eid) {
-                        let edge_queue =
-                            self.clusters[self.get_face(edge.face).cluster_idx].group_index;
-
-                        let error = eid.edge_collapse_error(&self, verts, &quadrics).unwrap();
-
-                        collapse_queues[edge_queue].queue.push(eid, error);
+                                collapses.queue.push(eid, error);
+                            }
+                        }
                     }
                 }
+
+                #[cfg(feature = "progress")]
+                bar.inc(1);
             }
-
-            #[cfg(feature = "progress")]
-            bar.inc(1);
         }
 
         #[cfg(feature = "progress")]
@@ -222,7 +239,10 @@ impl WingedMesh {
 mod tests {
     use std::error::Error;
 
-    use crate::mesh::{plane::Plane, winged_mesh::test::TEST_MESH_MONK};
+    use crate::mesh::{
+        plane::Plane,
+        winged_mesh::test::{TEST_MESH_MID, TEST_MESH_MONK},
+    };
 
     use super::super::winged_mesh::{test::TEST_MESH_HIGH, WingedMesh};
 
@@ -233,7 +253,7 @@ mod tests {
     // Test that each face generates a valid plane
     #[test]
     pub fn test_planes() -> Result<(), Box<dyn Error>> {
-        let (mesh, verts, norms) = WingedMesh::from_gltf(TEST_MESH_HIGH);
+        let (mesh, verts, _norms) = WingedMesh::from_gltf(TEST_MESH_HIGH);
 
         // These operations are not especially accurate, large epsilon value
         let e = 0.000001;
@@ -261,7 +281,7 @@ mod tests {
     // Test that each face/plane generates an equivalent quadric matrix
     #[test]
     pub fn test_plane_quadrics() -> Result<(), Box<dyn Error>> {
-        let (mesh, verts, norms) = WingedMesh::from_gltf(TEST_MESH_HIGH);
+        let (mesh, verts, _norms) = WingedMesh::from_gltf(TEST_MESH_HIGH);
 
         // These operations are not especially accurate, large epsilon value, only valid for errors within around 50 units.
         let e = 0.001;
@@ -310,7 +330,7 @@ mod tests {
     // Test that each vertex generates a valid quadric matrix that returns 0 at itself.
     #[test]
     pub fn test_vert_quadrics() -> Result<(), Box<dyn Error>> {
-        let (mesh, verts, norms) = WingedMesh::from_gltf(TEST_MESH_MONK);
+        let (mesh, verts, _norms) = WingedMesh::from_gltf(TEST_MESH_MONK);
 
         let e = 0.0000000001;
 
@@ -339,7 +359,7 @@ mod tests {
 
     #[test]
     pub fn test_reduction() -> Result<(), Box<dyn Error>> {
-        let (mut mesh, verts, norms) = WingedMesh::from_gltf(TEST_MESH_MONK);
+        let (mut mesh, verts, _norms) = WingedMesh::from_gltf(TEST_MESH_MONK);
         let mut quadrics = mesh.create_quadrics(&verts);
 
         for _i in 0..4 {
@@ -349,6 +369,54 @@ mod tests {
         }
 
         mesh.assert_valid().unwrap();
+
+        Ok(())
+    }
+
+    #[test]
+    pub fn test_reduction_parallel() -> Result<(), Box<dyn Error>> {
+        let test_config = &metis::PartitioningConfig {
+            method: metis::PartitioningMethod::MultilevelKWay,
+            force_contiguous_partitions: Some(true),
+            minimize_subgraph_degree: Some(true),
+            ..Default::default()
+        };
+
+        let (mut mesh, verts, _norms) = WingedMesh::from_gltf(TEST_MESH_MID);
+        mesh.partition_full_mesh(test_config, 300).unwrap();
+        mesh.group(test_config, &verts).unwrap();
+
+        let mut par_mesh = mesh.clone();
+        let sync_mesh = &mut mesh;
+        {
+            let mut quadrics = sync_mesh.create_quadrics(&verts);
+            for _i in 0..2 {
+                let collapse_requirements: Vec<usize> =
+                    sync_mesh.groups.iter().map(|g| g.tris / 4).collect();
+                sync_mesh
+                    .reduce_within_groups(&verts, &mut quadrics, &collapse_requirements)
+                    .unwrap();
+            }
+
+            sync_mesh.assert_valid().unwrap();
+        }
+
+        // {
+        //     let mut quadrics = par_mesh.create_quadrics(&verts);
+        //     for _i in 0..2 {
+        //         let collapse_requirements: Vec<usize> =
+        //             par_mesh.groups.iter().map(|g| g.tris / 4).collect();
+        //         par_mesh
+        //             .par_reduce_within_groups(&verts, &mut quadrics, &collapse_requirements)
+        //             .unwrap();
+        //     }
+        // }
+
+        par_mesh.assert_valid().unwrap();
+
+        if *sync_mesh != par_mesh {
+            panic!("Inconsistency or nondeterminism for parallel reduction is not allowed")
+        }
 
         Ok(())
     }
