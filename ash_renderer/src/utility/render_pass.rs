@@ -2,9 +2,9 @@ use std::{ptr, sync::Arc};
 
 use ash::vk;
 
-use crate::{App, VkHandle};
+use crate::{VkHandle};
 
-use super::{device::Device, macros::vk_device_owned_wrapper, physical_device::PhysicalDevice};
+use super::{device::Device, macros::vk_device_owned_wrapper};
 
 vk_device_owned_wrapper!(RenderPass, destroy_render_pass);
 

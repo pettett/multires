@@ -1,4 +1,3 @@
-use std::thread;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -16,15 +15,19 @@ pub struct FPSMeasure {
     delta_time_nanos: RollingMeasure<u32, 15>,
     fps_measure: RollingMeasure<f32, 60>,
 }
-
-impl FPSMeasure {
-    pub fn new() -> FPSMeasure {
+impl Default for FPSMeasure {
+    fn default() -> Self {
         FPSMeasure {
             delta_time_counter: Instant::now(),
             fps_measure_counter: Instant::now(),
             delta_time_nanos: RollingMeasure::default(),
             fps_measure: RollingMeasure::default(),
         }
+    }
+}
+impl FPSMeasure {
+    pub fn new() -> FPSMeasure {
+        FPSMeasure::default()
     }
 
     /// Call this function in game loop to update its inner status.

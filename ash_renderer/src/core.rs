@@ -6,7 +6,7 @@ use crate::{
         constants::*,
         debug::*,
         instance::Instance,
-        pooled::{command_pool::CommandPool, query_pool::QueryPool},
+        pooled::{command_pool::CommandPool},
         structures::*,
     },
     VkHandle, TASK_GROUP_SIZE, WINDOW_TITLE,

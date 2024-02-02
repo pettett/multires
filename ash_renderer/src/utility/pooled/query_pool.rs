@@ -5,7 +5,7 @@ use ash::vk;
 use crate::{
     utility::{
         device::Device,
-        macros::{vk_handle_wrapper, vk_handle_wrapper_g},
+        macros::{vk_handle_wrapper_g},
     },
     VkHandle,
 };

@@ -1,15 +1,12 @@
-use std::{
-    cell::RefCell,
-    sync::{Arc, Mutex},
-};
+use std::sync::{Arc, Mutex};
 
 use ash::vk;
-use bevy_ecs::system::Resource;
-use gpu_allocator::vulkan::{Allocator, AllocatorVisualizer};
+
+use gpu_allocator::vulkan::Allocator;
 use raw_window_handle::HasRawDisplayHandle;
 
 use crate::{
-    utility::{pooled::command_pool::CommandPool, device::Device, swapchain::Swapchain},
+    utility::{device::Device, pooled::command_pool::CommandPool, swapchain::Swapchain},
     QueueFamilyIndices,
 };
 
@@ -62,7 +59,7 @@ impl Gui {
         image_index: usize,
         draw_windows: impl FnOnce(&egui::Context),
     ) -> vk::CommandBuffer {
-        let cmd = self.ui_command_buffers[image_index as usize];
+        let cmd = self.ui_command_buffers[image_index];
 
         let command_buffer_begin_info = vk::CommandBufferBeginInfo::builder();
 
@@ -81,12 +78,8 @@ impl Gui {
         let output = self.integration.end_frame(&self.window);
 
         let clipped_meshes = self.integration.context().tessellate(output.shapes);
-        self.integration.paint(
-            cmd,
-            image_index as usize,
-            clipped_meshes,
-            output.textures_delta,
-        );
+        self.integration
+            .paint(cmd, image_index, clipped_meshes, output.textures_delta);
 
         unsafe {
             self.device

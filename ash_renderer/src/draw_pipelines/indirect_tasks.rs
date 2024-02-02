@@ -6,7 +6,7 @@ use std::{
 };
 
 use ash::vk::{self};
-use bevy_ecs::{system::Query, world::World};
+use bevy_ecs::system::Query;
 use common::MeshVert;
 use common_renderer::components::transform::Transform;
 use gpu_allocator::vulkan::Allocator;
@@ -17,7 +17,7 @@ use crate::{
     core::Core,
     screen::Screen,
     utility::{
-        buffer::{AsBuffer, Buffer, TBuffer},
+        buffer::{AsBuffer, TBuffer},
         device::Device,
         pooled::command_pool::CommandPool,
         pooled::{
@@ -29,7 +29,7 @@ use crate::{
         render_pass::RenderPass,
         {GraphicsPipeline, ShaderModule},
     },
-    ModelUniformBufferObject, VkHandle, TASK_GROUP_SIZE,
+    ModelUniformBufferObject, VkHandle,
 };
 
 use super::{
@@ -78,7 +78,7 @@ impl IndirectTasks {
         descriptor_pool: Arc<DescriptorPool>,
         uniform_transform_buffer: Arc<TBuffer<ModelUniformBufferObject>>,
         uniform_camera_buffers: &[Arc<impl AsBuffer>],
-        cluster_count: u32,
+        _cluster_count: u32,
         query: bool,
     ) -> Self {
         let ubo_layout = create_descriptor_set_layout(core.device.clone());
@@ -91,7 +91,7 @@ impl IndirectTasks {
         );
         let mut task_indirect_data = Vec::new();
 
-        for e in transforms.iter() {
+        for _e in transforms.iter() {
             task_indirect_data.push(DrawMeshTasksIndirect {
                 group_count_x: 8,
                 group_count_y: 1,
@@ -103,7 +103,6 @@ impl IndirectTasks {
         let indirect_task_buffer = TBuffer::new_filled(
             &core,
             allocator.clone(),
-            &core.command_pool,
             graphics_queue,
             vk::BufferUsageFlags::INDIRECT_BUFFER | vk::BufferUsageFlags::STORAGE_BUFFER,
             &task_indirect_data,
@@ -201,7 +200,7 @@ impl ScreenData {
         core_draw: &IndirectTasks,
         core: &Core,
         screen: &Screen,
-        submesh_count: u32,
+        _submesh_count: u32,
         instance_count: u32,
         render_pass: &RenderPass,
         indirect_task_buffer: &TBuffer<DrawMeshTasksIndirect>,

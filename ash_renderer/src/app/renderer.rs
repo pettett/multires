@@ -74,7 +74,7 @@ impl Renderer {
         );
 
         // Egui Integration
-        self.gui.update_swapchain(&self.screen.swapchain());
+        self.gui.update_swapchain(self.screen.swapchain());
     }
 
     pub fn resize_framebuffer(&mut self) {

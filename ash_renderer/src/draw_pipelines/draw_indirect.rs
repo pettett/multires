@@ -1,13 +1,12 @@
 use std::{
     ffi::CString,
-    ptr,
     sync::{Arc, Mutex},
 };
 
 use ash::vk::{self};
-use bevy_ecs::world::World;
+
 use common::MeshVert;
-use common_renderer::components::transform::Transform;
+
 use gpu_allocator::vulkan::Allocator;
 
 use crate::{
@@ -15,17 +14,17 @@ use crate::{
     core::Core,
     screen::Screen,
     utility::{
-        buffer::{AsBuffer, Buffer, TBuffer},
+        buffer::{AsBuffer, TBuffer},
         device::Device,
         pooled::command_pool::CommandPool,
         pooled::descriptor_pool::{
             DescriptorPool, DescriptorSet, DescriptorSetLayout, DescriptorWriteData,
         },
         render_pass::RenderPass,
-        {ComputePipeline, GraphicsPipeline, ShaderModule},
+        {GraphicsPipeline, ShaderModule},
     },
     vertex::Vertex,
-    ModelUniformBufferObject, VkHandle, TASK_GROUP_SIZE,
+    ModelUniformBufferObject, VkHandle,
 };
 
 use super::{
@@ -72,7 +71,6 @@ impl DrawIndirect {
         let should_cull_buffer = TBuffer::new_filled(
             &core,
             allocator.clone(),
-            &core.command_pool,
             graphics_queue,
             vk::BufferUsageFlags::STORAGE_BUFFER,
             &vec![0; cluster_count as _],
@@ -94,7 +92,6 @@ impl DrawIndirect {
         let draw_indexed_indirect_buffer = TBuffer::new_filled(
             &core,
             allocator.clone(),
-            &core.command_pool,
             graphics_queue,
             vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::INDIRECT_BUFFER,
             &draw_indexed_commands,
@@ -153,7 +150,7 @@ impl DrawPipeline for DrawIndirect {
         ));
     }
 
-    fn stats_gui(&mut self, ui: &mut egui::Ui, image_index: usize) {}
+    fn stats_gui(&mut self, _ui: &mut egui::Ui, _image_index: usize) {}
 }
 
 struct ScreenData {
@@ -167,8 +164,8 @@ impl ScreenData {
         core_draw: &DrawIndirect,
         core: &Core,
         screen: &Screen,
-        submesh_count: u32,
-        instance_count: u32,
+        _submesh_count: u32,
+        _instance_count: u32,
         render_pass: &RenderPass,
     ) -> Self {
         let device = core.device.clone();

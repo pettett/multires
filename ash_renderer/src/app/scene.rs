@@ -84,7 +84,6 @@ pub fn process_scene_events(
                 scene.uniform_transform_buffer = TBuffer::new_filled(
                     &renderer.core,
                     renderer.allocator.clone(),
-                    &renderer.core.command_pool,
                     renderer.graphics_queue,
                     vk::BufferUsageFlags::STORAGE_BUFFER,
                     &uniform_transforms,

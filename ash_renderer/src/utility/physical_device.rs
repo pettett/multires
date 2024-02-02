@@ -57,7 +57,7 @@ impl PhysicalRelevantFeatureSupport {
     }
 
     pub fn init() -> Box<Self> {
-        let mut relevant_features = Box::new(PhysicalRelevantFeatureSupport::default());
+        let mut relevant_features = Box::<PhysicalRelevantFeatureSupport>::default();
 
         // Get support info on all the features we want
         relevant_features.device = vk::PhysicalDeviceFeatures2::builder()
@@ -71,9 +71,9 @@ impl PhysicalRelevantFeatureSupport {
     }
 }
 
-impl Into<DeviceFeatureSet> for PhysicalRelevantFeatureSupport {
-    fn into(self) -> DeviceFeatureSet {
-        self.feature_set()
+impl From<PhysicalRelevantFeatureSupport> for DeviceFeatureSet {
+    fn from(val: PhysicalRelevantFeatureSupport) -> Self {
+        val.feature_set()
     }
 }
 

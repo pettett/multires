@@ -17,7 +17,6 @@ use crate::{core::Core, VkHandle};
 use super::{
     buffer::{AsBuffer, Buffer, STAGING_BUFFER},
     device::Device,
-    instance::Instance,
     macros::vk_handle_wrapper,
     pooled::command_pool::CommandPool,
 };
@@ -137,7 +136,7 @@ impl Image {
         allocator: Arc<Mutex<Allocator>>,
         command_pool: &Arc<CommandPool>,
         submit_queue: vk::Queue,
-        image_path: &Path,
+        _image_path: &Path,
         name: &str,
     ) -> Self {
         // let mut image_object = image::open(image_path).unwrap(); // this function is slow in debug mode.
@@ -159,7 +158,7 @@ impl Image {
         let image_size =
             (::std::mem::size_of::<u8>() as u32 * image_width * image_height * 4) as vk::DeviceSize;
 
-        if image_size <= 0 {
+        if image_size == 0 {
             panic!("Failed to load texture image!")
         }
 
@@ -384,10 +383,6 @@ impl Image {
         let command_buffer = command_pool.begin_single_time_command(submit_queue);
 
         let mut image_barrier = vk::ImageMemoryBarrier {
-            s_type: vk::StructureType::IMAGE_MEMORY_BARRIER,
-            p_next: ptr::null(),
-            src_access_mask: vk::AccessFlags::empty(),
-            dst_access_mask: vk::AccessFlags::empty(),
             old_layout: vk::ImageLayout::UNDEFINED,
             new_layout: vk::ImageLayout::UNDEFINED,
             src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
@@ -400,6 +395,7 @@ impl Image {
                 base_array_layer: 0,
                 layer_count: 1,
             },
+            ..vk::ImageMemoryBarrier::default()
         };
 
         let mut mip_width = tex_width as i32;
@@ -420,7 +416,7 @@ impl Image {
                     vk::DependencyFlags::empty(),
                     &[],
                     &[],
-                    &[image_barrier.clone()],
+                    &[image_barrier],
                 );
             }
 
@@ -480,7 +476,7 @@ impl Image {
                     vk::DependencyFlags::empty(),
                     &[],
                     &[],
-                    &[image_barrier.clone()],
+                    &[image_barrier],
                 );
             }
 
@@ -502,7 +498,7 @@ impl Image {
                 vk::DependencyFlags::empty(),
                 &[],
                 &[],
-                &[image_barrier.clone()],
+                &[image_barrier],
             );
         }
     }
@@ -518,7 +514,7 @@ impl Image {
     pub fn create_image_views(
         device: &Device,
         surface_format: vk::Format,
-        images: &Vec<vk::Image>,
+        images: &[vk::Image],
     ) -> Vec<vk::ImageView> {
         let swapchain_imageviews: Vec<vk::ImageView> = images
             .iter()

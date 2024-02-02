@@ -1,22 +1,18 @@
 use std::{
-    ffi,
     marker::PhantomData,
     mem, ptr,
     sync::{Arc, Mutex},
 };
 
-use ash::vk::{self, BufferUsageFlags, Handle};
+use ash::vk::{self, BufferUsageFlags};
 use gpu_allocator::{
-    vulkan::{self, Allocation, AllocationCreateDesc, AllocationScheme, Allocator},
+    vulkan::{Allocation, AllocationCreateDesc, AllocationScheme, Allocator},
     MemoryLocation,
 };
 
 use crate::{core::Core, VkHandle};
 
-use super::{
-    device::Device, macros::vk_handle_wrapper, pooled::command_pool::CommandPool,
-    pooled::descriptor_pool::DescriptorSet,
-};
+use super::{device::Device, macros::vk_handle_wrapper, pooled::command_pool::CommandPool};
 
 pub const STAGING_BUFFER: &str = "Staging Buffer";
 
@@ -101,7 +97,7 @@ impl<T> TBuffer<T> {
     pub fn new_per_swapchain(
         core: &Core,
         allocator: Arc<Mutex<Allocator>>,
-        location: MemoryLocation,
+        _location: MemoryLocation,
         swapchain_image_count: usize,
         name: &str,
     ) -> Vec<Arc<Self>> {
@@ -170,22 +166,13 @@ impl<T> TBuffer<T> {
     pub fn new_filled(
         core: &Core,
         allocator: Arc<Mutex<Allocator>>,
-        command_pool: &Arc<CommandPool>,
         submit_queue: vk::Queue,
         usage: vk::BufferUsageFlags,
         data: &[T],
         name: &str,
     ) -> Arc<Self> {
         Arc::new(Self {
-            buffer: Buffer::new_filled(
-                core,
-                allocator.clone(),
-                command_pool,
-                submit_queue,
-                usage,
-                data,
-                name,
-            ),
+            buffer: Buffer::new_filled(core, allocator.clone(), submit_queue, usage, data, name),
             _p: PhantomData,
         })
     }
@@ -302,7 +289,6 @@ impl Buffer {
     pub fn new_storage_filled<T: bytemuck::Pod>(
         core: &Core,
         allocator: Arc<Mutex<Allocator>>,
-        command_pool: &Arc<CommandPool>,
         submit_queue: vk::Queue,
         data: &[T],
         name: &str,
@@ -310,7 +296,6 @@ impl Buffer {
         Self::new_filled(
             core,
             allocator,
-            command_pool,
             submit_queue,
             vk::BufferUsageFlags::STORAGE_BUFFER,
             data,
@@ -322,7 +307,6 @@ impl Buffer {
     pub fn new_filled<T>(
         core: &Core,
         allocator: Arc<Mutex<Allocator>>,
-        command_pool: &Arc<CommandPool>,
         submit_queue: vk::Queue,
         usage: vk::BufferUsageFlags,
         data: &[T],
@@ -358,7 +342,7 @@ impl Buffer {
             name,
         );
 
-        staging_buffer.copy_to_other(submit_queue, command_pool, &buffer, buffer_size);
+        staging_buffer.copy_to_other(submit_queue, &core.command_pool, &buffer, buffer_size);
 
         // println!("Created buffer, size: {}", buffer_size);
 

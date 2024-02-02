@@ -1,17 +1,12 @@
-use std::{ptr, sync::Arc};
+use std::sync::Arc;
 
 use ash::vk::{self};
 
 use crate::VkHandle;
 
 use super::{
-    device::Device,
-    image::Image,
-    instance::Instance,
-    macros::{vk_device_drop, vk_handle_wrapper},
-    physical_device::PhysicalDevice,
-    structures::QueueFamilyIndices,
-    surface::Surface,
+    device::Device, macros::vk_handle_wrapper, physical_device::PhysicalDevice,
+    structures::QueueFamilyIndices, surface::Surface,
 };
 pub struct SwapChainSupportDetail {
     pub capabilities: vk::SurfaceCapabilitiesKHR,
@@ -50,11 +45,11 @@ impl SwapChainSupportDetail {
             if available_format.format == vk::Format::B8G8R8A8_SRGB
                 && available_format.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR
             {
-                return available_format.clone();
+                return *available_format;
             }
         }
 
-        return self.formats.first().unwrap().clone();
+        return *self.formats.first().unwrap();
     }
 }
 
@@ -163,9 +158,9 @@ impl Swapchain {
     }
 
     fn choose_swapchain_present_mode(
-        available_present_modes: &Vec<vk::PresentModeKHR>,
+        available_present_modes: &[vk::PresentModeKHR],
     ) -> vk::PresentModeKHR {
-        for &available_present_mode in available_present_modes.iter() {
+        for &available_present_mode in available_present_modes {
             if available_present_mode == vk::PresentModeKHR::MAILBOX {
                 return available_present_mode;
             }
@@ -191,12 +186,12 @@ impl Swapchain {
 
             vk::Extent2D {
                 width: clamp(
-                    window_size.width as u32,
+                    window_size.width,
                     capabilities.min_image_extent.width.max(1),
                     capabilities.max_image_extent.width,
                 ),
                 height: clamp(
-                    window_size.height as u32,
+                    window_size.height,
                     capabilities.min_image_extent.height.max(1),
                     capabilities.max_image_extent.height,
                 ),

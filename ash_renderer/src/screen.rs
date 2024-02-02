@@ -43,7 +43,7 @@ impl Screen {
 
     pub fn remake_swapchain(
         &mut self,
-        graphics_queue: vk::Queue,
+        _graphics_queue: vk::Queue,
         render_pass: &RenderPass,
         allocator: Arc<Mutex<Allocator>>,
     ) {
@@ -155,12 +155,10 @@ fn find_supported_format(
         };
         if tiling == vk::ImageTiling::LINEAR
             && format_properties.linear_tiling_features.contains(features)
+            || tiling == vk::ImageTiling::OPTIMAL
+                && format_properties.optimal_tiling_features.contains(features)
         {
-            return format.clone();
-        } else if tiling == vk::ImageTiling::OPTIMAL
-            && format_properties.optimal_tiling_features.contains(features)
-        {
-            return format.clone();
+            return format;
         }
     }
 
@@ -174,7 +172,7 @@ fn has_stencil_component(format: vk::Format) -> bool {
 fn create_framebuffers(
     device: &ash::Device,
     render_pass: vk::RenderPass,
-    image_views: &Vec<vk::ImageView>,
+    image_views: &[vk::ImageView],
     depth_image_view: vk::ImageView,
     swapchain_extent: vk::Extent2D,
 ) -> Vec<vk::Framebuffer> {

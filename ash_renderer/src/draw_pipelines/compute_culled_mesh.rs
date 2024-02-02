@@ -1,13 +1,12 @@
 use std::{
     ffi::CString,
-    ptr,
     sync::{Arc, Mutex},
 };
 
 use ash::vk::{self};
-use bevy_ecs::world::World;
+
 use common::MeshVert;
-use common_renderer::components::transform::Transform;
+
 use gpu_allocator::vulkan::Allocator;
 
 use crate::{
@@ -15,7 +14,7 @@ use crate::{
     core::Core,
     screen::Screen,
     utility::{
-        buffer::{AsBuffer, Buffer, TBuffer},
+        buffer::{AsBuffer, TBuffer},
         device::Device,
         pooled::command_pool::CommandPool,
         pooled::descriptor_pool::{
@@ -24,7 +23,7 @@ use crate::{
         render_pass::RenderPass,
         {ComputePipeline, GraphicsPipeline, ShaderModule},
     },
-    ModelUniformBufferObject, VkHandle, TASK_GROUP_SIZE,
+    ModelUniformBufferObject, VkHandle,
 };
 
 use super::{
@@ -75,7 +74,6 @@ impl ComputeCulledMesh {
         let should_cull_buffer = TBuffer::new_filled(
             &core,
             allocator.clone(),
-            &core.command_pool,
             graphics_queue,
             vk::BufferUsageFlags::STORAGE_BUFFER,
             &vec![1; cluster_count as _],
@@ -87,7 +85,7 @@ impl ComputeCulledMesh {
             &descriptor_pool,
             &ubo_layout,
             &uniform_transform_buffer,
-            &uniform_camera_buffers,
+            uniform_camera_buffers,
             &should_cull_buffer,
             &mesh_data.vertex_buffer,
             &mesh_data.meshlet_buffer,
@@ -130,7 +128,7 @@ impl DrawPipeline for ComputeCulledMesh {
         ));
     }
 
-    fn stats_gui(&mut self, ui: &mut egui::Ui, image_index: usize) {}
+    fn stats_gui(&mut self, _ui: &mut egui::Ui, _image_index: usize) {}
 }
 
 struct ScreenData {

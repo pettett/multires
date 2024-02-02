@@ -44,7 +44,7 @@ pub fn check_validation_layer_support(
         .enumerate_instance_layer_properties()
         .expect("Failed to enumerate Instance Layers Properties");
 
-    if layer_properties.len() <= 0 {
+    if layer_properties.len() == 0 {
         eprintln!("No available layers.");
         return false;
     }
@@ -60,7 +60,7 @@ pub fn check_validation_layer_support(
             }
         }
 
-        if is_layer_found == false {
+        if !is_layer_found {
             return false;
         }
     }
@@ -75,7 +75,7 @@ pub fn setup_debug_utils(
 ) -> (ash::extensions::ext::DebugUtils, vk::DebugUtilsMessengerEXT) {
     let debug_utils_loader = ash::extensions::ext::DebugUtils::new(entry, instance);
 
-    if is_enable_debug == false {
+    if !is_enable_debug {
         (debug_utils_loader, ash::vk::DebugUtilsMessengerEXT::null())
     } else {
         let messenger_ci = populate_debug_messenger_create_info();

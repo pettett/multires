@@ -9,7 +9,7 @@ use gpu_allocator::vulkan::Allocator;
 use crate::{
     core::Core,
     multires::{self, GpuMeshlet},
-    utility::buffer::{Buffer, TBuffer},
+    utility::buffer::TBuffer,
 };
 
 #[derive(Resource)]
@@ -29,7 +29,7 @@ impl MeshDataBuffers {
 
         let (clusters, meshlets) = multires::generate_meshlets(&cluster_order);
 
-        let (indices, partitions, groups) = data.indices_partitions_groups(&cluster_order);
+        let (indices, _partitions, _groups) = data.indices_partitions_groups(&cluster_order);
 
         for (i, submesh) in clusters.into_iter().enumerate() {
             cluster_data[i].meshlet_start = submesh.meshlet_start;
@@ -37,9 +37,8 @@ impl MeshDataBuffers {
         }
 
         let vertex_buffer = TBuffer::new_filled(
-            &core,
+            core,
             allocator.clone(),
-            &core.command_pool,
             graphics_queue,
             vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::VERTEX_BUFFER,
             &data.verts,
@@ -47,9 +46,8 @@ impl MeshDataBuffers {
         );
 
         let meshlet_buffer = TBuffer::new_filled(
-            &core,
+            core,
             allocator.clone(),
-            &core.command_pool,
             graphics_queue,
             vk::BufferUsageFlags::STORAGE_BUFFER,
             &meshlets,
@@ -57,9 +55,8 @@ impl MeshDataBuffers {
         );
 
         let cluster_buffer = TBuffer::new_filled(
-            &core,
+            core,
             allocator.clone(),
-            &core.command_pool,
             graphics_queue,
             vk::BufferUsageFlags::STORAGE_BUFFER,
             &cluster_data,
@@ -67,9 +64,8 @@ impl MeshDataBuffers {
         );
 
         let index_buffer = TBuffer::new_filled(
-            &core,
+            core,
             allocator.clone(),
-            &core.command_pool,
             graphics_queue,
             // Allow index use for testing
             vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::INDEX_BUFFER,

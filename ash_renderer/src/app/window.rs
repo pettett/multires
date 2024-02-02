@@ -23,7 +23,11 @@ pub fn init_window(
 pub struct ProgramProc {
     pub event_loop: EventLoop<()>,
 }
-
+impl Default for ProgramProc {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 impl ProgramProc {
     pub fn new() -> ProgramProc {
         // init window stuff

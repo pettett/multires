@@ -1,13 +1,12 @@
 use std::{
     ffi::CString,
-    ptr,
     sync::{Arc, Mutex},
 };
 
 use ash::vk::{self};
-use bevy_ecs::world::World;
+
 use common::MeshVert;
-use common_renderer::components::transform::Transform;
+
 use gpu_allocator::vulkan::Allocator;
 
 use crate::{
@@ -15,7 +14,7 @@ use crate::{
     core::Core,
     screen::Screen,
     utility::{
-        buffer::{AsBuffer, Buffer, TBuffer},
+        buffer::{AsBuffer, TBuffer},
         device::Device,
         pooled::command_pool::CommandPool,
         pooled::descriptor_pool::{
@@ -25,7 +24,7 @@ use crate::{
         {ComputePipeline, GraphicsPipeline, ShaderModule},
     },
     vertex::Vertex,
-    ModelUniformBufferObject, VkHandle, TASK_GROUP_SIZE,
+    ModelUniformBufferObject, VkHandle,
 };
 
 use super::{
@@ -87,7 +86,6 @@ impl ComputeCulledIndices {
         let should_cull_buffer = TBuffer::new_filled(
             &core,
             allocator.clone(),
-            &core.command_pool,
             graphics_queue,
             vk::BufferUsageFlags::STORAGE_BUFFER,
             &vec![0; cluster_count as _],
@@ -97,7 +95,6 @@ impl ComputeCulledIndices {
         let result_indices_buffer = TBuffer::new_filled(
             &core,
             allocator.clone(),
-            &core.command_pool,
             graphics_queue,
             vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::INDEX_BUFFER,
             &vec![0; (mesh_data.index_buffer.size() * 2) as usize],
@@ -121,7 +118,6 @@ impl ComputeCulledIndices {
         let draw_indexed_indirect_buffer = TBuffer::new_filled(
             &core,
             allocator.clone(),
-            &core.command_pool,
             graphics_queue,
             vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::INDIRECT_BUFFER,
             &draw_indexed_commands,
@@ -133,7 +129,7 @@ impl ComputeCulledIndices {
             &descriptor_pool,
             &ubo_layout,
             &uniform_transform_buffer,
-            &uniform_camera_buffers,
+            uniform_camera_buffers,
             &should_cull_buffer,
             &mesh_data.meshlet_buffer,
             &mesh_data.cluster_buffer,
@@ -183,7 +179,7 @@ impl DrawPipeline for ComputeCulledIndices {
         ));
     }
 
-    fn stats_gui(&mut self, ui: &mut egui::Ui, image_index: usize) {}
+    fn stats_gui(&mut self, _ui: &mut egui::Ui, _image_index: usize) {}
 }
 
 struct ScreenData {

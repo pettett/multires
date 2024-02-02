@@ -1,4 +1,4 @@
-use std::{ptr, sync::Arc};
+use std::sync::Arc;
 
 use ash::vk::{self, DescriptorSetLayoutCreateInfo};
 use egui::ahash::HashMap;
@@ -62,7 +62,7 @@ impl DescriptorPool {
 
         let descriptor_pool_create_info = vk::DescriptorPoolCreateInfo::builder()
             .pool_sizes(&pool_sizes)
-            .max_sets(swapchain_images_size as u32)
+            .max_sets(swapchain_images_size)
             .flags(vk::DescriptorPoolCreateFlags::FREE_DESCRIPTOR_SET);
 
         let handle = unsafe {

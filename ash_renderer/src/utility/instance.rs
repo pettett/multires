@@ -18,7 +18,7 @@ use super::{
     physical_device::PhysicalDevice,
     structures::{DeviceExtension, QueueFamilyIndices},
     surface::Surface,
-    swapchain::{SwapChainSupportDetail, Swapchain},
+    swapchain::SwapChainSupportDetail,
 };
 
 pub struct Instance {
@@ -132,12 +132,10 @@ impl Instance {
             };
             if tiling == vk::ImageTiling::LINEAR
                 && format_properties.linear_tiling_features.contains(features)
+                || tiling == vk::ImageTiling::OPTIMAL
+                    && format_properties.optimal_tiling_features.contains(features)
             {
-                return format.clone();
-            } else if tiling == vk::ImageTiling::OPTIMAL
-                && format_properties.optimal_tiling_features.contains(features)
-            {
-                return format.clone();
+                return format;
             }
         }
 
@@ -154,7 +152,7 @@ impl Instance {
             .optimal_tiling_features
             .contains(vk::FormatFeatureFlags::SAMPLED_IMAGE_FILTER_LINEAR);
 
-        if is_sample_image_filter_linear_support == false {
+        if !is_sample_image_filter_linear_support {
             panic!("Texture Image format does not support linear blitting!")
         }
     }
@@ -214,10 +212,10 @@ impl Instance {
         };
         let is_support_sampler_anisotropy = device_features.sampler_anisotropy == 1;
 
-        return is_queue_family_supported
+        is_queue_family_supported
             && is_device_extension_supported
             && is_swapchain_supported
-            && is_support_sampler_anisotropy;
+            && is_support_sampler_anisotropy
     }
 
     pub fn find_queue_family(
@@ -232,12 +230,11 @@ impl Instance {
 
         let mut queue_family_indices = QueueFamilyIndices::new();
 
-        let mut index = 0;
-        for queue_family in queue_families.iter() {
+        for (index, queue_family) in queue_families.iter().enumerate() {
             if queue_family.queue_count > 0
                 && queue_family.queue_flags.contains(vk::QueueFlags::GRAPHICS)
             {
-                queue_family_indices.graphics_family = Some(index);
+                queue_family_indices.graphics_family = Some(index as _);
             }
 
             let is_present_support = unsafe {
@@ -250,14 +247,12 @@ impl Instance {
             .unwrap();
 
             if queue_family.queue_count > 0 && is_present_support {
-                queue_family_indices.present_family = Some(index);
+                queue_family_indices.present_family = Some(index as _);
             }
 
             if queue_family_indices.is_complete() {
                 break;
             }
-
-            index += 1;
         }
 
         queue_family_indices
@@ -293,7 +288,7 @@ impl Instance {
             required_extensions.remove(extension_name);
         }
 
-        return required_extensions.is_empty();
+        required_extensions.is_empty()
     }
 }
 

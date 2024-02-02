@@ -1,17 +1,16 @@
 use std::{
-    ffi::{c_void, CString},
-    ptr,
+    ffi::{CString},
     sync::Arc,
 };
 
 use ash::vk;
 use winapi::ctypes::c_char;
 
-use crate::{VkDeviceOwned, VkHandle};
+use crate::{VkHandle};
 
 use super::{
     instance::Instance,
-    physical_device::{self, DeviceFeatureSet, PhysicalDevice},
+    physical_device::{DeviceFeatureSet, PhysicalDevice},
     structures::{DeviceExtension, QueueFamilyIndices},
     surface::Surface,
 };
@@ -75,7 +74,7 @@ impl Device {
             .iter()
             .map(|layer_name| CString::new(*layer_name).unwrap())
             .collect();
-        let enable_layer_names: Vec<*const c_char> = requred_validation_layer_raw_names
+        let _enable_layer_names: Vec<*const c_char> = requred_validation_layer_raw_names
             .iter()
             .map(|layer_name| layer_name.as_ptr())
             .collect();

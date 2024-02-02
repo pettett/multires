@@ -35,35 +35,28 @@ use app::{fps_limiter::FPSMeasure, scene::Scene};
 use ash::vk;
 
 use bevy_ecs::prelude::*;
-use common::{asset::Asset, MeshVert, MultiResMesh};
+
 use common_renderer::{
     components::{
         camera::Camera,
         camera_controller::{
             camera_handle_input, update_camera, CameraController, KeyIn, MouseIn, MouseMv,
         },
-        gpu_mesh_util::MultiResData,
         transform::Transform,
     },
     resources::time::Time,
 };
-use draw_pipelines::{
-    compute_culled_indices::ComputeCulledIndices, compute_culled_mesh::ComputeCulledMesh,
-    draw_indirect::DrawIndirect, indirect_tasks::IndirectTasks, stub::Stub, DrawPipeline,
-};
+use draw_pipelines::stub::Stub;
 use glam::{vec3a, Quat, Vec3A};
 use gpu_allocator::{vulkan::*, AllocationSizes, AllocatorDebugSettings};
-use gui::{gui::Gui, window::GuiWindow};
+use gui::gui::Gui;
 use rand::{Rng, SeedableRng};
 use screen::Screen;
-use utility::buffer::{AsBuffer, Buffer, TBuffer};
+use utility::buffer::TBuffer;
 use winit::event::WindowEvent;
 
+use std::sync::Mutex;
 use std::{f32::consts::PI, sync::Arc};
-use std::{
-    mem::take,
-    sync::{Mutex, MutexGuard},
-};
 
 // Constants
 const WINDOW_TITLE: &'static str = "Multires Mesh Renderer";
@@ -122,12 +115,12 @@ impl App {
         }
 
         match event {
-            WindowEvent::MouseInput { state, button, .. } => self
-                .world
-                .send_event(MouseIn(state.clone(), button.clone())),
-            WindowEvent::KeyboardInput { input, .. } => self.world.send_event(KeyIn(input.clone())),
+            WindowEvent::MouseInput { state, button, .. } => {
+                self.world.send_event(MouseIn(*state, *button))
+            }
+            WindowEvent::KeyboardInput { input, .. } => self.world.send_event(KeyIn(*input)),
             WindowEvent::CursorMoved { position, .. } => {
-                self.world.send_event(MouseMv(position.clone()));
+                self.world.send_event(MouseMv(*position));
             }
             _ => (),
         }
@@ -179,7 +172,7 @@ impl App {
 
         let mut screen = Screen::new(core.clone());
 
-        let swapchain_support = SwapChainSupportDetail::query(physical_device.handle(), &surface);
+        let swapchain_support = SwapChainSupportDetail::query(physical_device.handle(), surface);
 
         let surface_format = swapchain_support.choose_swapchain_format().format;
         let depth_format = find_depth_format(&instance.handle, physical_device);
@@ -204,7 +197,7 @@ impl App {
 
         let mut world: World = World::new();
 
-        let mut r = rand::rngs::StdRng::seed_from_u64(42);
+        let _r = rand::rngs::StdRng::seed_from_u64(42);
 
         let mut mid = Vec3A::ZERO;
 
@@ -213,7 +206,7 @@ impl App {
         for (i, j) in Spiral::default().take(instances) {
             let p = glam::Vec3A::X * i as f32 * 20.0 + glam::Vec3A::Z * j as f32 * 40.0;
             mid += p;
-            let mut transform = Transform::new_pos(p);
+            let transform = Transform::new_pos(p);
 
             //if i == 10 && j == 10 {
             //*transform.scale_mut() *= 10.0;
@@ -233,7 +226,6 @@ impl App {
         let uniform_transform_buffer = TBuffer::new_filled(
             &core,
             allocator.clone(),
-            &core.command_pool,
             graphics_queue,
             vk::BufferUsageFlags::STORAGE_BUFFER,
             &uniform_transforms,
@@ -296,9 +288,9 @@ impl App {
             event_loop,
             allocator.clone(),
             &core.command_pool,
-            &queue_family,
+            queue_family,
             graphics_queue,
-            &screen.swapchain(),
+            screen.swapchain(),
         );
         let mesh = MeshDataBuffers::new(&core, &allocator, graphics_queue);
 
