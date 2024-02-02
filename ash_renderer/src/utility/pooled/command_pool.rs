@@ -17,7 +17,6 @@ impl Drop for SingleTimeCommandBuffer {
         unsafe {
             self.pool
                 .device
-                .handle
                 .end_command_buffer(self.handle)
                 .expect("Failed to record Command Buffer at Ending!");
         }
@@ -39,17 +38,14 @@ impl Drop for SingleTimeCommandBuffer {
         unsafe {
             self.pool
                 .device
-                .handle
                 .queue_submit(self.submit_queue, &sumbit_infos, vk::Fence::null())
                 .expect("Failed to Queue Submit!");
             self.pool
                 .device
-                .handle
                 .queue_wait_idle(self.submit_queue)
                 .expect("Failed to wait Queue idle!");
             self.pool
                 .device
-                .handle
                 .free_command_buffers(self.pool.handle, &buffers_to_submit);
         }
     }
@@ -64,7 +60,6 @@ impl OneShotCommandBuffer {
         unsafe {
             self.pool
                 .device
-                .handle
                 .end_command_buffer(self.handle)
                 .expect("Failed to record Command Buffer at Ending!");
         }
@@ -75,7 +70,6 @@ impl Drop for OneShotCommandBuffer {
         unsafe {
             self.pool
                 .device
-                .handle
                 .free_command_buffers(self.pool.handle, &[self.handle]);
         }
     }
@@ -91,7 +85,6 @@ impl CommandPool {
 
         let pool = unsafe {
             device
-                .handle
                 .create_command_pool(&command_pool_create_info, None)
                 .expect("Failed to create Command Pool!")
         };
@@ -110,7 +103,6 @@ impl CommandPool {
 
         unsafe {
             self.device
-                .handle
                 .allocate_command_buffers(&command_buffer_allocate_info)
                 .expect("Failed to allocate Command Buffers!")
         }
@@ -129,7 +121,6 @@ impl CommandPool {
 
         let command_buffer = unsafe {
             self.device
-                .handle
                 .allocate_command_buffers(&command_buffer_allocate_info)
                 .expect("Failed to allocate Command Buffers!")
         }[0];
@@ -139,7 +130,6 @@ impl CommandPool {
 
         unsafe {
             self.device
-                .handle
                 .begin_command_buffer(command_buffer, &command_buffer_begin_info)
                 .expect("Failed to begin recording Command Buffer at beginning!")
         };
@@ -159,9 +149,8 @@ impl CommandPool {
             ..Default::default()
         };
 
-        let command_buffer = unsafe {
+        let handle = unsafe {
             self.device
-                .handle
                 .allocate_command_buffers(&command_buffer_allocate_info)
                 .expect("Failed to allocate Command Buffers!")
         }[0];
@@ -171,14 +160,13 @@ impl CommandPool {
 
         unsafe {
             self.device
-                .handle
-                .begin_command_buffer(command_buffer, &command_buffer_begin_info)
+                .begin_command_buffer(handle, &command_buffer_begin_info)
                 .expect("Failed to begin recording Command Buffer at beginning!")
         };
 
         OneShotCommandBuffer {
             pool: self.clone(),
-            handle: command_buffer,
+            handle,
         }
     }
 }

@@ -1,12 +1,9 @@
-use std::{
-    ffi::{CString},
-    sync::Arc,
-};
+use std::{ffi::CString, sync::Arc};
 
 use ash::vk;
 use winapi::ctypes::c_char;
 
-use crate::{VkHandle};
+use crate::VkHandle;
 
 use super::{
     instance::Instance,
@@ -22,9 +19,15 @@ pub struct Device {
     pub features: DeviceFeatureSet,
     pub fn_mesh_shader: ash::extensions::ext::MeshShader,
     pub fn_swapchain: ash::extensions::khr::Swapchain,
-    pub handle: ash::Device,
+    handle: ash::Device,
 }
+impl std::ops::Deref for Device {
+    type Target = ash::Device;
 
+    fn deref(&self) -> &Self::Target {
+        &self.handle
+    }
+}
 impl Drop for Device {
     fn drop(&mut self) {
         unsafe {
@@ -36,8 +39,7 @@ impl Drop for Device {
 impl Device {
     pub fn wait_device_idle(&self) {
         unsafe {
-            self.handle
-                .device_wait_idle()
+            self.device_wait_idle()
                 .expect("Failed to wait device idle!")
         };
     }
@@ -106,13 +108,12 @@ impl Device {
 
         let device: ash::Device = unsafe {
             instance
-                .handle
                 .create_device(physical_device.handle(), &device_create_info, None)
                 .expect("Failed to create logical Device!")
         };
 
-        let fn_mesh_shader = ash::extensions::ext::MeshShader::new(&instance.handle, &device);
-        let fn_swapchain = ash::extensions::khr::Swapchain::new(&instance.handle, &device);
+        let fn_mesh_shader = ash::extensions::ext::MeshShader::new(&instance, &device);
+        let fn_swapchain = ash::extensions::khr::Swapchain::new(&instance, &device);
 
         (
             Arc::new(Self {

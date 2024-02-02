@@ -2,7 +2,7 @@ use std::{ptr, sync::Arc};
 
 use ash::vk;
 
-use crate::{VkHandle};
+use crate::VkHandle;
 
 use super::{device::Device, macros::vk_device_owned_wrapper};
 
@@ -83,7 +83,6 @@ impl RenderPass {
 
         let handle = unsafe {
             device
-                .handle
                 .create_render_pass(&renderpass_create_info, None)
                 .expect("Failed to create render pass!")
         };

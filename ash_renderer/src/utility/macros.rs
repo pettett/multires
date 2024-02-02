@@ -19,6 +19,14 @@ macro_rules! vk_handle_wrapper {
                 self.handle
             }
         }
+
+        impl std::ops::Deref for $struct_name {
+            type Target = vk::$struct_name;
+
+            fn deref(&self) -> &Self::Target {
+                &self.handle
+            }
+        }
     };
 
     ($struct_name:ident, $vk_name:ident) => {
@@ -40,6 +48,34 @@ macro_rules! vk_handle_wrapper_g {
                 self.handle
             }
         }
+
+        impl<P> std::ops::Deref for $struct_name<P> {
+            type Target = vk::$struct_name;
+
+            fn deref(&self) -> &Self::Target {
+                &self.handle
+            }
+        }
+    };
+}
+
+macro_rules! vk_handle_wrapper_const {
+    ($struct_name:ident, $const:ident) => {
+        impl<const T: $const> crate::VkHandle for $struct_name<T> {
+            type VkItem = vk::$struct_name;
+
+            fn handle(&self) -> Self::VkItem {
+                self.handle
+            }
+        }
+
+        impl<const T: $const> std::ops::Deref for $struct_name<T> {
+            type Target = vk::$struct_name;
+
+            fn deref(&self) -> &Self::Target {
+                &self.handle
+            }
+        }
     };
 }
 
@@ -48,7 +84,7 @@ macro_rules! vk_device_drop {
 		impl Drop for $struct_name {
 			fn drop(&mut self) {
 				unsafe {
-					self.device.handle.$destructor_name(self.handle, None);
+					self.device.$destructor_name(self.handle, None);
 				}
 			}
 		}
@@ -58,7 +94,7 @@ macro_rules! vk_device_drop {
 		impl Drop for $struct_name {
 			fn drop(&mut self) {
 				unsafe {
-					self.device.handle.$destructor_name(self.handle, None).expect($expect:ident);
+					self.device.$destructor_name(self.handle, None).expect($expect:ident);
 				}
 			}
 		}
@@ -68,4 +104,5 @@ macro_rules! vk_device_drop {
 pub(crate) use vk_device_drop;
 pub(crate) use vk_device_owned_wrapper;
 pub(crate) use vk_handle_wrapper;
+pub(crate) use vk_handle_wrapper_const;
 pub(crate) use vk_handle_wrapper_g;

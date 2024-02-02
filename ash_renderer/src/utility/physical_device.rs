@@ -84,7 +84,6 @@ impl PhysicalDevice {
     pub fn get_memory_properties(&self) -> vk::PhysicalDeviceMemoryProperties {
         unsafe {
             self.instance
-                .handle
                 .get_physical_device_memory_properties(self.handle)
         }
     }
@@ -104,7 +103,6 @@ impl PhysicalDevice {
             };
 
             self.instance
-                .handle
                 .get_physical_device_properties2(self.handle, &mut physical_device_properties);
 
             PhysicalDeviceSubgroupProperties {
@@ -121,7 +119,6 @@ impl PhysicalDevice {
 
         unsafe {
             self.instance
-                .handle
                 .get_physical_device_features2(self.handle, &mut all_features.device)
         };
 

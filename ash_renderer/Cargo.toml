@@ -16,8 +16,8 @@ glam.workspace = true
 gltf.workspace = true
 pollster.workspace = true
 bevy_ecs.workspace = true
-common = { path = "../common" }
-common_renderer = { path = "../common_renderer" }
+common.workspace = true
+common_renderer.workspace = true
 ash = { version = "0.37", default-features = false, features = [
 	"linked",
 	"debug",

@@ -3,10 +3,7 @@ use std::{marker::PhantomData, sync::Arc};
 use ash::vk;
 
 use crate::{
-    utility::{
-        device::Device,
-        macros::{vk_handle_wrapper_g},
-    },
+    utility::{device::Device, macros::vk_handle_wrapper_g},
     VkHandle,
 };
 
@@ -35,7 +32,6 @@ where
 
         let handle = unsafe {
             device
-                .handle
                 .create_query_pool(&create_info, None)
                 .expect("Failed to create query group")
         };
@@ -50,9 +46,7 @@ where
     /// Call `cmd_reset_query_pool` for all queries in this buffer
     pub fn reset(&self, cmd: vk::CommandBuffer, i: u32) {
         unsafe {
-            self.device
-                .handle
-                .cmd_reset_query_pool(cmd, self.handle, i, 1);
+            self.device.cmd_reset_query_pool(cmd, self.handle, i, 1);
         }
     }
     /// Call `get_query_pool_results` for the correct sized
@@ -60,7 +54,6 @@ where
         let mut results = [R::zeroed()];
         unsafe {
             self.device
-                .handle
                 .get_query_pool_results(
                     self.handle,
                     i,
@@ -77,7 +70,7 @@ where
 impl<R> Drop for QueryPool<R> {
     fn drop(&mut self) {
         unsafe {
-            self.device.handle.destroy_query_pool(self.handle, None);
+            self.device.destroy_query_pool(self.handle, None);
         }
     }
 }

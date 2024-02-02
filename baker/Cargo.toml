@@ -8,8 +8,8 @@ default = ["progress"]
 progress = ["dep:indicatif"]
 
 [dependencies]
-metis = { path = "../metis" }
-common = { path = "../common" }
+metis.workspace = true
+common.workspace = true
 petgraph.workspace = true
 glam.workspace = true
 idmap = "0.2"

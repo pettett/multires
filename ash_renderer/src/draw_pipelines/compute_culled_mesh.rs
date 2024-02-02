@@ -157,7 +157,6 @@ impl ScreenData {
 
             unsafe {
                 device
-                    .handle
                     .begin_command_buffer(command_buffer, &command_buffer_begin_info)
                     .expect("Failed to begin recording Command Buffer at beginning!");
             }
@@ -187,16 +186,16 @@ impl ScreenData {
                 })
                 .clear_values(&clear_values);
 
-            let descriptor_sets_to_bind = [core_draw.descriptor_sets[i].handle()];
+            let descriptor_sets_to_bind = [*core_draw.descriptor_sets[i]];
 
             unsafe {
-                device.handle.cmd_bind_pipeline(
+                device.cmd_bind_pipeline(
                     command_buffer,
                     vk::PipelineBindPoint::COMPUTE,
-                    core_draw.should_draw_pipeline.handle(),
+                    *core_draw.should_draw_pipeline,
                 );
 
-                device.handle.cmd_bind_descriptor_sets(
+                device.cmd_bind_descriptor_sets(
                     command_buffer,
                     vk::PipelineBindPoint::COMPUTE,
                     core_draw.should_draw_pipeline.layout(),
@@ -205,17 +204,15 @@ impl ScreenData {
                     &[],
                 );
 
-                device
-                    .handle
-                    .cmd_dispatch(command_buffer, submesh_count, 1, 1);
+                device.cmd_dispatch(command_buffer, submesh_count, 1, 1);
 
-                device.handle.cmd_begin_render_pass(
+                device.cmd_begin_render_pass(
                     command_buffer,
                     &render_pass_begin_info,
                     vk::SubpassContents::INLINE,
                 );
 
-                device.handle.cmd_set_scissor(
+                device.cmd_set_scissor(
                     command_buffer,
                     0,
                     &[vk::Rect2D {
@@ -223,7 +220,7 @@ impl ScreenData {
                         extent: screen.swapchain().extent,
                     }],
                 );
-                device.handle.cmd_set_viewport(
+                device.cmd_set_viewport(
                     command_buffer,
                     0,
                     &[vk::Viewport {
@@ -236,7 +233,7 @@ impl ScreenData {
                     }],
                 );
 
-                device.handle.cmd_bind_pipeline(
+                device.cmd_bind_pipeline(
                     command_buffer,
                     vk::PipelineBindPoint::GRAPHICS,
                     core_draw.graphics_pipeline.handle(),
@@ -252,7 +249,7 @@ impl ScreenData {
                 //    0,
                 //    vk::IndexType::UINT32,
                 //);
-                device.handle.cmd_bind_descriptor_sets(
+                device.cmd_bind_descriptor_sets(
                     command_buffer,
                     vk::PipelineBindPoint::GRAPHICS,
                     core_draw.graphics_pipeline.layout(),
@@ -276,10 +273,9 @@ impl ScreenData {
                 //     0,
                 // );
 
-                device.handle.cmd_end_render_pass(command_buffer);
+                device.cmd_end_render_pass(command_buffer);
 
                 device
-                    .handle
                     .end_command_buffer(command_buffer)
                     .expect("Failed to record Command Buffer at Ending!");
             }
@@ -397,7 +393,6 @@ fn create_graphics_pipeline(
 
     let pipeline_layout = unsafe {
         device
-            .handle
             .create_pipeline_layout(&pipeline_layout_create_info, None)
             .expect("Failed to create pipeline layout!")
     };
@@ -432,7 +427,6 @@ fn create_graphics_pipeline(
 
     let graphics_pipelines = unsafe {
         device
-            .handle
             .create_graphics_pipelines(
                 vk::PipelineCache::null(),
                 &graphic_pipeline_create_infos,
@@ -534,7 +528,6 @@ fn create_compute_culled_meshes_descriptor_sets(
 
     let vk_descriptor_sets = unsafe {
         device
-            .handle
             .allocate_descriptor_sets(&descriptor_set_allocate_info)
             .expect("Failed to allocate descriptor sets!")
     };

@@ -37,12 +37,12 @@ impl Drop for Image {
     fn drop(&mut self) {
         unsafe {
             if let Some(sampler) = self.sampler {
-                self.device.handle.destroy_sampler(sampler, None);
+                self.device.destroy_sampler(sampler, None);
             }
             if let Some(image_view) = self.image_view {
-                self.device.handle.destroy_image_view(image_view, None);
+                self.device.destroy_image_view(image_view, None);
             }
-            self.device.handle.destroy_image(self.handle, None);
+            self.device.destroy_image(self.handle, None);
 
             let mut allocation = Default::default();
 
@@ -91,14 +91,13 @@ impl Image {
 
         let image = unsafe {
             core.device
-                .handle
                 .create_image(&image_create_info, None)
                 .expect("Failed to create Texture Image!")
         };
 
         core.name_object(name, image);
 
-        let requirements = unsafe { core.device.handle.get_image_memory_requirements(image) };
+        let requirements = unsafe { core.device.get_image_memory_requirements(image) };
 
         let allocation = allocator
             .lock()
@@ -114,7 +113,6 @@ impl Image {
 
         unsafe {
             core.device
-                .handle
                 .bind_image_memory(image, allocation.memory(), allocation.offset())
                 .expect("Failed to bind Image Memmory!");
         }
@@ -255,7 +253,6 @@ impl Image {
         unsafe {
             self.sampler = Some(
                 self.device
-                    .handle
                     .create_sampler(&sampler_create_info, None)
                     .expect("Failed to create Sampler!"),
             );
@@ -334,7 +331,7 @@ impl Image {
         }];
 
         unsafe {
-            device.handle.cmd_pipeline_barrier(
+            device.cmd_pipeline_barrier(
                 command_buffer.handle,
                 source_stage,
                 destination_stage,
@@ -409,7 +406,7 @@ impl Image {
             image_barrier.dst_access_mask = vk::AccessFlags::TRANSFER_READ;
 
             unsafe {
-                device.handle.cmd_pipeline_barrier(
+                device.cmd_pipeline_barrier(
                     command_buffer.handle,
                     vk::PipelineStageFlags::TRANSFER,
                     vk::PipelineStageFlags::TRANSFER,
@@ -452,7 +449,7 @@ impl Image {
             }];
 
             unsafe {
-                device.handle.cmd_blit_image(
+                device.cmd_blit_image(
                     command_buffer.handle,
                     image,
                     vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
@@ -469,7 +466,7 @@ impl Image {
             image_barrier.dst_access_mask = vk::AccessFlags::SHADER_READ;
 
             unsafe {
-                device.handle.cmd_pipeline_barrier(
+                device.cmd_pipeline_barrier(
                     command_buffer.handle,
                     vk::PipelineStageFlags::TRANSFER,
                     vk::PipelineStageFlags::FRAGMENT_SHADER,
@@ -491,7 +488,7 @@ impl Image {
         image_barrier.dst_access_mask = vk::AccessFlags::SHADER_READ;
 
         unsafe {
-            device.handle.cmd_pipeline_barrier(
+            device.cmd_pipeline_barrier(
                 command_buffer.handle,
                 vk::PipelineStageFlags::TRANSFER,
                 vk::PipelineStageFlags::FRAGMENT_SHADER,
@@ -561,7 +558,6 @@ impl Image {
 
         unsafe {
             device
-                .handle
                 .create_image_view(&imageview_create_info, None)
                 .expect("Failed to create Image View!")
         }
@@ -624,7 +620,7 @@ pub fn copy_buffer_to_image(
     }];
 
     unsafe {
-        device.handle.cmd_copy_buffer_to_image(
+        device.cmd_copy_buffer_to_image(
             command_buffer.handle,
             buffer,
             image,

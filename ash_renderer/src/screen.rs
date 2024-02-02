@@ -74,7 +74,7 @@ impl Screen {
         );
 
         self.swapchain_framebuffers = create_framebuffers(
-            &self.core.device.handle,
+            &self.core.device,
             render_pass.handle(),
             &self.swapchain_image_views,
             self.depth().image_view(),
@@ -85,14 +85,11 @@ impl Screen {
     fn cleanup(&mut self) {
         unsafe {
             for &framebuffer in self.swapchain_framebuffers.iter() {
-                self.core
-                    .device
-                    .handle
-                    .destroy_framebuffer(framebuffer, None);
+                self.core.device.destroy_framebuffer(framebuffer, None);
             }
 
             for &image_view in self.swapchain_image_views.iter() {
-                self.core.device.handle.destroy_image_view(image_view, None);
+                self.core.device.destroy_image_view(image_view, None);
             }
         }
     }
@@ -109,7 +106,7 @@ fn create_depth_resources(
     swapchain_extent: vk::Extent2D,
     allocator: Arc<Mutex<Allocator>>,
 ) -> Arc<Image> {
-    let depth_format = find_depth_format(&core.instance.handle, &core.physical_device);
+    let depth_format = find_depth_format(&core.instance, &core.physical_device);
     Arc::new(
         Image::create_image(
             core,

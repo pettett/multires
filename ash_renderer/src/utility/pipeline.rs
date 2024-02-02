@@ -6,7 +6,7 @@ use crate::{core::Core, VkHandle};
 
 use super::{
     device::Device,
-    macros::{vk_device_owned_wrapper},
+    macros::{vk_device_owned_wrapper, vk_handle_wrapper, vk_handle_wrapper_const},
     pooled::descriptor_pool::DescriptorSetLayout,
 };
 
@@ -19,6 +19,8 @@ pub struct Pipeline<const T: bool> {
 
 pub type GraphicsPipeline = Pipeline<true>;
 pub type ComputePipeline = Pipeline<false>;
+
+vk_handle_wrapper_const!(Pipeline, bool);
 
 impl<const T: bool> Pipeline<T> {
     pub fn new(
@@ -64,7 +66,6 @@ impl ComputePipeline {
 
         let pipeline_layout = unsafe {
             core.device
-                .handle
                 .create_pipeline_layout(&pipeline_layout_create_info, None)
                 .expect("Failed to create pipeline layout!")
         };
@@ -77,7 +78,6 @@ impl ComputePipeline {
 
         let compute_pipelines = unsafe {
             core.device
-                .handle
                 .create_compute_pipelines(vk::PipelineCache::null(), &pipeline_create_infos, None)
                 .expect("Failed to create Compute Pipeline!.")
         };
@@ -93,21 +93,11 @@ impl ComputePipeline {
     }
 }
 
-impl<const T: bool> VkHandle for Pipeline<T> {
-    type VkItem = vk::Pipeline;
-
-    fn handle(&self) -> Self::VkItem {
-        self.handle
-    }
-}
-
 impl<const T: bool> Drop for Pipeline<T> {
     fn drop(&mut self) {
         unsafe {
-            self.device.handle.destroy_pipeline(self.handle, None);
-            self.device
-                .handle
-                .destroy_pipeline_layout(self.layout, None);
+            self.device.destroy_pipeline(self.handle, None);
+            self.device.destroy_pipeline_layout(self.layout, None);
         }
     }
 }
@@ -121,7 +111,6 @@ impl ShaderModule {
         ShaderModule {
             handle: unsafe {
                 device
-                    .handle
                     .create_shader_module(&shader_module_create_info, None)
                     .expect("Failed to create Shader Module!")
             },

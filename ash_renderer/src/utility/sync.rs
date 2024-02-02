@@ -15,14 +15,10 @@ impl Drop for SyncObjects {
         unsafe {
             for i in 0..self.image_available_semaphores.len() {
                 self.device
-                    .handle
                     .destroy_semaphore(self.image_available_semaphores[i], None);
                 self.device
-                    .handle
                     .destroy_semaphore(self.render_finished_semaphores[i], None);
-                self.device
-                    .handle
-                    .destroy_fence(self.in_flight_fences[i], None);
+                self.device.destroy_fence(self.in_flight_fences[i], None);
             }
         }
     }
@@ -33,30 +29,20 @@ impl SyncObjects {
         let mut render_finished_semaphores = vec![];
         let mut in_flight_fences = vec![];
 
-        let semaphore_create_info = vk::SemaphoreCreateInfo {
-            s_type: vk::StructureType::SEMAPHORE_CREATE_INFO,
-            p_next: ptr::null(),
-            flags: vk::SemaphoreCreateFlags::empty(),
-        };
+        let semaphore_create_info = vk::SemaphoreCreateInfo::default();
 
-        let fence_create_info = vk::FenceCreateInfo {
-            s_type: vk::StructureType::FENCE_CREATE_INFO,
-            p_next: ptr::null(),
-            flags: vk::FenceCreateFlags::SIGNALED,
-        };
+        let fence_create_info =
+            vk::FenceCreateInfo::builder().flags(vk::FenceCreateFlags::SIGNALED);
 
         for _ in 0..max_frame_in_flight {
             unsafe {
                 let image_available_semaphore = device
-                    .handle
                     .create_semaphore(&semaphore_create_info, None)
                     .expect("Failed to create Semaphore Object!");
                 let render_finished_semaphore = device
-                    .handle
                     .create_semaphore(&semaphore_create_info, None)
                     .expect("Failed to create Semaphore Object!");
                 let inflight_fence = device
-                    .handle
                     .create_fence(&fence_create_info, None)
                     .expect("Failed to create Fence Object!");
 

@@ -139,8 +139,8 @@ impl App {
         let surface = &core.surface;
         let allocator = Arc::new(Mutex::new(
             Allocator::new(&AllocatorCreateDesc {
-                instance: instance.handle.clone(),
-                device: device.handle.clone(),
+                instance: (**instance).clone(),
+                device: (**device).clone(),
                 physical_device: physical_device.handle(),
                 debug_settings: AllocatorDebugSettings {
                     log_memory_information: false,
@@ -157,16 +157,10 @@ impl App {
         ));
 
         println!("Loading queues");
-        let graphics_queue = unsafe {
-            device
-                .handle
-                .get_device_queue(queue_family.graphics_family.unwrap(), 0)
-        };
-        let present_queue = unsafe {
-            device
-                .handle
-                .get_device_queue(queue_family.present_family.unwrap(), 0)
-        };
+        let graphics_queue =
+            unsafe { device.get_device_queue(queue_family.graphics_family.unwrap(), 0) };
+        let present_queue =
+            unsafe { device.get_device_queue(queue_family.present_family.unwrap(), 0) };
 
         println!("Loading swapchain");
 
@@ -175,7 +169,7 @@ impl App {
         let swapchain_support = SwapChainSupportDetail::query(physical_device.handle(), surface);
 
         let surface_format = swapchain_support.choose_swapchain_format().format;
-        let depth_format = find_depth_format(&instance.handle, physical_device);
+        let depth_format = find_depth_format(&instance, physical_device);
 
         let render_pass = RenderPass::new(device.clone(), surface_format, depth_format);
 

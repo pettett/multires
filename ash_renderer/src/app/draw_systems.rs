@@ -129,7 +129,6 @@ pub fn draw_frame(
         renderer
             .core
             .device
-            .handle
             .wait_for_fences(&wait_fences, true, std::u64::MAX)
             .expect("Failed to wait for Fence!");
     }
@@ -178,22 +177,20 @@ pub fn draw_frame(
     let submit_infos = [vk::SubmitInfo::builder()
         .command_buffers(&[renderer.draw_pipeline.draw(image_index as usize), ui_cmd])
         .wait_dst_stage_mask(&wait_stages)
-        .signal_semaphores(&signal_semaphores)
         .wait_semaphores(&wait_semaphores)
+        .signal_semaphores(&signal_semaphores)
         .build()];
 
     unsafe {
         renderer
             .core
             .device
-            .handle
             .reset_fences(&wait_fences)
             .expect("Failed to reset Fence!");
 
         renderer
             .core
             .device
-            .handle
             .queue_submit(
                 renderer.graphics_queue,
                 &submit_infos,

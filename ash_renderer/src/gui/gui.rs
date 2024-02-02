@@ -38,7 +38,7 @@ impl Gui {
             1.0,
             egui::FontDefinitions::default(),
             egui::Style::default(),
-            device.handle.clone(),
+            (**device).clone(),
             GpuAllocator(allocator.clone()),
             queue_family.graphics_family.unwrap(),
             graphics_queue,
@@ -65,7 +65,6 @@ impl Gui {
 
         unsafe {
             self.device
-                .handle
                 .begin_command_buffer(cmd, &command_buffer_begin_info)
                 .expect("Failed to begin recording Command Buffer at beginning!")
         };
@@ -83,7 +82,6 @@ impl Gui {
 
         unsafe {
             self.device
-                .handle
                 .end_command_buffer(cmd)
                 .expect("Failed to record Command Buffer at Ending!");
         }

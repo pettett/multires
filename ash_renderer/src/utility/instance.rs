@@ -22,8 +22,16 @@ use super::{
 };
 
 pub struct Instance {
-    pub handle: ash::Instance,
+    handle: ash::Instance,
     pub fn_surface: ash::extensions::khr::Surface,
+}
+
+impl std::ops::Deref for Instance {
+    type Target = ash::Instance;
+
+    fn deref(&self) -> &Self::Target {
+        &self.handle
+    }
 }
 
 impl Instance {

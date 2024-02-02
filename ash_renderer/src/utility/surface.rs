@@ -29,8 +29,7 @@ impl Surface {
         screen_height: u32,
     ) -> Arc<Surface> {
         let surface = unsafe {
-            platforms::create_surface(entry, &instance.handle, window)
-                .expect("Failed to create surface.")
+            platforms::create_surface(entry, &instance, window).expect("Failed to create surface.")
         };
 
         Arc::new(Surface {

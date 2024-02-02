@@ -67,7 +67,6 @@ impl DescriptorPool {
 
         let handle = unsafe {
             device
-                .handle
                 .create_descriptor_pool(&descriptor_pool_create_info, None)
                 .expect("Failed to create Descriptor Pool!")
         };
@@ -115,9 +114,7 @@ impl DescriptorSet {
             .collect();
 
         unsafe {
-            device
-                .handle
-                .update_descriptor_sets(&descriptor_write_sets, &[]);
+            device.update_descriptor_sets(&descriptor_write_sets, &[]);
         }
 
         Self {
@@ -134,7 +131,6 @@ impl DescriptorSetLayout {
         Self {
             handle: unsafe {
                 device
-                    .handle
                     .create_descriptor_set_layout(
                         &DescriptorSetLayoutCreateInfo::builder().bindings(bindings),
                         None,
@@ -155,7 +151,6 @@ impl Drop for DescriptorSet {
     fn drop(&mut self) {
         unsafe {
             self.device
-                .handle
                 .free_descriptor_sets(self.pool.handle, &[self.handle])
                 .unwrap();
         }

@@ -6,7 +6,7 @@ use crate::{
         constants::*,
         debug::*,
         instance::Instance,
-        pooled::{command_pool::CommandPool},
+        pooled::command_pool::CommandPool,
         structures::*,
     },
     VkHandle, TASK_GROUP_SIZE, WINDOW_TITLE,
@@ -55,7 +55,7 @@ impl Core {
         );
 
         let (debug_utils_loader, debug_messenger) =
-            setup_debug_utils(VALIDATION.is_enable, &entry, &instance.handle);
+            setup_debug_utils(VALIDATION.is_enable, &entry, &instance);
         let physical_device = instance.pick_physical_device(&surface, &DEVICE_EXTENSIONS);
 
         //let physical_device_memory_properties = physical_device.get_memory_properties();
@@ -113,7 +113,7 @@ impl Core {
             .object_name(&name_c);
         unsafe {
             self.debug_utils_loader
-                .set_debug_utils_object_name(self.device.handle.handle(), &object_name_info)
+                .set_debug_utils_object_name(self.device.handle(), &object_name_info)
                 .unwrap();
         }
     }

@@ -214,7 +214,7 @@ impl AsBuffer for Buffer {
 impl Drop for Buffer {
     fn drop(&mut self) {
         unsafe {
-            self.device.handle.destroy_buffer(self.handle, None);
+            self.device.destroy_buffer(self.handle, None);
 
             let mut allocation = Allocation::default();
             mem::swap(&mut self.allocation, &mut allocation);
@@ -248,14 +248,13 @@ impl Buffer {
 
         let buffer = unsafe {
             core.device
-                .handle
                 .create_buffer(&buffer_create_info, None)
                 .expect("Failed to create Vertex Buffer")
         };
 
         core.name_object(name, buffer);
 
-        let requirements = unsafe { core.device.handle.get_buffer_memory_requirements(buffer) };
+        let requirements = unsafe { core.device.get_buffer_memory_requirements(buffer) };
 
         let allocation = allocator
             .lock()
@@ -271,7 +270,6 @@ impl Buffer {
 
         unsafe {
             core.device
-                .handle
                 .bind_buffer_memory(buffer, allocation.memory(), allocation.offset())
                 .expect("Failed to bind Buffer");
         }
@@ -368,7 +366,7 @@ impl Buffer {
         }];
 
         unsafe {
-            self.device.handle.cmd_copy_buffer(
+            self.device.cmd_copy_buffer(
                 command_buffer.handle,
                 self.handle,
                 other.handle,
