@@ -262,6 +262,14 @@ impl App {
         world.insert_resource(Events::<MeshDrawingPipelineType>::default());
         world.insert_resource(Time::default());
 
+		
+        if core.device.features.mesh_shader {
+            world.send_event(MeshDrawingPipelineType::IndirectTasks);
+        } else {
+            world.send_event(MeshDrawingPipelineType::ComputeCulledIndices);
+        }
+
+
         let camera = world
             .spawn((CameraController::new(50.0), cam, transform))
             .id();
@@ -321,7 +329,6 @@ impl App {
         world.insert_resource(mesh);
         world.insert_resource(FPSMeasure::new());
 
-        world.send_event(MeshDrawingPipelineType::IndirectTasks);
 
         // cleanup(); the 'drop' function will take care of it.
         App {
@@ -341,15 +348,3 @@ impl App {
 //             .update_uniform_buffer(self.uniform_transform);
 //     }
 // }
-
-#[cfg(test)]
-mod tests {
-    use crate::Spiral;
-
-    #[test]
-    fn test_spiral() {
-        for (x, y) in Spiral::default().skip(10).take(50) {
-            print!("({} {})", x, y)
-        }
-    }
-}

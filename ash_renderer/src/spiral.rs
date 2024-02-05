@@ -57,3 +57,16 @@ impl Iterator for Spiral {
         Some((self.x, self.y))
     }
 }
+
+
+#[cfg(test)]
+mod tests {
+    use crate::Spiral;
+
+    #[test]
+    fn test_spiral() {
+        for (x, y) in Spiral::default().skip(10).take(50) {
+            print!("({} {})", x, y)
+        }
+    }
+}

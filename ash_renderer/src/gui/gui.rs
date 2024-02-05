@@ -6,7 +6,11 @@ use gpu_allocator::vulkan::Allocator;
 use raw_window_handle::HasRawDisplayHandle;
 
 use crate::{
-    utility::{device::Device, pooled::command_pool::CommandPool, swapchain::Swapchain},
+    utility::{
+        device::Device,
+        pooled::{command_buffer_group::CommandBufferGroup, command_pool::CommandPool},
+        swapchain::Swapchain,
+    },
     QueueFamilyIndices,
 };
 
@@ -16,7 +20,7 @@ pub struct Gui {
     device: Arc<Device>,
     window: Arc<winit::window::Window>,
     integration: egui_winit_ash_integration::Integration<GpuAllocator>,
-    ui_command_buffers: Vec<vk::CommandBuffer>,
+    ui_command_buffers: CommandBufferGroup,
 }
 
 impl Gui {
@@ -30,7 +34,8 @@ impl Gui {
         graphics_queue: vk::Queue,
         swapchain: &Swapchain,
     ) -> Self {
-        let ui_command_buffers = command_pool.allocate_group(swapchain.images.len() as _);
+        let ui_command_buffers = CommandBufferGroup::new(command_pool.clone(), swapchain.images.len() as _);
+
         let integration = egui_winit_ash_integration::Integration::<GpuAllocator>::new(
             target,
             swapchain.extent.width,

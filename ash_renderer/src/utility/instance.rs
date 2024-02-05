@@ -15,10 +15,8 @@ use crate::{
 };
 
 use super::{
-    physical_device::PhysicalDevice,
-    structures::{DeviceExtension, QueueFamilyIndices},
-    surface::Surface,
-    swapchain::SwapChainSupportDetail,
+    extensions::Extensions, physical_device::PhysicalDevice, structures::QueueFamilyIndices,
+    surface::Surface, swapchain::SwapChainSupportDetail,
 };
 
 pub struct Instance {
@@ -167,33 +165,30 @@ impl Instance {
     pub fn pick_physical_device(
         self: &Arc<Self>,
         surface: &Surface,
-        required_device_extensions: &DeviceExtension,
+        required_device_extensions: &Extensions,
+        optional_device_extensions: &Extensions,
     ) -> Arc<PhysicalDevice> {
         let physical_devices = unsafe {
-            self.handle
-                .enumerate_physical_devices()
+            self.enumerate_physical_devices()
                 .expect("Failed to enumerate Physical Devices!")
         };
 
-        let result = physical_devices.iter().find(|physical_device| {
-            let is_suitable = self.is_physical_device_suitable(
-                **physical_device,
+        let result = physical_devices.iter().find_map(|physical_device| {
+            self.is_physical_device_suitable(
+                *physical_device,
                 surface,
                 required_device_extensions,
-            );
-
-            // if is_suitable {
-            //     let device_properties = instance.get_physical_device_properties(**physical_device);
-            //     let device_name = super::tools::vk_to_string(&device_properties.device_name);
-            //     println!("Using GPU: {}", device_name);
-            // }
-
-            is_suitable
+                optional_device_extensions,
+            )
+            .map(|e| (physical_device, e))
         });
 
         match result {
-            Some(p_physical_device) => {
-                Arc::new(PhysicalDevice::new(*p_physical_device, self.clone()))
+            Some((p_physical_device, supported_extensions)) => {
+
+				
+
+                Arc::new(PhysicalDevice::new(*p_physical_device, self.clone(), supported_extensions))
             }
             None => panic!("Failed to find a suitable GPU!"),
         }
@@ -203,16 +198,20 @@ impl Instance {
         &self,
         physical_device: vk::PhysicalDevice,
         surface_stuff: &Surface,
-        required_device_extensions: &DeviceExtension,
-    ) -> bool {
+        required_device_extensions: &Extensions,
+        optional_device_extensions: &Extensions,
+    ) -> Option<Extensions> {
         let device_features = unsafe { self.handle.get_physical_device_features(physical_device) };
 
         let indices = self.find_queue_family(physical_device, surface_stuff);
 
         let is_queue_family_supported = indices.is_complete();
-        let is_device_extension_supported =
-            self.check_device_extension_support(physical_device, required_device_extensions);
-        let is_swapchain_supported = if is_device_extension_supported {
+        let present_required_extensions =
+            required_device_extensions.get_device_extension_support(physical_device, self);
+        let present_optional_extensions =
+            optional_device_extensions.get_device_extension_support(physical_device, self);
+
+        let is_swapchain_supported = if present_required_extensions == *required_device_extensions {
             let swapchain_support = SwapChainSupportDetail::query(physical_device, surface_stuff);
             !swapchain_support.formats.is_empty() && !swapchain_support.present_modes.is_empty()
         } else {
@@ -220,10 +219,11 @@ impl Instance {
         };
         let is_support_sampler_anisotropy = device_features.sampler_anisotropy == 1;
 
-        is_queue_family_supported
-            && is_device_extension_supported
+        (is_queue_family_supported
+            && present_required_extensions == *required_device_extensions
             && is_swapchain_supported
-            && is_support_sampler_anisotropy
+            && is_support_sampler_anisotropy)
+            .then(|| present_required_extensions.union(&present_optional_extensions))
     }
 
     pub fn find_queue_family(
@@ -264,39 +264,6 @@ impl Instance {
         }
 
         queue_family_indices
-    }
-
-    pub fn check_device_extension_support(
-        &self,
-        physical_device: vk::PhysicalDevice,
-        device_extensions: &DeviceExtension,
-    ) -> bool {
-        let available_extensions = unsafe {
-            self.handle
-                .enumerate_device_extension_properties(physical_device)
-                .expect("Failed to get device extension properties.")
-        };
-
-        use std::collections::HashSet;
-        let mut available_extension_names = HashSet::new();
-
-        for extension in available_extensions.iter() {
-            let raw_string = unsafe { CStr::from_ptr(extension.extension_name.as_ptr()) };
-
-            available_extension_names.insert(raw_string);
-        }
-
-        let mut required_extensions = HashSet::new();
-        for extension in device_extensions.get_extensions_raw_names() {
-            let raw_string = unsafe { CStr::from_ptr(extension) };
-            required_extensions.insert(raw_string);
-        }
-
-        for extension_name in available_extension_names.iter() {
-            required_extensions.remove(extension_name);
-        }
-
-        required_extensions.is_empty()
     }
 }
 

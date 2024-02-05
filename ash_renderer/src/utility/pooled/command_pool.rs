@@ -95,18 +95,7 @@ impl CommandPool {
         })
     }
 
-    pub fn allocate_group(&self, command_buffer_count: u32) -> Vec<vk::CommandBuffer> {
-        let command_buffer_allocate_info = vk::CommandBufferAllocateInfo::builder()
-            .command_buffer_count(command_buffer_count)
-            .level(vk::CommandBufferLevel::PRIMARY)
-            .command_pool(self.handle);
 
-        unsafe {
-            self.device
-                .allocate_command_buffers(&command_buffer_allocate_info)
-                .expect("Failed to allocate Command Buffers!")
-        }
-    }
 
     pub fn begin_single_time_command(
         self: &Arc<Self>,

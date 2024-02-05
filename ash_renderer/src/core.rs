@@ -5,6 +5,7 @@ use crate::{
         // the mod define some fixed functions that have been learned before.
         constants::*,
         debug::*,
+        extensions::Extensions,
         instance::Instance,
         pooled::command_pool::CommandPool,
         structures::*,
@@ -56,7 +57,15 @@ impl Core {
 
         let (debug_utils_loader, debug_messenger) =
             setup_debug_utils(VALIDATION.is_enable, &entry, &instance);
-        let physical_device = instance.pick_physical_device(&surface, &DEVICE_EXTENSIONS);
+
+        let required_extensions = Extensions::new(vec![
+            ash::extensions::khr::BufferDeviceAddress::name(),
+            ash::extensions::khr::Swapchain::name(),
+        ]);
+        let optional_extensions = Extensions::new(vec![ash::extensions::ext::MeshShader::name()]);
+
+        let physical_device =
+            instance.pick_physical_device(&surface, &required_extensions, &optional_extensions);
 
         //let physical_device_memory_properties = physical_device.get_memory_properties();
 
@@ -65,8 +74,7 @@ impl Core {
         let (device, queue_family) = Device::create_logical_device(
             instance.clone(),
             physical_device.clone(),
-            &VALIDATION,
-            &DEVICE_EXTENSIONS,
+            &VALIDATION, 
             &surface,
         );
 

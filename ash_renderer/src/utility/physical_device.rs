@@ -1,14 +1,15 @@
 use std::{ptr, sync::Arc};
 
-use ash::vk;
+use ash::{extensions, vk};
 
 use crate::VkHandle;
 
-use super::{instance::Instance, macros::vk_handle_wrapper};
+use super::{extensions::Extensions, instance::Instance, macros::vk_handle_wrapper};
 
 pub struct PhysicalDevice {
     instance: Arc<Instance>,
     handle: vk::PhysicalDevice,
+    pub extensions: Extensions,
 }
 
 vk_handle_wrapper!(PhysicalDevice);
@@ -78,8 +79,18 @@ impl From<PhysicalRelevantFeatureSupport> for DeviceFeatureSet {
 }
 
 impl PhysicalDevice {
-    pub fn new(handle: vk::PhysicalDevice, instance: Arc<Instance>) -> Self {
-        Self { handle, instance }
+    pub fn new(
+        handle: vk::PhysicalDevice,
+        instance: Arc<Instance>,
+        extensions: Extensions,
+    ) -> Self {
+        println!("Attaching to device with extensions: {extensions:?}");
+
+        Self {
+            handle,
+            instance,
+            extensions,
+        }
     }
     pub fn get_memory_properties(&self) -> vk::PhysicalDeviceMemoryProperties {
         unsafe {

@@ -3,7 +3,6 @@
 
 
 
-pub struct DeviceExtension {}
 
 pub struct QueueFamilyIndices {
     pub graphics_family: Option<u32>,

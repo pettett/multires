@@ -21,6 +21,7 @@ use crate::{
         device::Device,
         pooled::command_pool::CommandPool,
         pooled::{
+            command_buffer_group::CommandBufferGroup,
             descriptor_pool::{
                 DescriptorPool, DescriptorSet, DescriptorSetLayout, DescriptorWriteData,
             },
@@ -184,16 +185,9 @@ impl DrawPipeline for IndirectTasks {
 struct ScreenData {
     device: Arc<Device>,
     command_pool: Arc<CommandPool>,
-    command_buffers: Vec<vk::CommandBuffer>,
+    command_buffers: CommandBufferGroup,
 }
-impl Drop for ScreenData {
-    fn drop(&mut self) {
-        unsafe {
-            self.device
-                .free_command_buffers(self.command_pool.handle(), &self.command_buffers);
-        }
-    }
-}
+
 impl ScreenData {
     pub fn create_command_buffers(
         core_draw: &IndirectTasks,
@@ -205,9 +199,8 @@ impl ScreenData {
         indirect_task_buffer: &TBuffer<DrawMeshTasksIndirect>,
     ) -> Self {
         let device = core.device.clone();
-        let command_buffers = core
-            .command_pool
-            .allocate_group(screen.swapchain_framebuffers.len() as _);
+        let command_buffers =
+            CommandBufferGroup::new(core.command_pool.clone(), screen.swapchain_framebuffers.len() as _);
 
         for (i, &command_buffer) in command_buffers.iter().enumerate() {
             let command_buffer_begin_info = vk::CommandBufferBeginInfo::builder()

@@ -16,6 +16,7 @@ pub mod structures;
 pub mod surface;
 pub mod swapchain;
 pub mod sync;
+pub mod extensions;
 pub mod tools;
 
 pub use pipeline::ComputePipeline;

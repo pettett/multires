@@ -5,6 +5,12 @@ macro_rules! vk_device_owned_wrapper {
             handle: vk::$struct_name,
         }
 
+		impl $struct_name{
+			pub fn parent(&self) -> &Device{
+				&self.device
+			}
+		}
+
         crate::utility::macros::vk_handle_wrapper!($struct_name);
         crate::utility::macros::vk_device_drop!($struct_name, $destructor_name);
     };

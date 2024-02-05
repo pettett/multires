@@ -6,10 +6,7 @@ use winapi::ctypes::c_char;
 use crate::VkHandle;
 
 use super::{
-    instance::Instance,
-    physical_device::{DeviceFeatureSet, PhysicalDevice},
-    structures::{DeviceExtension, QueueFamilyIndices},
-    surface::Surface,
+    extensions::Extensions, instance::Instance, physical_device::{DeviceFeatureSet, PhysicalDevice}, structures::QueueFamilyIndices, surface::Surface
 };
 
 pub struct Device {
@@ -47,8 +44,7 @@ impl Device {
     pub fn create_logical_device(
         instance: Arc<Instance>,
         physical_device: Arc<PhysicalDevice>,
-        validation: &super::debug::ValidationInfo,
-        device_extensions: &DeviceExtension,
+        validation: &super::debug::ValidationInfo, 
         surface: &Surface,
     ) -> (Arc<Self>, QueueFamilyIndices) {
         let indices = instance.find_queue_family(physical_device.handle(), surface);
@@ -99,7 +95,7 @@ impl Device {
 
         println!("{:?}", feature_set);
 
-        let enable_extension_names = device_extensions.get_extensions_raw_names();
+        let enable_extension_names = physical_device.extensions.get_extensions_raw_names();
 
         let device_create_info = vk::DeviceCreateInfo::builder()
             .push_next(&mut physical_device_features.device) // The rest will already have been pushed on

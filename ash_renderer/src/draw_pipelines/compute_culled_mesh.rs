@@ -17,8 +17,11 @@ use crate::{
         buffer::{AsBuffer, TBuffer},
         device::Device,
         pooled::command_pool::CommandPool,
-        pooled::descriptor_pool::{
-            DescriptorPool, DescriptorSet, DescriptorSetLayout, DescriptorWriteData,
+        pooled::{
+            command_buffer_group::CommandBufferGroup,
+            descriptor_pool::{
+                DescriptorPool, DescriptorSet, DescriptorSetLayout, DescriptorWriteData,
+            },
         },
         render_pass::RenderPass,
         {ComputePipeline, GraphicsPipeline, ShaderModule},
@@ -134,7 +137,7 @@ impl DrawPipeline for ComputeCulledMesh {
 struct ScreenData {
     device: Arc<Device>,
     command_pool: Arc<CommandPool>,
-    command_buffers: Vec<vk::CommandBuffer>,
+    command_buffers: CommandBufferGroup,
 }
 
 impl ScreenData {
@@ -147,9 +150,9 @@ impl ScreenData {
         render_pass: &RenderPass,
     ) -> Self {
         let device = core.device.clone();
-        let command_buffers = core
-            .command_pool
-            .allocate_group(screen.swapchain_framebuffers.len() as _);
+
+        let command_buffers =
+            CommandBufferGroup::new(core.command_pool.clone(), screen.swapchain_framebuffers.len() as _);
 
         for (i, &command_buffer) in command_buffers.iter().enumerate() {
             let command_buffer_begin_info = vk::CommandBufferBeginInfo::builder()
