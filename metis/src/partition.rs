@@ -20,7 +20,7 @@ use crate::{
 };
 use common::graph::filter_nodes_by_weight;
 use petgraph::visit::EdgeRef;
-use std::ptr::null_mut;
+use std::{fs, io::Write, ptr::null_mut};
 use thiserror::Error;
 
 /// Specifies the used algorithm.
@@ -348,36 +348,44 @@ impl PartitioningConfig {
     where
         E: Copy,
     {
-        if graph.node_count() > partition_size as usize * 4 + 1 {
-            let partitions = 2;
-            let mut partitioned_graph = self.partition_onto_graph(partitions, graph)?;
-
-            let graphs = filter_nodes_by_weight(&partitioned_graph, 0..partitions);
-
-            assert_eq!(graphs.len(), 2);
-
-            let mut total_parts: u32 = 0;
-
-            for g in graphs {
-                let (exact_graph, total_sub_parts) =
-                    self.exact_partition_onto_graph(partition_size, &g)?;
-
-                for n in g.node_indices() {
-                    let original_index = g.node_weight(n).unwrap();
-                    let new_part = total_parts + exact_graph.node_weight(n).unwrap();
-
-                    *partitioned_graph
-                        .node_weight_mut(petgraph::graph::node_index(*original_index))
-                        .unwrap() = new_part;
-                }
-                total_parts += total_sub_parts;
-            }
-
-            Ok((partitioned_graph, total_parts))
-        } else {
-            let parts = (graph.node_count() - 1).div_ceil(partition_size) as _;
-            Ok((self.partition_onto_graph(parts, graph)?, parts))
+        if graph.node_count() <= partition_size + 1 {
+            return Ok((graph.map(|_, _| 0u32, |_, e| e.clone()), 1));
         }
+
+        const SPLIT_FACTOR: u32 = 2;
+
+        let partitions = if graph.node_count() > partition_size * (SPLIT_FACTOR as usize) * 2 + 1 {
+            SPLIT_FACTOR
+        } else {
+            let count = graph.node_count().saturating_sub(1);
+
+            count.div_ceil(partition_size) as _
+        };
+
+        let mut partitioned_graph = self.partition_onto_graph(partitions, graph)?;
+
+        let graphs = filter_nodes_by_weight(&partitioned_graph, 0..partitions);
+
+        assert_eq!(graphs.len(), partitions as usize);
+
+        let mut total_parts: u32 = 0;
+
+        for g in graphs {
+            let (exact_graph, total_sub_parts) =
+                self.exact_partition_onto_graph(partition_size, &g)?;
+
+            for n in g.node_indices() {
+                let original_index = g.node_weight(n).unwrap();
+                let new_part = total_parts + exact_graph.node_weight(n).unwrap();
+
+                *partitioned_graph
+                    .node_weight_mut(petgraph::graph::node_index(*original_index))
+                    .unwrap() = new_part;
+            }
+            total_parts += total_sub_parts;
+        }
+
+        Ok((partitioned_graph, total_parts))
     }
 
     pub fn partition_onto_graph<V, E>(

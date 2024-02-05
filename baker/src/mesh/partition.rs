@@ -1,5 +1,3 @@
-use std::collections::BTreeSet;
-
 //use crate::MAX_TRIS_PER_CLUSTER;
 
 use crate::mesh::group_info::GroupInfo;
@@ -135,11 +133,23 @@ impl WingedMesh {
     ) -> Result<usize, metis::PartitioningError> {
         assert!(config.force_contiguous_partitions.unwrap());
 
+        const EXACT_CLUSTERING: bool = true;
+
         let cluster_graph = self.generate_cluster_graph();
+
         let group_count = {
             //std::mem::swap(&mut self.groups, &mut new_groups);
-            let (cluster_partitioning, group_count) =
-                config.exact_partition_onto_graph(4, &cluster_graph)?;
+
+            let (cluster_partitioning, group_count) = if EXACT_CLUSTERING {
+                config.exact_partition_onto_graph(4, &cluster_graph)?
+            } else {
+                let group_count = (cluster_graph.node_count() - 1).div_ceil(4) as _;
+
+                let cluster_partitioning =
+                    config.partition_onto_graph(group_count, &cluster_graph)?;
+
+                (cluster_partitioning, group_count)
+            };
 
             let group_count = group_count as usize;
 
@@ -152,15 +162,34 @@ impl WingedMesh {
             //     ..Default::default()
             // };
 
-            let mut occupancies = vec![0; group_count];
-            for &group in cluster_partitioning.node_weights() {
-                occupancies[group as usize] += 1;
+            {
+                let mut occupancies = vec![0; group_count];
+                for &group in cluster_partitioning.node_weights() {
+                    occupancies[group as usize] += 1;
+                }
+                let m = occupancies.iter().max().unwrap();
+                println!(
+                    "Generated groups with sizes {}<->{}",
+                    occupancies.iter().min().unwrap(),
+                    m
+                );
+
+                let mut counts = vec![0usize; (*m + 1) as _];
+
+                let sum = occupancies.len();
+
+                for i in occupancies {
+                    counts[i] += 1;
+                }
+
+                println!("Cnt | Occupancies (total {sum})");
+
+                for (i, &c) in counts.iter().enumerate() {
+                    println!("{i:<3} | {c:>5} {}", "@".repeat((c * 100) / sum))
+                }
+
+                //let sum = occupancies.iter().sum();
             }
-            println!(
-                "Generated groups with sizes {}<->{}",
-                occupancies.iter().min().unwrap(),
-                occupancies.iter().max().unwrap()
-            );
 
             // Tell each partition what group they now belong to.
             if group_count != 1 {
@@ -429,7 +458,7 @@ impl WingedMesh {
 
 #[cfg(test)]
 pub mod tests {
-    use std::collections::HashSet;
+    use std::{collections::HashSet, io::Write};
 
     use anyhow::Context;
 
@@ -442,6 +471,7 @@ pub mod tests {
     };
 
     use super::*;
+
     #[test]
     pub fn test_group_sizes() -> anyhow::Result<()> {
         let test_config = &metis::MultilevelKWayPartitioningConfig {
