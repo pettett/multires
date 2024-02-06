@@ -10,18 +10,22 @@ use common::MeshVert;
 use gpu_allocator::vulkan::Allocator;
 
 use crate::{
-    app::mesh_data::MeshDataBuffers,
+    app::{mesh_data::MeshDataBuffers, renderer::Renderer, scene::Scene},
     core::Core,
     screen::Screen,
     utility::{
         buffer::{AsBuffer, TBuffer},
         device::Device,
-        pooled::command_pool::CommandPool,
-        pooled::{command_buffer_group::CommandBufferGroup, descriptor_pool::{
-            DescriptorPool, DescriptorSet, DescriptorSetLayout, DescriptorWriteData,
-        }},
+        pooled::{
+            command_buffer_group::CommandBufferGroup,
+            command_pool::CommandPool,
+            descriptor_pool::{
+                DescriptorPool, DescriptorSet, DescriptorSetLayout, DescriptorSetLayoutBinding,
+                DescriptorWriteData,
+            },
+        },
         render_pass::RenderPass,
-        {GraphicsPipeline, ShaderModule},
+        GraphicsPipeline, ShaderModule,
     },
     vertex::Vertex,
     ModelUniformBufferObject, VkHandle,
@@ -38,46 +42,24 @@ pub struct DrawIndirect {
     screen: Option<ScreenData>,
     descriptor_pool: Arc<DescriptorPool>,
     core: Arc<Core>,
-    should_cull_buffer: Arc<TBuffer<u32>>,
     draw_indexed_indirect_buffer: Arc<TBuffer<vk::DrawIndexedIndirectCommand>>,
     vertex_buffer: Arc<TBuffer<MeshVert>>,
-    indices_buffer: Arc<TBuffer<u32>>,
+    index_buffer: Arc<TBuffer<u32>>,
     query: bool,
 }
 
 impl DrawIndirect {
-    pub fn new(
-        core: Arc<Core>,
-        screen: &Screen,
-        mesh_data: &MeshDataBuffers,
-        allocator: Arc<Mutex<Allocator>>,
-        render_pass: &RenderPass,
-        graphics_queue: vk::Queue,
-        descriptor_pool: Arc<DescriptorPool>,
-        uniform_transform_buffer: Arc<TBuffer<ModelUniformBufferObject>>,
-        uniform_camera_buffers: &[Arc<impl AsBuffer>],
-        cluster_count: u32,
-        query: bool,
-    ) -> Self {
-        let ubo_layout = create_descriptor_set_layout(core.device.clone());
+    pub fn new(renderer: &Renderer, mesh_data: &MeshDataBuffers, scene: &Scene) -> Self {
+        let ubo_layout = create_descriptor_set_layout(renderer.core.device.clone());
 
         let graphics_pipeline = create_graphics_pipeline(
-            core.device.clone(),
-            render_pass,
-            screen.swapchain().extent,
+            renderer.core.device.clone(),
+            &renderer.render_pass,
+            renderer.screen.swapchain().extent,
             ubo_layout.clone(),
         );
 
-        let should_cull_buffer = TBuffer::new_filled(
-            &core,
-            allocator.clone(),
-            graphics_queue,
-            vk::BufferUsageFlags::STORAGE_BUFFER,
-            &vec![0; cluster_count as _],
-            "Should Cull Buffer",
-        );
-
-        let instance_count = uniform_transform_buffer.item_len();
+        let instance_count = scene.uniform_transform_buffer.item_len();
 
         let mut draw_indexed_commands = Vec::with_capacity(instance_count);
 
@@ -90,40 +72,33 @@ impl DrawIndirect {
         });
 
         let draw_indexed_indirect_buffer = TBuffer::new_filled(
-            &core,
-            allocator.clone(),
-            graphics_queue,
+            &renderer.core,
+            renderer.allocator.clone(),
+            renderer.graphics_queue,
             vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::INDIRECT_BUFFER,
             &draw_indexed_commands,
             "Draw Indexed Indirect Buffer",
         );
 
         let descriptor_sets = create_compute_culled_indices_descriptor_sets(
-            &core.device,
-            &descriptor_pool,
+            &renderer.core.device,
+            &renderer.descriptor_pool,
             &ubo_layout,
-            &uniform_transform_buffer,
-            &uniform_camera_buffers,
-            &should_cull_buffer,
-            &mesh_data.meshlet_buffer,
-            &mesh_data.cluster_buffer,
-            //&texture_image,
-            &mesh_data.index_buffer,
-            &draw_indexed_indirect_buffer,
-            screen.swapchain().images.len(),
+            &scene.uniform_transform_buffer,
+            &scene.uniform_camera_buffers,
+            renderer.screen.swapchain().images.len(),
         );
 
         Self {
             graphics_pipeline,
             descriptor_sets,
             screen: None,
-            core,
-            descriptor_pool,
-            should_cull_buffer,
-            query,
+            core: renderer.core.clone(),
+            descriptor_pool: renderer.descriptor_pool.clone(),
+            query: renderer.query,
             vertex_buffer: mesh_data.vertex_buffer.clone(),
             draw_indexed_indirect_buffer,
-            indices_buffer: mesh_data.index_buffer.clone(),
+            index_buffer: mesh_data.index_buffer.clone(),
         }
     }
 }
@@ -169,8 +144,10 @@ impl ScreenData {
         render_pass: &RenderPass,
     ) -> Self {
         let device = core.device.clone();
-        let command_buffers =
-            CommandBufferGroup::new(core.command_pool.clone(), screen.swapchain_framebuffers.len() as _);
+        let command_buffers = CommandBufferGroup::new(
+            core.command_pool.clone(),
+            screen.swapchain_framebuffers.len() as _,
+        );
 
         for (i, &command_buffer) in command_buffers.iter().enumerate() {
             let command_buffer_begin_info = vk::CommandBufferBeginInfo::builder()
@@ -264,7 +241,7 @@ impl ScreenData {
 
                 device.cmd_bind_index_buffer(
                     command_buffer,
-                    core_draw.indices_buffer.handle(),
+                    core_draw.index_buffer.handle(),
                     0,
                     vk::IndexType::UINT32,
                 );
@@ -456,80 +433,17 @@ fn create_graphics_pipeline(
 }
 
 fn create_descriptor_set_layout(device: Arc<Device>) -> Arc<DescriptorSetLayout> {
-    let ubo_layout_bindings = [
-        // layout (binding = 0) readonly buffer ModelUniformBufferObject {
-        // 	mat4 models[];
-        // };
-        vk::DescriptorSetLayoutBinding::builder()
-            .binding(0)
-            .descriptor_count(1)
-            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-            .stage_flags(
-                vk::ShaderStageFlags::MESH_EXT
-                    | vk::ShaderStageFlags::COMPUTE
-                    | vk::ShaderStageFlags::VERTEX,
-            )
-            .build(),
-        // layout(binding = 1) buffer Clusters {
-        // 	ClusterData clusters[];
-        // };
-        vk::DescriptorSetLayoutBinding::builder()
-            .binding(1)
-            .descriptor_count(1)
-            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-            .stage_flags(vk::ShaderStageFlags::TASK_EXT | vk::ShaderStageFlags::COMPUTE)
-            .build(),
-        // layout(binding = 2) buffer ShouldDraw {
-        // 	uint should_draw[];
-        // };
-        vk::DescriptorSetLayoutBinding::builder()
-            .binding(2)
-            .descriptor_count(1)
-            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-            .stage_flags(vk::ShaderStageFlags::TASK_EXT | vk::ShaderStageFlags::COMPUTE)
-            .build(),
-        // layout (binding = 3) uniform CameraUniformBufferObject {
-        // 	CameraUniformObject ubo;
-        // };
-        vk::DescriptorSetLayoutBinding::builder()
-            .binding(3)
-            .descriptor_count(1)
-            .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-            .stage_flags(vk::ShaderStageFlags::COMPUTE | vk::ShaderStageFlags::VERTEX)
-            .build(),
-        // layout (std430, binding = 4) buffer InputBufferI {
-        // 	s_meshlet meshlets[];
-        // };
-        vk::DescriptorSetLayoutBinding::builder()
-            .binding(4)
-            .descriptor_count(1)
-            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-            .stage_flags(vk::ShaderStageFlags::MESH_EXT)
-            .build(),
-        // layout (std430, binding = 5) buffer InputBufferV {
-        // 	Vertex verts[];
-        // };
-        vk::DescriptorSetLayoutBinding::builder()
-            .binding(5)
-            .descriptor_count(1)
-            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-            .stage_flags(vk::ShaderStageFlags::COMPUTE)
-            .build(),
-        vk::DescriptorSetLayoutBinding::builder()
-            .binding(6)
-            .descriptor_count(1)
-            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-            .stage_flags(vk::ShaderStageFlags::COMPUTE)
-            .build(),
-        vk::DescriptorSetLayoutBinding::builder()
-            .binding(7)
-            .descriptor_count(1)
-            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-            .stage_flags(vk::ShaderStageFlags::COMPUTE)
-            .build(),
+    let bindings = vec![
+        DescriptorSetLayoutBinding::Storage {
+            vis: vk::ShaderStageFlags::VERTEX,
+        },
+        DescriptorSetLayoutBinding::None,
+        DescriptorSetLayoutBinding::None,
+        DescriptorSetLayoutBinding::Uniform {
+            vis: vk::ShaderStageFlags::VERTEX,
+        },
     ];
-
-    Arc::new(DescriptorSetLayout::new(device, &ubo_layout_bindings))
+    Arc::new(DescriptorSetLayout::new(device, bindings))
 }
 
 fn create_compute_culled_indices_descriptor_sets(
@@ -538,11 +452,6 @@ fn create_compute_culled_indices_descriptor_sets(
     descriptor_set_layout: &Arc<DescriptorSetLayout>,
     uniform_transform_buffer: &Arc<TBuffer<ModelUniformBufferObject>>,
     uniform_camera_buffers: &[Arc<impl AsBuffer>],
-    should_draw_buffer: &Arc<impl AsBuffer>,
-    meshlet_buffer: &Arc<impl AsBuffer>,
-    submesh_buffer: &Arc<impl AsBuffer>,
-    indices_buffer: &Arc<impl AsBuffer>,
-    draw_indexed_indirect_buffer: &Arc<TBuffer<vk::DrawIndexedIndirectCommand>>,
     //texture: &Image,
     swapchain_images_size: usize,
 ) -> Vec<DescriptorSet> {
@@ -575,30 +484,11 @@ fn create_compute_culled_indices_descriptor_sets(
                         // 0
                         buf: uniform_transform_buffer.buffer(),
                     },
-                    DescriptorWriteData::Buffer {
-                        // 1
-                        buf: submesh_buffer.buffer(), //
-                    },
-                    DescriptorWriteData::Buffer {
-                        // 2
-                        buf: should_draw_buffer.buffer(),
-                    },
+                    DescriptorWriteData::Empty,
+                    DescriptorWriteData::Empty,
                     DescriptorWriteData::Buffer {
                         // 3
                         buf: uniform_camera_buffers[i].buffer(),
-                    },
-                    DescriptorWriteData::Buffer {
-                        // 4
-                        buf: meshlet_buffer.buffer(), //
-                    },
-                    DescriptorWriteData::Empty,
-                    DescriptorWriteData::Buffer {
-                        // 6
-                        buf: indices_buffer.buffer(), //
-                    },
-                    DescriptorWriteData::Buffer {
-                        // 6
-                        buf: draw_indexed_indirect_buffer.buffer(), //
                     },
                 ],
             )

@@ -12,23 +12,23 @@ use common_renderer::components::transform::Transform;
 use gpu_allocator::vulkan::Allocator;
 
 use crate::{
-    app::frame_measure::RollingMeasure,
-    app::mesh_data::MeshDataBuffers,
+    app::{frame_measure::RollingMeasure, mesh_data::MeshDataBuffers},
     core::Core,
     screen::Screen,
     utility::{
         buffer::{AsBuffer, TBuffer},
         device::Device,
-        pooled::command_pool::CommandPool,
         pooled::{
             command_buffer_group::CommandBufferGroup,
+            command_pool::CommandPool,
             descriptor_pool::{
-                DescriptorPool, DescriptorSet, DescriptorSetLayout, DescriptorWriteData,
+                DescriptorPool, DescriptorSet, DescriptorSetLayout, DescriptorSetLayoutBinding,
+                DescriptorWriteData,
             },
             query_pool::QueryPool,
         },
         render_pass::RenderPass,
-        {GraphicsPipeline, ShaderModule},
+        GraphicsPipeline, ShaderModule,
     },
     ModelUniformBufferObject, VkHandle,
 };
@@ -199,8 +199,10 @@ impl ScreenData {
         indirect_task_buffer: &TBuffer<DrawMeshTasksIndirect>,
     ) -> Self {
         let device = core.device.clone();
-        let command_buffers =
-            CommandBufferGroup::new(core.command_pool.clone(), screen.swapchain_framebuffers.len() as _);
+        let command_buffers = CommandBufferGroup::new(
+            core.command_pool.clone(),
+            screen.swapchain_framebuffers.len() as _,
+        );
 
         for (i, &command_buffer) in command_buffers.iter().enumerate() {
             let command_buffer_begin_info = vk::CommandBufferBeginInfo::builder()
@@ -323,66 +325,29 @@ impl ScreenData {
 }
 
 fn create_descriptor_set_layout(device: Arc<Device>) -> Arc<DescriptorSetLayout> {
-    let ubo_layout_bindings = [
-        vk::DescriptorSetLayoutBinding {
-            // transform uniform
-            binding: 0,
-            descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
-            descriptor_count: 1,
-            stage_flags: vk::ShaderStageFlags::MESH_EXT | vk::ShaderStageFlags::TASK_EXT,
-            p_immutable_samplers: ptr::null(),
+    let bindings = vec![
+        DescriptorSetLayoutBinding::Storage {
+            vis: vk::ShaderStageFlags::MESH_EXT | vk::ShaderStageFlags::TASK_EXT,
         },
-        // vk::DescriptorSetLayoutBinding {
-        //     // sampler uniform
-        //     binding: 1,
-        //     descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-        //     descriptor_count: 1,
-        //     stage_flags: vk::ShaderStageFlags::FRAGMENT,
-        //     p_immutable_samplers: ptr::null(),
-        // },
-        vk::DescriptorSetLayoutBinding {
-            // sampler uniform
-            binding: 2,
-            descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
-            descriptor_count: 1,
-            stage_flags: vk::ShaderStageFlags::TASK_EXT,
-            p_immutable_samplers: ptr::null(),
+        DescriptorSetLayoutBinding::None,
+        DescriptorSetLayoutBinding::Storage {
+            vis: vk::ShaderStageFlags::TASK_EXT,
         },
-        vk::DescriptorSetLayoutBinding {
-            // camera uniform
-            binding: 3,
-            descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
-            descriptor_count: 1,
-            stage_flags: vk::ShaderStageFlags::MESH_EXT | vk::ShaderStageFlags::TASK_EXT,
-            p_immutable_samplers: ptr::null(),
+        DescriptorSetLayoutBinding::Uniform {
+            vis: vk::ShaderStageFlags::MESH_EXT | vk::ShaderStageFlags::TASK_EXT,
         },
-        vk::DescriptorSetLayoutBinding {
-            // verts buffer
-            binding: 4,
-            descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
-            descriptor_count: 1,
-            stage_flags: vk::ShaderStageFlags::MESH_EXT,
-            p_immutable_samplers: ptr::null(),
+        DescriptorSetLayoutBinding::Storage {
+            vis: vk::ShaderStageFlags::MESH_EXT,
         },
-        vk::DescriptorSetLayoutBinding {
-            // meshlet buffer
-            binding: 5,
-            descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
-            descriptor_count: 1,
-            stage_flags: vk::ShaderStageFlags::MESH_EXT,
-            p_immutable_samplers: ptr::null(),
+        DescriptorSetLayoutBinding::Storage {
+            vis: vk::ShaderStageFlags::MESH_EXT,
         },
-        vk::DescriptorSetLayoutBinding {
-            // indirect draw params buffer array
-            binding: 6,
-            descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
-            descriptor_count: 1,
-            stage_flags: vk::ShaderStageFlags::TASK_EXT,
-            p_immutable_samplers: ptr::null(),
+        DescriptorSetLayoutBinding::Storage {
+            vis: vk::ShaderStageFlags::TASK_EXT,
         },
     ];
 
-    Arc::new(DescriptorSetLayout::new(device, &ubo_layout_bindings))
+    Arc::new(DescriptorSetLayout::new(device, bindings))
 }
 
 fn create_descriptor_sets(
@@ -470,6 +435,7 @@ fn create_graphics_pipeline(
         device.clone(),
         bytemuck::cast_slice(include_bytes!("../../shaders/spv/mesh-shader.mesh")),
     );
+
     let frag_shader_module = ShaderModule::new(
         device.clone(),
         bytemuck::cast_slice(include_bytes!("../../shaders/spv/frag_colour.frag")),

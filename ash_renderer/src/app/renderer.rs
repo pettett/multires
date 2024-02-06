@@ -12,11 +12,13 @@ use crate::{
     screen::Screen,
     utility::{
         pooled::descriptor_pool::DescriptorPool, render_pass::RenderPass, sync::SyncObjects,
+        ShaderModule,
     },
 };
 
 use super::{
     fps_limiter::FPSMeasure,
+    mesh_data::MeshDataBuffers,
     scene::{Scene, SceneEvent},
 };
 #[derive(Debug, Clone, Copy, Event)]
@@ -27,6 +29,13 @@ pub enum MeshDrawingPipelineType {
     ComputeCulledIndices,
     None,
 }
+
+#[derive(Debug, Clone, Copy, Event)]
+pub enum Fragment {
+    VertexColour,
+    Lit,
+}
+
 pub struct Renderer {
     pub allocator: Arc<Mutex<Allocator>>,
     pub graphics_queue: vk::Queue,
@@ -41,15 +50,22 @@ pub struct Renderer {
     pub query: bool,
     pub current_frame: usize,
     pub is_framebuffer_resized: bool,
-    pub cluster_count: u32,
     pub app_info_open: bool,
     // Make sure to drop the core last
     pub screen: Screen,
     pub core: Arc<Core>,
+
+    pub fragment_colour: ShaderModule,
+    pub fragment_lit: ShaderModule,
 }
 
 impl Renderer {
-    pub fn recreate_swapchain(&mut self, scene: &Scene, cam: &mut Camera) {
+    pub fn recreate_swapchain(
+        &mut self,
+        scene: &Scene,
+        mesh_data: &MeshDataBuffers,
+        cam: &mut Camera,
+    ) {
         self.core.device.wait_device_idle();
 
         let size = self.window_ref().inner_size();
@@ -68,7 +84,7 @@ impl Renderer {
         self.draw_pipeline.init_swapchain(
             &self.core,
             &self.screen,
-            self.cluster_count,
+            mesh_data.cluster_count,
             scene.uniform_transform_buffer.item_len() as _,
             &self.render_pass,
         );

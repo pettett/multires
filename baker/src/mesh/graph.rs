@@ -102,7 +102,7 @@ impl WingedMesh {
     /// Generates a graph of all partitions and their neighbours.
     /// A partition neighbours another one iff there is some triangle in each that share an edge.
     /// We add an edge for each linking triangle, to record 'weights' for partitioning.
-    pub fn generate_cluster_graph(&self) -> petgraph::graph::UnGraph<i32, i32> {
+    pub fn generate_guided_cluster_graph(&self) -> petgraph::graph::UnGraph<i32, i32> {
         //TODO: Give lower weight to grouping partitions that have not been recently grouped, to ensure we are
         // constantly overwriting old borders with remeshes
 
@@ -141,8 +141,18 @@ impl WingedMesh {
                             .map(|e| graph.edge_weight(e))
                             .flatten();
 
-                        //                        graph.update_edge(n0, n1, *w.unwrap_or(&0) + 1);
-                        graph.add_edge(n0, n1, 0);
+                        // We don't want to encourage groupings between previously grouped clusters
+                        if self.clusters[other_face.cluster_idx].group_index
+                            == self.clusters[face.cluster_idx].group_index
+                        {
+                            graph.update_edge(n0, n1, 0);
+                            // Increase by a small proportion of the edges
+                            if _fid.0 % 16 == 0 {
+                                graph.add_edge(n0, n1, 0);
+                            }
+                        } else {
+                            graph.add_edge(n0, n1, 0);
+                        }
                     }
                 }
             }
@@ -321,15 +331,15 @@ pub mod test {
         },
     };
 
-    pub const DOT_OUT: &str = "baker\\graph.gv";
+    pub const DOT_OUT: &str = "..\\baker\\graph.gv";
 
-    pub const HIERARCHY_SVG_OUT: &str = "baker\\hierarchy_graph.svg";
+    pub const HIERARCHY_SVG_OUT: &str = "..\\baker\\hierarchy_graph.svg";
     pub const PART_SVG_OUT: &str = "..\\baker\\part_graph.svg";
 
-    pub const FACE_SVG_OUT: &str = "baker\\face_graph.svg";
+    pub const FACE_SVG_OUT: &str = "..\\baker\\face_graph.svg";
 
-    pub const FACE_SVG_OUT_2: &str = "baker\\face_graph2.svg";
-    pub const ERROR_SVG_OUT: &str = "error.svg";
+    pub const FACE_SVG_OUT_2: &str = "..\\baker\\face_graph2.svg";
+    pub const ERROR_SVG_OUT: &str = "..\\error.svg";
 
     const COLS: [&str; 10] = [
         "red",
@@ -353,7 +363,7 @@ pub mod test {
             ..Default::default()
         };
         let mesh = TEST_MESH_PLANE_LOW;
-        let (mut mesh, verts, _norms) = WingedMesh::from_gltf(mesh);
+        let (mut mesh, tri_mesh) = WingedMesh::from_gltf(mesh);
 
         // Apply primary partition, that will define the lowest level clusterings
         mesh.partition_full_mesh(test_config, 9)?;
@@ -371,7 +381,7 @@ pub mod test {
             &graph,
             FACE_SVG_OUT,
             &|_, (_n, &fid)| {
-                let p = fid.center(&mesh, &verts);
+                let p = fid.center(&mesh, &tri_mesh.verts);
                 let part = mesh.get_face(fid).cluster_idx;
                 format!(
                     "shape=point, color={}, pos=\"{},{}\"",
@@ -399,7 +409,7 @@ pub mod test {
             &graph,
             FACE_SVG_OUT_2,
             &|_, (_n, &fid)| {
-                let p = fid.center(&mesh, &verts);
+                let p = fid.center(&mesh, &tri_mesh.verts);
                 let part = mesh.get_face(fid).cluster_idx;
                 format!(
                     "shape=point, color={}, pos=\"{},{}\"",
@@ -425,18 +435,20 @@ pub mod test {
             minimize_subgraph_degree: Some(true),
             ..Default::default()
         };
-        let mesh = TEST_MESH_PLANE_LOW;
-        let (mut mesh, _verts, _norms) = WingedMesh::from_gltf(mesh);
+        let mesh = TEST_MESH_LOW;
+        let (mut mesh, tri_mesh) = WingedMesh::from_gltf(mesh);
 
         // Apply primary partition, that will define the lowest level clusterings
         mesh.partition_within_groups(test_config, None, Some(60))?;
+        mesh.group(test_config, &tri_mesh.verts).unwrap();
 
         graph::petgraph_to_svg(
-            &mesh.generate_cluster_graph(),
+            &mesh.generate_guided_cluster_graph(),
             PART_SVG_OUT,
             &|_, _| format!("shape=point"),
-            graph::GraphSVGRender::Directed {
-                node_label: common::graph::Label::None,
+            graph::GraphSVGRender::Undirected {
+                edge_label: common::graph::Label::None,
+                positions: false,
             },
         )?;
 
@@ -451,14 +463,14 @@ pub mod test {
             minimize_subgraph_degree: Some(true),
             ..Default::default()
         };
-        let mesh = TEST_MESH_PLANE_LOW;
-        let (mut mesh, verts, _norms) = WingedMesh::from_gltf(mesh);
+        let mesh = TEST_MESH_LOW;
+        let (mut mesh, tri_mesh) = WingedMesh::from_gltf(mesh);
 
         println!("Faces: {}, Verts: {}", mesh.face_count(), mesh.vert_count());
 
         // Apply primary partition, that will define the lowest level clusterings
         mesh.partition_full_mesh(test_config, 60).unwrap();
-        mesh.group(test_config, &verts).unwrap();
+        mesh.group(test_config, &tri_mesh.verts).unwrap();
 
         let effect_graph = mesh.generate_group_effect_graph();
 
@@ -490,23 +502,25 @@ pub mod test {
         }
     }
 
+    /// Generate a DAG representing dependence of clusters as an SVG.
+    /// Used for dissertation graphs, as well as visual verification of DAG correctness.
     #[test]
     pub fn generate_partition_hierarchy_graph() -> Result<(), Box<dyn error::Error>> {
         let test_config = &metis::PartitioningConfig {
             method: metis::PartitioningMethod::MultilevelKWay,
             force_contiguous_partitions: Some(true),
-            minimize_subgraph_degree: Some(true),
             ..Default::default()
         };
+
         let mesh = TEST_MESH_LOW;
-        let (mut mesh, verts, _norms) = WingedMesh::from_gltf(mesh);
+        let (mut mesh, tri_mesh) = WingedMesh::from_gltf(mesh);
 
         println!("Faces: {}, Verts: {}", mesh.face_count(), mesh.vert_count());
 
         // Apply primary partition, that will define the lowest level clusterings
         mesh.partition_within_groups(test_config, None, Some(60))?;
 
-        mesh.group(test_config, &verts)?;
+        mesh.group(test_config, &tri_mesh.verts)?;
         let mut graph: petgraph::Graph<(), ()> = petgraph::Graph::new();
 
         let mut old_part_nodes: Vec<_> =
@@ -539,7 +553,7 @@ pub mod test {
 
             old_part_nodes = new_part_nodes;
 
-            mesh.group(test_config, &verts)?;
+            mesh.group(test_config, &tri_mesh.verts)?;
 
             if mesh.clusters.len() <= 2 {
                 break;

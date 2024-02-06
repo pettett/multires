@@ -1,7 +1,7 @@
 pub mod mesh;
 pub mod pidge;
 
-use common::{graph, MeshCluster, MeshLevel, MeshVert, MultiResMesh};
+use common::{graph, tri_mesh::TriMesh, MeshCluster, MeshLevel, MeshVert, MultiResMesh};
 
 use glam::Vec4;
 use mesh::winged_mesh::WingedMesh;
@@ -25,8 +25,7 @@ pub fn to_mesh_layer(mesh: &WingedMesh) -> MeshLevel {
 
 pub fn group_and_partition_and_simplify(
     mut mesh: WingedMesh,
-    verts: &[Vec4],
-    normals: &[Vec4],
+    tri_mesh: TriMesh,
     name: String,
 ) -> MultiResMesh {
     let triangle_clustering_config = &metis::MultilevelKWayPartitioningConfig {
@@ -69,7 +68,7 @@ pub fn group_and_partition_and_simplify(
     }
     .into();
 
-    let mut quadrics = mesh.create_quadrics(verts);
+    let mut quadrics = mesh.create_quadrics(&tri_mesh.verts);
 
     // Apply primary partition, that will define the lowest level clusterings
     mesh.partition_full_mesh(
@@ -78,16 +77,18 @@ pub fn group_and_partition_and_simplify(
     )
     .unwrap();
 
-    mesh.group(grouping_config, verts).unwrap();
+    mesh.group(grouping_config, &tri_mesh.verts).unwrap();
 
     mesh.colour_within_clusters(non_contig_even_clustering_config, COLOUR_CLUSTER_SIZE)
         .unwrap();
 
     let mut multi_res = MultiResMesh {
         name,
-        verts: verts
+        full_indices: tri_mesh.indices,
+        verts: tri_mesh
+            .verts
             .iter()
-            .zip(normals)
+            .zip(tri_mesh.normals.iter())
             .map(|(v, n)| MeshVert {
                 pos: [v.x, v.y, v.z, 1.0],
                 normal: [n.x, n.y, n.z, 1.0],
@@ -107,7 +108,7 @@ pub fn group_and_partition_and_simplify(
 
     multi_res
         .clusters
-        .extend_from_slice(&generate_clusters(&mesh, 0, verts, 0, 0));
+        .extend_from_slice(&generate_clusters(&mesh, 0, &tri_mesh.verts, 0, 0));
 
     // Generate more meshes
     for i in 1..10 {
@@ -150,16 +151,18 @@ pub fn group_and_partition_and_simplify(
 
         println!("Reducing within {} groups:", collapse_requirements.len());
 
-        let e = match mesh.reduce_within_groups(verts, &mut quadrics, &collapse_requirements) {
-            Ok(e) => e,
-            Err(e) => {
-                println!(
-                    "Experience error {} with reducing, exiting early with what we have",
-                    e
-                );
-                break;
-            }
-        };
+        let e =
+            match mesh.reduce_within_groups(&tri_mesh.verts, &mut quadrics, &collapse_requirements)
+            {
+                Ok(e) => e,
+                Err(e) => {
+                    println!(
+                        "Experience error {} with reducing, exiting early with what we have",
+                        e
+                    );
+                    break;
+                }
+            };
         println!(
             "Introduced error of {e}. Max edge age: {}, Mean: {}",
             mesh.max_edge_age(),
@@ -184,7 +187,7 @@ pub fn group_and_partition_and_simplify(
 
         println!("{partition_count} Partitions from groups");
 
-        let group_count = mesh.group(grouping_config, verts).unwrap();
+        let group_count = mesh.group(grouping_config, &tri_mesh.verts).unwrap();
 
         mesh.colour_within_clusters(non_contig_even_clustering_config, COLOUR_CLUSTER_SIZE)
             .unwrap();
@@ -199,7 +202,7 @@ pub fn group_and_partition_and_simplify(
         multi_res.clusters.extend_from_slice(&generate_clusters(
             &mesh,
             i,
-            verts,
+            &tri_mesh.verts,
             lower_group_range,
             upper_group_range,
         ));
@@ -445,7 +448,7 @@ mod test {
     #[test]
     fn test_contiguous_meshes() {
         println!("Loading from gltf!");
-        let (mesh, _verts, _norms) = WingedMesh::from_gltf("../../assets/dragon_1m.glb");
+        let (mesh, tri_mesh) = WingedMesh::from_gltf("../../assets/dragon_1m.glb");
 
         let mesh_dual = mesh.generate_face_graph();
 
@@ -458,11 +461,11 @@ mod test {
         let mesh_name = "../../assets/sphere.glb";
 
         println!("Loading from gltf!");
-        let (mesh, verts, norms) = WingedMesh::from_gltf(mesh_name);
+        let (mesh, tri_mesh) = WingedMesh::from_gltf(mesh_name);
 
         //group_and_partition_full_res(working_mesh, &verts, mesh_name.to_owned());
         //apply_simplification(working_mesh, &verts, mesh_name.to_owned());
-        group_and_partition_and_simplify(mesh, &verts, &norms, "".to_owned());
+        group_and_partition_and_simplify(mesh, tri_mesh, "".to_owned());
     }
 
     // #[test]

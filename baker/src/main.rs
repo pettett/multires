@@ -19,7 +19,7 @@ struct Args {
 
 fn bake_mesh(input: std::path::PathBuf, output: std::path::PathBuf) {
     println!("Loading from gltf!");
-    let (mut mesh, verts, normals) = WingedMesh::from_gltf(&input);
+    let (mut mesh, tri_mesh) = WingedMesh::from_gltf(&input);
 
     let num_contiguous = mesh.partition_contiguous();
 
@@ -44,12 +44,8 @@ fn bake_mesh(input: std::path::PathBuf, output: std::path::PathBuf) {
 
     //group_and_partition_full_res(working_mesh, &verts, mesh_name.to_owned());
     //apply_simplification(working_mesh, &verts, mesh_name.to_owned());
-    let multi_res = group_and_partition_and_simplify(
-        mesh,
-        &verts,
-        &normals,
-        input.to_str().unwrap().to_owned(),
-    );
+    let multi_res =
+        group_and_partition_and_simplify(mesh, tri_mesh, input.to_str().unwrap().to_owned());
 
     multi_res.save(output).unwrap();
 }

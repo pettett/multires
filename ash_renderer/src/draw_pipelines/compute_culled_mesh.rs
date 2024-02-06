@@ -16,15 +16,16 @@ use crate::{
     utility::{
         buffer::{AsBuffer, TBuffer},
         device::Device,
-        pooled::command_pool::CommandPool,
         pooled::{
             command_buffer_group::CommandBufferGroup,
+            command_pool::CommandPool,
             descriptor_pool::{
-                DescriptorPool, DescriptorSet, DescriptorSetLayout, DescriptorWriteData,
+                DescriptorPool, DescriptorSet, DescriptorSetLayout, DescriptorSetLayoutBinding,
+                DescriptorWriteData,
             },
         },
         render_pass::RenderPass,
-        {ComputePipeline, GraphicsPipeline, ShaderModule},
+        ComputePipeline, GraphicsPipeline, ShaderModule,
     },
     ModelUniformBufferObject, VkHandle,
 };
@@ -151,8 +152,10 @@ impl ScreenData {
     ) -> Self {
         let device = core.device.clone();
 
-        let command_buffers =
-            CommandBufferGroup::new(core.command_pool.clone(), screen.swapchain_framebuffers.len() as _);
+        let command_buffers = CommandBufferGroup::new(
+            core.command_pool.clone(),
+            screen.swapchain_framebuffers.len() as _,
+        );
 
         for (i, &command_buffer) in command_buffers.iter().enumerate() {
             let command_buffer_begin_info = vk::CommandBufferBeginInfo::builder()
@@ -447,64 +450,28 @@ fn create_graphics_pipeline(
 }
 
 fn create_descriptor_set_layout(device: Arc<Device>) -> Arc<DescriptorSetLayout> {
-    let ubo_layout_bindings = [
-        // layout (binding = 0) readonly buffer ModelUniformBufferObject {
-        // 	mat4 models[];
-        // };
-        vk::DescriptorSetLayoutBinding::builder()
-            .binding(0)
-            .descriptor_count(1)
-            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-            .stage_flags(vk::ShaderStageFlags::MESH_EXT | vk::ShaderStageFlags::COMPUTE)
-            .build(),
-        // layout(binding = 1) buffer Clusters {
-        // 	ClusterData clusters[];
-        // };
-        vk::DescriptorSetLayoutBinding::builder()
-            .binding(1)
-            .descriptor_count(1)
-            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-            .stage_flags(vk::ShaderStageFlags::TASK_EXT | vk::ShaderStageFlags::COMPUTE)
-            .build(),
-        // layout(binding = 2) buffer ShouldDraw {
-        // 	uint should_draw[];
-        // };
-        vk::DescriptorSetLayoutBinding::builder()
-            .binding(2)
-            .descriptor_count(1)
-            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-            .stage_flags(vk::ShaderStageFlags::TASK_EXT | vk::ShaderStageFlags::COMPUTE)
-            .build(),
-        // layout (binding = 3) uniform CameraUniformBufferObject {
-        // 	CameraUniformObject ubo;
-        // };
-        vk::DescriptorSetLayoutBinding::builder()
-            .binding(3)
-            .descriptor_count(1)
-            .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-            .stage_flags(vk::ShaderStageFlags::MESH_EXT | vk::ShaderStageFlags::COMPUTE)
-            .build(),
-        // layout (std430, binding = 4) buffer InputBufferI {
-        // 	s_meshlet meshlets[];
-        // };
-        vk::DescriptorSetLayoutBinding::builder()
-            .binding(4)
-            .descriptor_count(1)
-            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-            .stage_flags(vk::ShaderStageFlags::MESH_EXT)
-            .build(),
-        // layout (std430, binding = 5) buffer InputBufferV {
-        // 	Vertex verts[];
-        // };
-        vk::DescriptorSetLayoutBinding::builder()
-            .binding(5)
-            .descriptor_count(1)
-            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-            .stage_flags(vk::ShaderStageFlags::MESH_EXT)
-            .build(),
+    let bindings = vec![
+        DescriptorSetLayoutBinding::Storage {
+            vis: vk::ShaderStageFlags::MESH_EXT | vk::ShaderStageFlags::COMPUTE,
+        },
+        DescriptorSetLayoutBinding::Storage {
+            vis: vk::ShaderStageFlags::TASK_EXT | vk::ShaderStageFlags::COMPUTE,
+        },
+        DescriptorSetLayoutBinding::Uniform {
+            vis: vk::ShaderStageFlags::TASK_EXT | vk::ShaderStageFlags::COMPUTE,
+        },
+        DescriptorSetLayoutBinding::Uniform {
+            vis: vk::ShaderStageFlags::TASK_EXT | vk::ShaderStageFlags::COMPUTE,
+        },
+        DescriptorSetLayoutBinding::Storage {
+            vis: vk::ShaderStageFlags::MESH_EXT,
+        },
+        DescriptorSetLayoutBinding::Storage {
+            vis: vk::ShaderStageFlags::MESH_EXT,
+        },
     ];
 
-    Arc::new(DescriptorSetLayout::new(device, &ubo_layout_bindings))
+    Arc::new(DescriptorSetLayout::new(device, bindings))
 }
 
 fn create_compute_culled_meshes_descriptor_sets(

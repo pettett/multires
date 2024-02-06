@@ -135,7 +135,7 @@ impl WingedMesh {
 
         const EXACT_CLUSTERING: bool = true;
 
-        let cluster_graph = self.generate_cluster_graph();
+        let cluster_graph = self.generate_guided_cluster_graph();
 
         let group_count = {
             //std::mem::swap(&mut self.groups, &mut new_groups);
@@ -480,7 +480,7 @@ pub mod tests {
             ..Default::default()
         }
         .into();
-        let (mut mesh, verts, _norms) = WingedMesh::from_gltf(TEST_MESH_DRAGON);
+        let (mut mesh, tri_mesh) = WingedMesh::from_gltf(TEST_MESH_DRAGON);
 
         println!("{:?}", mesh.partition_contiguous());
 
@@ -491,7 +491,7 @@ pub mod tests {
             mesh.face_count().div_ceil(STARTING_CLUSTER_SIZE) as _,
         )?;
 
-        mesh.group(test_config, &verts)?;
+        mesh.group(test_config, &tri_mesh.verts)?;
 
         Ok(())
     }
@@ -504,13 +504,13 @@ pub mod tests {
             ..Default::default()
         }
         .into();
-        let (mut mesh, verts, _norms) = WingedMesh::from_gltf(TEST_MESH_LOW);
+        let (mut mesh, tri_mesh) = WingedMesh::from_gltf(TEST_MESH_LOW);
 
         mesh.partition_full_mesh(
             test_config,
             mesh.face_count().div_ceil(STARTING_CLUSTER_SIZE) as _,
         )?;
-        mesh.group(test_config, &verts)?;
+        mesh.group(test_config, &tri_mesh.verts)?;
 
         // What does it mean for two groups to be neighbours?
 

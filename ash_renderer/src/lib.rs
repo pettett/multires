@@ -28,6 +28,7 @@ use crate::{
         structures::*,
         swapchain::SwapChainSupportDetail,
         sync::SyncObjects,
+        ShaderModule,
     },
 };
 
@@ -262,13 +263,11 @@ impl App {
         world.insert_resource(Events::<MeshDrawingPipelineType>::default());
         world.insert_resource(Time::default());
 
-		
         if core.device.features.mesh_shader {
             world.send_event(MeshDrawingPipelineType::IndirectTasks);
         } else {
             world.send_event(MeshDrawingPipelineType::ComputeCulledIndices);
         }
-
 
         let camera = world
             .spawn((CameraController::new(50.0), cam, transform))
@@ -306,6 +305,15 @@ impl App {
         });
 
         world.insert_non_send_resource(Renderer {
+            fragment_colour: ShaderModule::new(
+                device.clone(),
+                bytemuck::cast_slice(include_bytes!("../shaders/spv/frag_colour.frag")),
+            ),
+            fragment_lit: ShaderModule::new(
+                device.clone(),
+                bytemuck::cast_slice(include_bytes!("../shaders/spv/frag_pbr.frag")),
+            ),
+
             graphics_queue,
             present_queue,
             render_pass,
@@ -321,14 +329,11 @@ impl App {
             current_frame: 0,
             is_framebuffer_resized: false,
             app_info_open: true,
-            //FIXME: This should be used directly
-            cluster_count: mesh.cluster_buffer.item_len() as _,
             core,
             screen,
         });
         world.insert_resource(mesh);
         world.insert_resource(FPSMeasure::new());
-
 
         // cleanup(); the 'drop' function will take care of it.
         App {

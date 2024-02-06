@@ -26,6 +26,7 @@ pub fn update_pipeline(
     mut events: EventReader<MeshDrawingPipelineType>,
     mesh_data: Res<MeshDataBuffers>,
     transforms: Query<&Transform>,
+    mut commands: Commands,
 ) {
     let s = events.read().next();
 
@@ -52,7 +53,7 @@ pub fn update_pipeline(
             renderer.descriptor_pool.clone(),
             scene.uniform_transform_buffer.clone(),
             &scene.uniform_camera_buffers,
-            renderer.cluster_count,
+            mesh_data.cluster_count,
             renderer.query,
         )),
         MeshDrawingPipelineType::ComputeCulledMesh => Box::new(ComputeCulledMesh::new(
@@ -65,7 +66,7 @@ pub fn update_pipeline(
             renderer.descriptor_pool.clone(),
             scene.uniform_transform_buffer.clone(),
             &scene.uniform_camera_buffers,
-            renderer.cluster_count,
+            mesh_data.cluster_count,
         )),
         MeshDrawingPipelineType::ComputeCulledIndices => Box::new(ComputeCulledIndices::new(
             renderer.core.clone(),
@@ -77,28 +78,18 @@ pub fn update_pipeline(
             renderer.descriptor_pool.clone(),
             scene.uniform_transform_buffer.clone(),
             &scene.uniform_camera_buffers,
-            renderer.cluster_count,
+            mesh_data.cluster_count,
         )),
-        MeshDrawingPipelineType::DrawIndirect => Box::new(DrawIndirect::new(
-            renderer.core.clone(),
-            &renderer.screen,
-            &mesh_data,
-            renderer.allocator.clone(),
-            &renderer.render_pass,
-            renderer.graphics_queue,
-            renderer.descriptor_pool.clone(),
-            scene.uniform_transform_buffer.clone(),
-            &scene.uniform_camera_buffers,
-            renderer.cluster_count,
-            renderer.query,
-        )),
+        MeshDrawingPipelineType::DrawIndirect => {
+            Box::new(DrawIndirect::new(&renderer, &mesh_data, &scene))
+        }
         MeshDrawingPipelineType::None => unreachable!(),
     };
 
     draw_pipeline.init_swapchain(
         &renderer.core,
         &renderer.screen,
-        renderer.cluster_count,
+        mesh_data.cluster_count,
         scene.uniform_transform_buffer.item_len() as _,
         &renderer.render_pass,
     );
@@ -120,6 +111,7 @@ pub fn draw_frame(
     scene_events: EventWriter<SceneEvent>,
     draw_events: EventWriter<MeshDrawingPipelineType>,
     fps: Res<FPSMeasure>,
+    mesh_data: Res<MeshDataBuffers>,
 ) {
     let wait_fences = [renderer.sync_objects.in_flight_fences[renderer.current_frame]];
 
@@ -145,7 +137,7 @@ pub fn draw_frame(
             Ok(image_index) => image_index,
             Err(vk_result) => match vk_result {
                 vk::Result::ERROR_OUT_OF_DATE_KHR => {
-                    renderer.recreate_swapchain(&scene, &mut cam);
+                    renderer.recreate_swapchain(&scene, &mesh_data, &mut cam);
                     return;
                 }
                 _ => panic!("Failed to acquire Swap Chain Image!"),
@@ -224,7 +216,7 @@ pub fn draw_frame(
     };
     if is_resized || is_sub_optimal {
         renderer.is_framebuffer_resized = false;
-        renderer.recreate_swapchain(&scene, &mut cam);
+        renderer.recreate_swapchain(&scene, &mesh_data, &mut cam);
     }
 
     renderer.current_frame = (renderer.current_frame + 1) % MAX_FRAMES_IN_FLIGHT;

@@ -14,9 +14,11 @@ use crate::{
 
 #[derive(Resource)]
 pub struct MeshDataBuffers {
+    pub cluster_count: u32,
     pub vertex_buffer: Arc<TBuffer<MeshVert>>,
     pub meshlet_buffer: Arc<TBuffer<GpuMeshlet>>,
     pub cluster_buffer: Arc<TBuffer<ClusterData>>,
+    pub meshlet_index_buffer: Arc<TBuffer<u32>>,
     pub index_buffer: Arc<TBuffer<u32>>,
 }
 
@@ -29,11 +31,16 @@ impl MeshDataBuffers {
 
         let (clusters, meshlets) = multires::generate_meshlets(&cluster_order);
 
-        let (indices, _partitions, _groups) = data.indices_partitions_groups(&cluster_order);
+        assert_eq!(clusters.len(), cluster_data.len());
 
-        for (i, submesh) in clusters.into_iter().enumerate() {
-            cluster_data[i].meshlet_start = submesh.meshlet_start;
-            cluster_data[i].meshlet_count = submesh.meshlet_count;
+        let (meshlet_indices, _partitions, _groups) =
+            data.indices_partitions_groups(&cluster_order);
+
+        let cluster_count = clusters.len() as _;
+
+        for (i, cluster) in clusters.into_iter().enumerate() {
+            cluster_data[i].meshlet_start = cluster.meshlet_start;
+            cluster_data[i].meshlet_count = cluster.meshlet_count;
         }
 
         let vertex_buffer = TBuffer::new_filled(
@@ -68,15 +75,26 @@ impl MeshDataBuffers {
             allocator.clone(),
             graphics_queue,
             // Allow index use for testing
+            vk::BufferUsageFlags::INDEX_BUFFER,
+            &data.full_indices,
+            "Indices Buffer",
+        );
+        let meshlet_index_buffer = TBuffer::new_filled(
+            core,
+            allocator.clone(),
+            graphics_queue,
+            // Allow index use for testing
             vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::INDEX_BUFFER,
-            &indices,
+            &meshlet_indices,
             "Indices Buffer",
         );
         Self {
             vertex_buffer,
             meshlet_buffer,
             cluster_buffer,
+            meshlet_index_buffer,
             index_buffer,
+            cluster_count,
         }
     }
 }

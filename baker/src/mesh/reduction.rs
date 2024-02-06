@@ -253,13 +253,13 @@ mod tests {
     // Test that each face generates a valid plane
     #[test]
     pub fn test_planes() -> Result<(), Box<dyn Error>> {
-        let (mesh, verts, _norms) = WingedMesh::from_gltf(TEST_MESH_HIGH);
+        let (mesh, tri_mesh) = WingedMesh::from_gltf(TEST_MESH_HIGH);
 
         // These operations are not especially accurate, large epsilon value
         let e = 0.000001;
 
         for (i, (fid, f)) in mesh.iter_faces().enumerate() {
-            let plane = fid.plane(&mesh, &verts);
+            let plane = fid.plane(&mesh, &tri_mesh.verts);
             let n = plane.normal();
             assert!(
                 ((n.x * n.x + n.y * n.y + n.z * n.z) - 1.0).abs() < e,
@@ -267,7 +267,7 @@ mod tests {
             );
 
             for v in mesh.triangle_from_face(&f) {
-                let v_dist = plane_distance(&plane, verts[v].into()).abs();
+                let v_dist = plane_distance(&plane, tri_mesh.verts[v].into()).abs();
                 assert!(
                     v_dist < e,
                     "Plane invalid at index {v}, tri {i}, value {v_dist}",
@@ -281,7 +281,7 @@ mod tests {
     // Test that each face/plane generates an equivalent quadric matrix
     #[test]
     pub fn test_plane_quadrics() -> Result<(), Box<dyn Error>> {
-        let (mesh, verts, _norms) = WingedMesh::from_gltf(TEST_MESH_HIGH);
+        let (mesh, tri_mesh) = WingedMesh::from_gltf(TEST_MESH_HIGH);
 
         // These operations are not especially accurate, large epsilon value, only valid for errors within around 50 units.
         let e = 0.001;
@@ -289,7 +289,7 @@ mod tests {
         let random_points = [glam::Vec3A::X, glam::Vec3A::Y * 50.0];
 
         for (i, (fid, f)) in mesh.iter_faces().enumerate() {
-            let plane = fid.plane(&mesh, &verts);
+            let plane = fid.plane(&mesh, &tri_mesh.verts);
 
             let mat = plane.fundamental_error_quadric();
 
@@ -303,7 +303,7 @@ mod tests {
             }
 
             for v in mesh.triangle_from_face(&f) {
-                let v = verts[v];
+                let v = tri_mesh.verts[v];
                 // v^t * K_p * v
                 let q_error = mat.quadric_error(v.into());
                 assert!(
@@ -330,12 +330,12 @@ mod tests {
     // Test that each vertex generates a valid quadric matrix that returns 0 at itself.
     #[test]
     pub fn test_vert_quadrics() -> Result<(), Box<dyn Error>> {
-        let (mesh, verts, _norms) = WingedMesh::from_gltf(TEST_MESH_MONK);
+        let (mesh, tri_mesh) = WingedMesh::from_gltf(TEST_MESH_MONK);
 
         let e = 0.0000000001;
 
-        for vid in mesh.iter_verts() {
-            let q = vid.0.generate_error_matrix(&mesh, &verts);
+        for (vid, v) in mesh.iter_verts() {
+            let q = v.generate_error_matrix(&mesh, &tri_mesh.verts);
 
             let cols = q.0.to_cols_array_2d();
             // Assert symmetry
@@ -345,7 +345,7 @@ mod tests {
                 }
             }
 
-            let v = verts[vid.0 .0];
+            let v = tri_mesh.verts[vid.0];
             // v^t * K_p * v
             let q_error = q.quadric_error(v.into());
             assert!(
@@ -359,12 +359,12 @@ mod tests {
 
     #[test]
     pub fn test_reduction() -> Result<(), Box<dyn Error>> {
-        let (mut mesh, verts, _norms) = WingedMesh::from_gltf(TEST_MESH_MONK);
-        let mut quadrics = mesh.create_quadrics(&verts);
+        let (mut mesh, tri_mesh) = WingedMesh::from_gltf(TEST_MESH_MONK);
+        let mut quadrics = mesh.create_quadrics(&tri_mesh.verts);
 
         for _i in 0..4 {
             mesh.assert_valid().unwrap();
-            mesh.reduce_within_groups(&verts, &mut quadrics, &[mesh.face_count() / 4])
+            mesh.reduce_within_groups(&tri_mesh.verts, &mut quadrics, &[mesh.face_count() / 4])
                 .unwrap();
         }
 
@@ -382,19 +382,19 @@ mod tests {
             ..Default::default()
         };
 
-        let (mut mesh, verts, _norms) = WingedMesh::from_gltf(TEST_MESH_MID);
+        let (mut mesh, tri_mesh) = WingedMesh::from_gltf(TEST_MESH_MID);
         mesh.partition_full_mesh(test_config, 300).unwrap();
-        mesh.group(test_config, &verts).unwrap();
+        mesh.group(test_config, &tri_mesh.verts).unwrap();
 
         let mut par_mesh = mesh.clone();
         let sync_mesh = &mut mesh;
         {
-            let mut quadrics = sync_mesh.create_quadrics(&verts);
+            let mut quadrics = sync_mesh.create_quadrics(&tri_mesh.verts);
             for _i in 0..2 {
                 let collapse_requirements: Vec<usize> =
                     sync_mesh.groups.iter().map(|g| g.tris / 4).collect();
                 sync_mesh
-                    .reduce_within_groups(&verts, &mut quadrics, &collapse_requirements)
+                    .reduce_within_groups(&tri_mesh.verts, &mut quadrics, &collapse_requirements)
                     .unwrap();
             }
 
@@ -402,12 +402,12 @@ mod tests {
         }
 
         // {
-        //     let mut quadrics = par_mesh.create_quadrics(&verts);
+        //     let mut quadrics = par_mesh.create_quadrics(&tri_mesh.verts);
         //     for _i in 0..2 {
         //         let collapse_requirements: Vec<usize> =
         //             par_mesh.groups.iter().map(|g| g.tris / 4).collect();
         //         par_mesh
-        //             .par_reduce_within_groups(&verts, &mut quadrics, &collapse_requirements)
+        //             .par_reduce_within_groups(&tri_mesh.verts, &mut quadrics, &collapse_requirements)
         //             .unwrap();
         //     }
         // }

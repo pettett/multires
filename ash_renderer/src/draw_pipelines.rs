@@ -1,15 +1,7 @@
-
-
 use ash::vk;
+use bevy_ecs::schedule::Schedule;
 
-
-
-
-use crate::{
-    core::Core,
-    screen::Screen,
-    utility::{render_pass::RenderPass},
-};
+use crate::{core::Core, screen::Screen, utility::render_pass::RenderPass};
 
 pub mod compute_culled_indices;
 pub mod compute_culled_mesh;
@@ -29,7 +21,14 @@ pub trait DrawPipeline {
         render_pass: &RenderPass,
     );
 
+    /// Draw our stats UI
     fn stats_gui(&mut self, ui: &mut egui::Ui, frame_index: usize);
+
+    /// Notification that the scene has changed, so we need to rebind to model buffers / update for new instances
+    fn on_scene_dirty(&mut self) {}
+
+    /// Notification that the user has selected a new fragment shader, and we need to regenerate our pipelines
+    fn on_fragment_changed(&mut self) {}
 }
 
 pub fn init_rasterization_statue_create_info() -> vk::PipelineRasterizationStateCreateInfo {

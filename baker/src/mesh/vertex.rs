@@ -108,6 +108,45 @@ impl Vertex {
     pub fn unpack(self) -> (Vec<EdgeID>, Vec<EdgeID>) {
         (self.incoming_edges, self.outgoing_edges)
     }
+
+    /// Generate error matrix Q, the sum of Kp for all planes p around this vertex.
+    /// TODO: Eventually we can also add a high penality plane if this is a vertex on a boundary, but manually checking may be easier
+    pub fn generate_error_matrix(&self, mesh: &WingedMesh, verts: &[glam::Vec4]) -> Quadric {
+        let mut q = Quadric::default();
+
+        for &eid in self.outgoing_edges() {
+            let e = mesh.get_edge(eid);
+            let f = e.face;
+
+            let plane = f.plane(mesh, verts);
+
+            // If these two vertices are in the exact same place, we will get a NaN plane.
+            // In this case, there is 'no' error from collapsing between them (as we do not include normals).
+            let k_p = if plane.0.is_nan() {
+                Quadric::default()
+            } else {
+                plane.fundamental_error_quadric()
+            };
+
+            q += k_p;
+
+            if e.twin.is_none() {
+                // Boundary edge, add a plane that stops us moving away from the boundary
+
+                // Edge Plane should have normal of Edge X plane
+                let v = eid.edge_vec(mesh, verts).unwrap();
+
+                let boundary_norm = v.cross(plane.normal());
+
+                let boundary_plane =
+                    Plane::from_normal_and_point(boundary_norm, verts[e.vert_origin.0].into());
+                // Multiply squared error by large factor, as changing the boundary adds a lot of visible error
+                q += boundary_plane.fundamental_error_quadric() * 3000.0;
+            }
+        }
+
+        q
+    }
 }
 
 impl VertID {
@@ -184,39 +223,6 @@ impl VertID {
     /// Generate error matrix Q, the sum of Kp for all planes p around this vertex.
     /// TODO: Eventually we can also add a high penality plane if this is a vertex on a boundary, but manually checking may be easier
     pub fn generate_error_matrix(self, mesh: &WingedMesh, verts: &[glam::Vec4]) -> Quadric {
-        let mut q = Quadric::default();
-
-        for &eid in mesh.get_vert(self).outgoing_edges() {
-            let e = mesh.get_edge(eid);
-            let f = e.face;
-
-            let plane = f.plane(mesh, verts);
-
-            // If these two vertices are in the exact same place, we will get a NaN plane.
-            // In this case, there is 'no' error from collapsing between them (as we do not include normals).
-            let k_p = if plane.0.is_nan() {
-                Quadric::default()
-            } else {
-                plane.fundamental_error_quadric()
-            };
-
-            q += k_p;
-
-            if e.twin.is_none() {
-                // Boundary edge, add a plane that stops us moving away from the boundary
-
-                // Edge Plane should have normal of Edge X plane
-                let v = eid.edge_vec(mesh, verts).unwrap();
-
-                let boundary_norm = v.cross(plane.normal());
-
-                let boundary_plane =
-                    Plane::from_normal_and_point(boundary_norm, verts[e.vert_origin.0].into());
-                // Multiply squared error by large factor, as changing the boundary adds a lot of visible error
-                q += boundary_plane.fundamental_error_quadric() * 3000.0;
-            }
-        }
-
-        q
+        mesh.get_vert(self).generate_error_matrix(mesh, verts)
     }
 }

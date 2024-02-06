@@ -39,6 +39,7 @@ pub struct MeshVert {
 pub struct MultiResMesh {
     pub name: String,
     pub verts: Vec<MeshVert>,
+    pub full_indices: Box<[u32]>,
     pub lods: Vec<MeshLevel>,
     pub clusters: Vec<MeshCluster>,
     pub group_count: usize,

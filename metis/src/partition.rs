@@ -685,6 +685,8 @@ impl PartitioningConfig {
         // 				METIS ERROR MEMORY Indicates that it could not allocate the required memory.
         // 				METIS ERROR Indicates some other type of error.
 
+        assert_eq!(part.len(), nodes);
+
         match status {
             rstatus_et_METIS_OK => Ok(part),
             rstatus_et_METIS_ERROR_INPUT => Err(PartitioningError::Input),

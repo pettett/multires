@@ -6,7 +6,10 @@ use winapi::ctypes::c_char;
 use crate::VkHandle;
 
 use super::{
-    extensions::Extensions, instance::Instance, physical_device::{DeviceFeatureSet, PhysicalDevice}, structures::QueueFamilyIndices, surface::Surface
+    instance::Instance,
+    physical_device::{DeviceFeatureSet, PhysicalDevice},
+    structures::QueueFamilyIndices,
+    surface::Surface,
 };
 
 pub struct Device {
@@ -18,6 +21,7 @@ pub struct Device {
     pub fn_swapchain: ash::extensions::khr::Swapchain,
     handle: ash::Device,
 }
+
 impl std::ops::Deref for Device {
     type Target = ash::Device;
 
@@ -25,6 +29,7 @@ impl std::ops::Deref for Device {
         &self.handle
     }
 }
+
 impl Drop for Device {
     fn drop(&mut self) {
         unsafe {
@@ -44,7 +49,7 @@ impl Device {
     pub fn create_logical_device(
         instance: Arc<Instance>,
         physical_device: Arc<PhysicalDevice>,
-        validation: &super::debug::ValidationInfo, 
+        validation: &super::debug::ValidationInfo,
         surface: &Surface,
     ) -> (Arc<Self>, QueueFamilyIndices) {
         let indices = instance.find_queue_family(physical_device.handle(), surface);

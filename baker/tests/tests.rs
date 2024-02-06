@@ -87,7 +87,7 @@ fn test_determinacy() {
     let mesh_name = "../../assets/rock.glb";
 
     println!("Loading from gltf!");
-    let (mut mesh1, verts, norms) = WingedMesh::from_gltf(mesh_name);
+    let (mut mesh1, tri_mesh) = WingedMesh::from_gltf(mesh_name);
 
     let mut mesh0 = mesh1.clone();
 
@@ -98,8 +98,8 @@ fn test_determinacy() {
     assert_eq!(num_contiguous.len(), 1);
     //group_and_partition_full_res(working_mesh, &verts, mesh_name.to_owned());
     //apply_simplification(working_mesh, &verts, mesh_name.to_owned());
-    group_and_partition_and_simplify(&mut mesh0, &verts);
-    group_and_partition_and_simplify(&mut mesh1, &verts);
+    group_and_partition_and_simplify(&mut mesh0, &tri_mesh.verts);
+    group_and_partition_and_simplify(&mut mesh1, &tri_mesh.verts);
 
     assert_eq!(mesh0, mesh1)
 }

@@ -16,12 +16,16 @@ use crate::{
     utility::{
         buffer::{AsBuffer, TBuffer},
         device::Device,
-        pooled::command_pool::CommandPool,
-        pooled::{command_buffer_group::CommandBufferGroup, descriptor_pool::{
-            DescriptorPool, DescriptorSet, DescriptorSetLayout, DescriptorWriteData,
-        }},
+        pooled::{
+            command_buffer_group::CommandBufferGroup,
+            command_pool::CommandPool,
+            descriptor_pool::{
+                DescriptorPool, DescriptorSet, DescriptorSetLayout, DescriptorSetLayoutBinding,
+                DescriptorWriteData,
+            },
+        },
         render_pass::RenderPass,
-        {ComputePipeline, GraphicsPipeline, ShaderModule},
+        ComputePipeline, GraphicsPipeline, ShaderModule,
     },
     vertex::Vertex,
     ModelUniformBufferObject, VkHandle,
@@ -97,7 +101,7 @@ impl ComputeCulledIndices {
             allocator.clone(),
             graphics_queue,
             vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::INDEX_BUFFER,
-            &vec![0; (mesh_data.index_buffer.size() * 2) as usize],
+            &vec![0; (mesh_data.meshlet_index_buffer.size() * 2) as usize],
             "Result Indices Buffer",
         );
 
@@ -107,9 +111,9 @@ impl ComputeCulledIndices {
 
         for i in 0..instance_count {
             draw_indexed_commands.push(vk::DrawIndexedIndirectCommand {
-                index_count: mesh_data.index_buffer.item_len() as _,
+                index_count: mesh_data.meshlet_index_buffer.item_len() as _,
                 instance_count: 1,
-                first_index: (mesh_data.index_buffer.item_len() * i) as _,
+                first_index: (mesh_data.meshlet_index_buffer.item_len() * i) as _,
                 vertex_offset: 0,
                 first_instance: i as _,
             });
@@ -135,7 +139,7 @@ impl ComputeCulledIndices {
             &mesh_data.cluster_buffer,
             //&texture_image,
             &result_indices_buffer,
-            &mesh_data.index_buffer,
+            &mesh_data.meshlet_index_buffer,
             &draw_indexed_indirect_buffer,
             screen.swapchain().images.len(),
         );
@@ -152,7 +156,7 @@ impl ComputeCulledIndices {
             should_draw_pipeline,
             result_indices_buffer,
             draw_indexed_indirect_buffer,
-            indices_buffer: mesh_data.index_buffer.clone(),
+            indices_buffer: mesh_data.meshlet_index_buffer.clone(),
         }
     }
 }
@@ -198,8 +202,10 @@ impl ScreenData {
         render_pass: &RenderPass,
     ) -> Self {
         let device = core.device.clone();
-        let command_buffers =
-            CommandBufferGroup::new(core.command_pool.clone(), screen.swapchain_framebuffers.len() as _);
+        let command_buffers = CommandBufferGroup::new(
+            core.command_pool.clone(),
+            screen.swapchain_framebuffers.len() as _,
+        );
 
         for (i, &command_buffer) in command_buffers.iter().enumerate() {
             let command_buffer_begin_info = vk::CommandBufferBeginInfo::builder()
@@ -572,80 +578,36 @@ fn create_graphics_pipeline(
 }
 
 fn create_descriptor_set_layout(device: Arc<Device>) -> Arc<DescriptorSetLayout> {
-    let ubo_layout_bindings = [
-        // layout (binding = 0) readonly buffer ModelUniformBufferObject {
-        // 	mat4 models[];
-        // };
-        vk::DescriptorSetLayoutBinding::builder()
-            .binding(0)
-            .descriptor_count(1)
-            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-            .stage_flags(
-                vk::ShaderStageFlags::MESH_EXT
-                    | vk::ShaderStageFlags::COMPUTE
-                    | vk::ShaderStageFlags::VERTEX,
-            )
-            .build(),
-        // layout(binding = 1) buffer Clusters {
-        // 	ClusterData clusters[];
-        // };
-        vk::DescriptorSetLayoutBinding::builder()
-            .binding(1)
-            .descriptor_count(1)
-            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-            .stage_flags(vk::ShaderStageFlags::TASK_EXT | vk::ShaderStageFlags::COMPUTE)
-            .build(),
-        // layout(binding = 2) buffer ShouldDraw {
-        // 	uint should_draw[];
-        // };
-        vk::DescriptorSetLayoutBinding::builder()
-            .binding(2)
-            .descriptor_count(1)
-            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-            .stage_flags(vk::ShaderStageFlags::TASK_EXT | vk::ShaderStageFlags::COMPUTE)
-            .build(),
-        // layout (binding = 3) uniform CameraUniformBufferObject {
-        // 	CameraUniformObject ubo;
-        // };
-        vk::DescriptorSetLayoutBinding::builder()
-            .binding(3)
-            .descriptor_count(1)
-            .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-            .stage_flags(vk::ShaderStageFlags::COMPUTE | vk::ShaderStageFlags::VERTEX)
-            .build(),
-        // layout (std430, binding = 4) buffer InputBufferI {
-        // 	s_meshlet meshlets[];
-        // };
-        vk::DescriptorSetLayoutBinding::builder()
-            .binding(4)
-            .descriptor_count(1)
-            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-            .stage_flags(vk::ShaderStageFlags::MESH_EXT)
-            .build(),
-        // layout (std430, binding = 5) buffer InputBufferV {
-        // 	Vertex verts[];
-        // };
-        vk::DescriptorSetLayoutBinding::builder()
-            .binding(5)
-            .descriptor_count(1)
-            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-            .stage_flags(vk::ShaderStageFlags::COMPUTE)
-            .build(),
-        vk::DescriptorSetLayoutBinding::builder()
-            .binding(6)
-            .descriptor_count(1)
-            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-            .stage_flags(vk::ShaderStageFlags::COMPUTE)
-            .build(),
-        vk::DescriptorSetLayoutBinding::builder()
-            .binding(7)
-            .descriptor_count(1)
-            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-            .stage_flags(vk::ShaderStageFlags::COMPUTE)
-            .build(),
+    let bindings = vec![
+        DescriptorSetLayoutBinding::Storage {
+            vis: vk::ShaderStageFlags::MESH_EXT
+                | vk::ShaderStageFlags::COMPUTE
+                | vk::ShaderStageFlags::VERTEX,
+        },
+        DescriptorSetLayoutBinding::Storage {
+            vis: vk::ShaderStageFlags::TASK_EXT | vk::ShaderStageFlags::COMPUTE,
+        },
+        DescriptorSetLayoutBinding::Storage {
+            vis: vk::ShaderStageFlags::TASK_EXT | vk::ShaderStageFlags::COMPUTE,
+        },
+        DescriptorSetLayoutBinding::Uniform {
+            vis: vk::ShaderStageFlags::COMPUTE | vk::ShaderStageFlags::VERTEX,
+        },
+        DescriptorSetLayoutBinding::Storage {
+            vis: vk::ShaderStageFlags::MESH_EXT,
+        },
+        DescriptorSetLayoutBinding::Storage {
+            vis: vk::ShaderStageFlags::COMPUTE,
+        },
+        DescriptorSetLayoutBinding::Storage {
+            vis: vk::ShaderStageFlags::COMPUTE,
+        },
+        DescriptorSetLayoutBinding::Storage {
+            vis: vk::ShaderStageFlags::COMPUTE,
+        },
     ];
 
-    Arc::new(DescriptorSetLayout::new(device, &ubo_layout_bindings))
+    Arc::new(DescriptorSetLayout::new(device, bindings))
 }
 
 fn create_compute_culled_indices_descriptor_sets(
