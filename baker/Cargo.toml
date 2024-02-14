@@ -23,3 +23,4 @@ indicatif = { version = "0.17", features = ["rayon"], optional = true }
 parking_lot = "0.12"
 clap.workspace = true
 glob = "0.3"
+meshopt = "0.2.0"

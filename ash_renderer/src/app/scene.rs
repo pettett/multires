@@ -4,9 +4,7 @@ use ash::vk;
 use bevy_ecs::prelude::*;
 use common_renderer::components::{camera::Camera, transform::Transform};
 
-use crate::{
-    spiral::Spiral, utility::buffer::TBuffer, CameraUniformBufferObject, ModelUniformBufferObject,
-};
+use crate::{spiral::Spiral, utility::buffer::TBuffer};
 
 use super::renderer::{MeshDrawingPipelineType, Renderer};
 #[derive(Debug, Clone, Copy, Event)]
@@ -14,13 +12,48 @@ pub enum SceneEvent {
     AddInstances(usize),
     UpdateInstanceBuffers,
 }
+
+#[repr(C)]
+#[derive(Clone, Debug, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct ModelUniformBufferObject {
+    pub model: glam::Mat4,
+    pub inv_model: glam::Mat4,
+}
+
+#[repr(C)]
+#[derive(Clone, Debug, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct CameraUniformBufferObject {
+    view_proj: glam::Mat4,
+    // Freezable view-proj matrix, for culling calculations
+    culling_view_proj: glam::Mat4,
+    pub cam_pos: glam::Vec3,
+    pub target_error: f32,
+}
+
+impl CameraUniformBufferObject {
+    pub fn new(view_proj: glam::Mat4, cam_pos: glam::Vec3, target_error: f32) -> Self {
+        Self {
+            view_proj,
+            culling_view_proj: view_proj,
+            cam_pos,
+            target_error,
+        }
+    }
+    pub fn update_view_proj(&mut self, view_proj: glam::Mat4, frozen: bool) {
+        self.view_proj = view_proj;
+        if !frozen {
+            self.culling_view_proj = view_proj
+        }
+    }
+}
+
 #[derive(Resource)]
 pub struct Scene {
     //texture_image: Image,
     pub uniform_transform_buffer: Arc<TBuffer<ModelUniformBufferObject>>,
     pub uniform_camera: CameraUniformBufferObject,
-    pub uniform_camera_buffers: Vec<Arc<TBuffer<CameraUniformBufferObject>>>,
     pub target_error: f32,
+    pub uniform_camera_buffers: Vec<Arc<TBuffer<CameraUniformBufferObject>>>,
     pub freeze_pos: bool,
     pub instances: usize,
 }
@@ -32,7 +65,10 @@ impl Scene {
         camera_transform: &Transform,
         current_image: usize,
     ) {
-        self.uniform_camera.view_proj = camera.build_view_projection_matrix(camera_transform);
+        self.uniform_camera.update_view_proj(
+            camera.build_view_projection_matrix(camera_transform),
+            self.freeze_pos,
+        );
 
         if !self.freeze_pos {
             self.uniform_camera.cam_pos = (*camera_transform.get_pos()).into();

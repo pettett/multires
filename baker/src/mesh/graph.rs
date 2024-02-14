@@ -366,7 +366,7 @@ pub mod test {
         let (mut mesh, tri_mesh) = WingedMesh::from_gltf(mesh);
 
         // Apply primary partition, that will define the lowest level clusterings
-        mesh.partition_full_mesh(test_config, 9)?;
+        mesh.partition_full_mesh(test_config, 9, &tri_mesh.verts)?;
 
         println!(
             "Faces: {}, Verts: {}, Partitions: {}",
@@ -439,8 +439,8 @@ pub mod test {
         let (mut mesh, tri_mesh) = WingedMesh::from_gltf(mesh);
 
         // Apply primary partition, that will define the lowest level clusterings
-        mesh.partition_within_groups(test_config, None, Some(60))?;
-        mesh.group(test_config, &tri_mesh.verts).unwrap();
+        mesh.partition_within_groups(test_config, &tri_mesh.verts, None, Some(60))?;
+        mesh.group(test_config).unwrap();
 
         graph::petgraph_to_svg(
             &mesh.generate_guided_cluster_graph(),
@@ -469,8 +469,9 @@ pub mod test {
         println!("Faces: {}, Verts: {}", mesh.face_count(), mesh.vert_count());
 
         // Apply primary partition, that will define the lowest level clusterings
-        mesh.partition_full_mesh(test_config, 60).unwrap();
-        mesh.group(test_config, &tri_mesh.verts).unwrap();
+        mesh.partition_full_mesh(test_config, 60, &tri_mesh.verts)
+            .unwrap();
+        mesh.group(test_config).unwrap();
 
         let effect_graph = mesh.generate_group_effect_graph();
 
@@ -518,9 +519,9 @@ pub mod test {
         println!("Faces: {}, Verts: {}", mesh.face_count(), mesh.vert_count());
 
         // Apply primary partition, that will define the lowest level clusterings
-        mesh.partition_within_groups(test_config, None, Some(60))?;
+        mesh.partition_within_groups(test_config, &tri_mesh.verts, None, Some(60))?;
 
-        mesh.group(test_config, &tri_mesh.verts)?;
+        mesh.group(test_config)?;
         let mut graph: petgraph::Graph<(), ()> = petgraph::Graph::new();
 
         let mut old_part_nodes: Vec<_> =
@@ -538,7 +539,7 @@ pub mod test {
 
             seen_groups += mesh.groups.len();
 
-            mesh.partition_within_groups(test_config, Some(2), None)?;
+            mesh.partition_within_groups(test_config, &tri_mesh.verts, Some(2), None)?;
 
             let new_part_nodes: Vec<_> =
                 mesh.clusters.iter().map(|_o| graph.add_node(())).collect();
@@ -553,7 +554,7 @@ pub mod test {
 
             old_part_nodes = new_part_nodes;
 
-            mesh.group(test_config, &tri_mesh.verts)?;
+            mesh.group(test_config)?;
 
             if mesh.clusters.len() <= 2 {
                 break;

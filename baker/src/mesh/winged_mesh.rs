@@ -1,5 +1,5 @@
 use anyhow::Context;
-use common::{tri_mesh::TriMesh, ClusterInfo};
+use common::tri_mesh::TriMesh;
 use glam::{Vec3, Vec4};
 
 use std::{collections::HashSet, fs};
@@ -7,6 +7,7 @@ use std::{collections::HashSet, fs};
 use crate::pidge::Pidge;
 
 use super::{
+    cluster_info::ClusterInfo,
     edge::{EdgeID, EdgeIter, HalfEdge},
     face::{Face, FaceID},
     group_info::GroupInfo,
@@ -829,15 +830,15 @@ pub mod test {
 
         mesh.assert_valid().unwrap();
 
-        mesh.partition_within_groups(test_config, None, Some(60))?;
+        mesh.partition_within_groups(test_config, &tri_mesh.verts, None, Some(60))?;
 
         mesh.assert_valid().unwrap();
 
-        mesh.group(test_config, &tri_mesh.verts)?;
+        mesh.group(test_config)?;
 
         mesh.assert_valid().unwrap();
 
-        mesh.partition_within_groups(test_config, Some(2), None)?;
+        mesh.partition_within_groups(test_config, &tri_mesh.verts, Some(2), None)?;
 
         println!("{} {}", mesh.cluster_count(), mesh.groups.len());
 
@@ -861,7 +862,7 @@ pub mod test {
         let (mut mesh, tri_mesh) = WingedMesh::from_gltf(mesh);
 
         // Apply primary partition, that will define the lowest level clusterings
-        mesh.partition_within_groups(test_config, None, Some(60))?;
+        mesh.partition_within_groups(test_config, &tri_mesh.verts, None, Some(60))?;
 
         let mut boundary_face_ratio = 0.0;
         for pi in 0..mesh.clusters.len() {
@@ -1016,8 +1017,12 @@ pub mod test {
             ..Default::default()
         };
 
-        mesh.partition_full_mesh(test_config, mesh.verts.len().div_ceil(60) as u32)
-            .unwrap();
+        mesh.partition_full_mesh(
+            test_config,
+            mesh.verts.len().div_ceil(60) as u32,
+            &tri_mesh.verts,
+        )
+        .unwrap();
 
         let mut embed_prop = 0.0;
 
@@ -1087,7 +1092,7 @@ pub mod test {
         for i in 9..50 {
             println!("{i}");
 
-            mesh.partition_full_mesh(test_config, i)?;
+            mesh.partition_full_mesh(test_config, i, &tri_mesh.verts)?;
 
             println!("Partitioned");
             let mut graph = mesh.generate_face_graph();

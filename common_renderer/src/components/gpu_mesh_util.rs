@@ -3,20 +3,10 @@ use std::cmp;
 use common::{MeshCluster, MultiResMesh};
 
 #[repr(C)]
-#[derive(
-    crevice::std430::AsStd430,
-    bytemuck::Pod,
-    Clone,
-    Copy,
-    bytemuck::Zeroable,
-    PartialEq,
-    Debug,
-    Default,
-)]
+#[derive(crevice::std430::AsStd430, Clone, Copy, PartialEq, Debug)]
 pub struct ClusterData {
-    pub center_x: f32,
-    pub center_y: f32,
-    pub center_z: f32,
+    pub center: mint::Vector3<f32>,
+
     // Range into the index array that this submesh resides
     pub index_offset: u32,
     pub index_count: u32,
@@ -36,6 +26,9 @@ pub struct ClusterData {
     _4: i32,
     pub meshlet_start: u32,
     pub meshlet_count: u32,
+
+    tight_sphere: mint::Vector4<f32>,
+    culling_cone: mint::Vector4<f32>,
 }
 
 impl ClusterData {
@@ -75,11 +68,11 @@ impl MultiResData for MultiResMesh {
 
         // Sorting by group index allows us to represent all children with a min/max child pair
         // As they have also share some properties, this will also slightly improve GPU compute efficiency
-        clusters.sort_unstable_by_key(|x| cmp::Reverse(x.info.group_index));
+        clusters.sort_unstable_by_key(|x| cmp::Reverse(x.group_index));
 
         let mut groups = vec![Vec::new(); self.group_count];
         for i in 0..clusters.len() {
-            groups[clusters[i].info.group_index].push(i);
+            groups[clusters[i].group_index].push(i);
         }
 
         (clusters, groups)
@@ -106,15 +99,20 @@ impl MultiResData for MultiResMesh {
                 index_offset: index_sum,
                 index_count,
                 error: cluster.error,
-                center_x: cluster.saturated_sphere.center().x,
-                center_y: cluster.saturated_sphere.center().y,
-                center_z: cluster.saturated_sphere.center().z,
+                center: cluster.saturated_bound.center().into(),
+
                 parent0: -1,
                 parent1: -1,
                 co_parent: -1,
-                radius: cluster.saturated_sphere.radius(),
+                radius: cluster.saturated_bound.radius(),
                 layer: cluster.lod as _,
-                ..ClusterData::default()
+                max_child_index: 0,
+                min_child_index: 0,
+                _4: 0,
+                meshlet_start: 0,
+                meshlet_count: 0,
+                tight_sphere: cluster.tight_bound.packed().into(),
+                culling_cone: cluster.tight_cone.packed().into(),
             });
 
             index_sum += index_count;
@@ -127,11 +125,11 @@ impl MultiResData for MultiResMesh {
         for (cluster_idx, &cluster_node_idx) in cluster_nodes.iter().enumerate() {
             let i = *dag.node_weight(cluster_node_idx).unwrap();
 
-            let cluster_group_idx = cluster_order[i].info.group_index;
+            let cluster_group_idx = cluster_order[i].group_index;
 
             assert!(cluster_groups[cluster_group_idx].contains(&cluster_idx));
 
-            let Some(child_group_idx) = cluster_order[i].info.child_group_index else {
+            let Some(child_group_idx) = cluster_order[i].child_group_index else {
                 continue;
             };
 
@@ -192,7 +190,7 @@ impl MultiResData for MultiResMesh {
                 }
             };
 
-            if let Some(child_group) = cluster_order[i].info.child_group_index {
+            if let Some(child_group) = cluster_order[i].child_group_index {
                 let min_child_index = *cluster_groups[child_group].iter().min().unwrap();
                 let max_child_index = *cluster_groups[child_group].iter().max().unwrap();
 
@@ -227,13 +225,13 @@ impl MultiResData for MultiResMesh {
             for _ in 0..(index_count / 3) {
                 partitions.push(cluster_idx as i32);
             }
-            groups.push(cluster.info.group_index as i32);
+            groups.push(cluster.group_index as i32);
 
             cluster_idx += 1;
 
             // Push to indices *after* recording the offset above
             for i in 0..cluster.colour_count() {
-                indices.extend_from_slice(&cluster.indices_for_colour(i));
+                indices.extend_from_slice(&cluster.meshlet_for_colour(i).indices());
             }
         }
 

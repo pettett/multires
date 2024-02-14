@@ -55,6 +55,7 @@ pub fn update_pipeline(
             &scene.uniform_camera_buffers,
             mesh_data.cluster_count,
             renderer.query,
+            renderer.mesh_mode,
         )),
         MeshDrawingPipelineType::ComputeCulledMesh => Box::new(ComputeCulledMesh::new(
             renderer.core.clone(),

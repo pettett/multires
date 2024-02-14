@@ -4,8 +4,7 @@ use common::MeshCluster;
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct PackedTri {
-    pub t: [u8; 3],
-    pub _0: u8,
+    pub t: [u8; 4],
 }
 
 #[repr(C)]
@@ -36,57 +35,72 @@ unsafe impl bytemuck::Pod for GpuCluster {}
 //     dirty: bool,
 // }
 
-pub fn generate_meshlets(cluster_order: &[&MeshCluster]) -> (Vec<GpuCluster>, Vec<GpuMeshlet>) {
+pub fn generate_meshlets(
+    cluster_order: &[&MeshCluster],
+) -> (Vec<GpuCluster>, Vec<GpuMeshlet>, Vec<GpuMeshlet>) {
     println!("Generating meshlets!");
 
     // Precondition: partition indexes completely span in some range 0..N
-    let mut meshlets = Vec::new();
-    let mut clusters = Vec::new();
+    let mut meshlets = Vec::with_capacity(cluster_order.len());
+    let mut clusters = Vec::with_capacity(cluster_order.len());
+    let mut strip_meshlets = Vec::with_capacity(cluster_order.len());
 
     for cluster in cluster_order {
         let mut s = GpuCluster::zeroed();
 
         s.meshlet_start = meshlets.len() as _;
 
-        for c in 0..cluster.colour_count() {
-            let mut m = GpuMeshlet::zeroed();
+        for meshlet in cluster.meshlets() {
+            //TRIANGLE LIST
+            {
+                let mut m = GpuMeshlet::zeroed();
 
-            assert!(cluster.indices_for_colour(c).len() <= m.triangles.len() * 3);
+                assert!(meshlet.local_indices().len() <= m.triangles.len() * 3);
+                assert!(meshlet.verts().len() <= m.vertices.len());
 
-            for &vert in cluster.indices_for_colour(c) {
-                // If unique, add to list
-                let idx = (0..m.vertex_count as u8).find(|&j| m.vertices[j as usize] == vert);
+                for (tri_idx, tri) in meshlet.local_indices().chunks(3).enumerate() {
+                    assert_eq!(tri.len(), 3);
+                    // Pack triangles into a single uint
+                    for i in 0..3 {
+                        assert!(tri[i] < meshlet.vert_count() as _);
 
-                // Use byte addressing within the vertex array
-                let idx = if let Some(idx) = idx {
-                    idx
-                } else {
-                    assert!((m.vertex_count as usize) < m.vertices.len());
+                        m.triangles[tri_idx].t[i] = tri[i] as _;
+                    }
+                }
+                for (i, &vert) in meshlet.verts().iter().enumerate() {
+                    m.vertices[i] = vert;
+                }
+                m.tri_count = (meshlet.local_indices().len() / 3) as _;
+                m.vertex_count = meshlet.verts().len() as _;
 
-                    m.vertex_count += 1;
-
-                    m.vertices[m.vertex_count as usize - 1] = vert;
-                    (m.vertex_count - 1) as u8
-                };
-
-                // Pack triangles into a single uint
-                let tri_idx = (m.tri_count as usize) / 3;
-                let offset = (m.tri_count as usize) % 3;
-
-                m.triangles[tri_idx].t[offset] = idx;
-
-                m.tri_count += 1;
+                meshlets.push(m);
             }
 
-            assert_eq!(m.tri_count % 3, 0);
-            m.tri_count /= 3;
+            //TRIANGLE STRIP
+            {
+                let mut stripped_m = GpuMeshlet::zeroed();
 
-            meshlets.push(m);
+                for (tri_idx, indices) in meshlet.strip_indices().chunks(4).enumerate() {
+                    for i in 0..indices.len() {
+                        assert!(indices[i] < meshlet.vert_count() as _);
+
+                        stripped_m.triangles[tri_idx].t[i] = indices[i] as _;
+                    }
+                }
+
+                for (i, &vert) in meshlet.verts().iter().enumerate() {
+                    stripped_m.vertices[i] = vert;
+                }
+
+                stripped_m.tri_count = (meshlet.strip_indices().len().div_ceil(4)) as _;
+                stripped_m.vertex_count = meshlet.verts().len() as _;
+                strip_meshlets.push(stripped_m);
+            }
         }
 
         s.meshlet_count = meshlets.len() as u32 - s.meshlet_start;
         clusters.push(s);
     }
 
-    (clusters, meshlets)
+    (clusters, meshlets, strip_meshlets)
 }

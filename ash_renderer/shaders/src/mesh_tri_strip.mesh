@@ -12,9 +12,8 @@
 #include "structs\meshlet.glsl" // s_meshlet
 #include "structs\model.glsl" // Model
 
- 
+  
 const uint GROUP_SIZE = 32;
-
 
 layout (binding = 0) readonly buffer ModelUniformBufferObject {
     Model models[];
@@ -65,7 +64,8 @@ void main() {
 	vec3 colour = integer_to_rgb(meshlet_index);
 
 	const uint vertex_count = min(MAX_VERTS, meshlets[meshlet_index].vertex_count);
-	const uint primitive_count = min(MAX_PRIMITIVES, meshlets[meshlet_index].tri_count);
+
+	const uint primitive_count = min(MAX_PRIMITIVES, meshlets[meshlet_index].tri_count * 4 - 2);
 
     SetMeshOutputsEXT(vertex_count, primitive_count);
 
@@ -84,14 +84,34 @@ void main() {
 		OUT[i].fragTexCoord = vec2(1, 1);
     }
 
+	// Unroll strip compressed index array
+
 	[[unroll]]
-    for (uint i = local_id; i < primitive_count; i += GROUP_SIZE) {
+    for (uint i = local_id; i < meshlets[meshlet_index].tri_count; i += GROUP_SIZE) {
+
 		uint tri = meshlets[meshlet_index].indices[i];
 
 		uint a = (tri >> 0) & 255;
 		uint b = (tri >> 8) & 255;
-		uint c = (tri >> 16) & 255;
 
-        gl_PrimitiveTriangleIndicesEXT[i] = uvec3(a, b, c);
+		if (i > 0){
+			uint prev_tri = meshlets[meshlet_index].indices[i-1];
+
+			uint prev_c = (prev_tri >> (8*2)) & 255;
+			uint prev_d = (prev_tri >> (8*3)) & 255;
+
+			gl_PrimitiveTriangleIndicesEXT[i * 4 - 1] = uvec3(prev_c, prev_d, a);
+			gl_PrimitiveTriangleIndicesEXT[i * 4 - 2] = uvec3(prev_d, b, a);
+		}
+
+		uint c = (tri >> (8*2)) & 255;
+		uint d = (tri >> (8*3)) & 255;
+
+		// gl_PrimitiveTriangleIndicesEXT has triangles sourced from indexes:
+		// 00 1111 2222 etc
+
+		gl_PrimitiveTriangleIndicesEXT[i * 4 + 0] = uvec3(a, b, c);
+		gl_PrimitiveTriangleIndicesEXT[i * 4 + 1] = uvec3(b, d,  c);
     }
+
 }

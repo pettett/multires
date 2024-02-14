@@ -7,7 +7,7 @@ use gpu_allocator::vulkan::Allocator;
 
 use crate::{
     core::Core,
-    draw_pipelines::DrawPipeline,
+    draw_pipelines::{indirect_tasks::MeshShaderMode, DrawPipeline},
     gui::{gui::Gui, window::GuiWindow},
     screen::Screen,
     utility::{
@@ -46,6 +46,7 @@ pub struct Renderer {
     pub gui: Gui,
     pub windows: Vec<Box<dyn GuiWindow>>,
     pub current_pipeline: MeshDrawingPipelineType,
+    pub mesh_mode: MeshShaderMode,
     pub sync_objects: SyncObjects,
     pub query: bool,
     pub current_frame: usize,
@@ -130,9 +131,7 @@ impl Renderer {
                     }
 
                     ui.add(fps);
-                    if self.query {
-                        self.draw_pipeline.stats_gui(ui, image_index);
-                    }
+
                     ui.label(format!("Current Pipeline: {:?}", self.current_pipeline));
 
                     ui.add_enabled_ui(self.core.device.features.mesh_shader, |ui| {
@@ -159,8 +158,34 @@ impl Renderer {
                         add_more = true;
                     }
 
-                    if ui.checkbox(&mut self.query, "Enable Queries").clicked() {
+                    if egui::ComboBox::from_label("Select one!")
+                        .selected_text(format!("{:?}", self.mesh_mode))
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(
+                                &mut self.mesh_mode,
+                                MeshShaderMode::TriangleList,
+                                "Triangle List",
+                            );
+                            ui.selectable_value(
+                                &mut self.mesh_mode,
+                                MeshShaderMode::TriangleStrip,
+                                "Triangle Strip",
+                            );
+                        })
+                        .response
+                        .clicked()
+                    {
+                        // Refresh render pipeline
                         draw_events.send(self.current_pipeline)
+                    }
+
+                    if ui.checkbox(&mut self.query, "Enable Queries").clicked() {
+                        // Refresh render pipeline
+                        draw_events.send(self.current_pipeline)
+                    }
+
+                    if self.query {
+                        self.draw_pipeline.stats_gui(ui, image_index);
                     }
                 });
 

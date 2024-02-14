@@ -14,7 +14,9 @@ use crate::{
         draw_systems::{draw_frame, tick_clocks, update_pipeline},
         mesh_data::MeshDataBuffers,
         renderer::{MeshDrawingPipelineType, Renderer},
-        scene::{process_scene_events, SceneEvent},
+        scene::{
+            process_scene_events, CameraUniformBufferObject, ModelUniformBufferObject, SceneEvent,
+        },
     },
     core::Core,
     gui::allocator_visualiser_window::AllocatorVisualiserWindow,
@@ -250,11 +252,11 @@ impl App {
         let cam = Camera::new(1.0);
         let transform = Transform::new(mid + Vec3A::Y * 200.0, Quat::IDENTITY);
 
-        let uniform_camera = CameraUniformBufferObject {
-            view_proj: cam.build_view_projection_matrix(&transform),
-            cam_pos: (*transform.get_pos()).into(),
-            target_error: 0.5,
-        };
+        let uniform_camera = CameraUniformBufferObject::new(
+            cam.build_view_projection_matrix(&transform),
+            (*transform.get_pos()).into(),
+            0.5,
+        );
 
         world.insert_resource(Events::<MouseIn>::default());
         world.insert_resource(Events::<MouseMv>::default());
@@ -321,7 +323,7 @@ impl App {
             descriptor_pool,
             gui,
             windows: vec![Box::new(AllocatorVisualiserWindow::new(allocator.clone()))],
-
+            mesh_mode: draw_pipelines::indirect_tasks::MeshShaderMode::TriangleList,
             allocator,
             current_pipeline: MeshDrawingPipelineType::None,
             sync_objects,

@@ -38,6 +38,15 @@ impl IntegerId for FaceID {
     }
 }
 
+impl Face {
+    /// Generate plane from the 3 points a,b,c on this face.
+    pub fn plane(&self, mesh: &WingedMesh, verts: &[glam::Vec4]) -> Plane {
+        let [a, b, c] = mesh.triangle_from_face(self);
+
+        Plane::from_three_points(verts[a].into(), verts[b].into(), verts[c].into())
+    }
+}
+
 impl FaceID {
     pub fn center(self, mesh: &WingedMesh, verts: &[glam::Vec4]) -> glam::Vec4 {
         let [a, b, c] = mesh.triangle_from_face(&mesh.get_face(self));
@@ -47,8 +56,6 @@ impl FaceID {
 
     /// Generate plane from the 3 points a,b,c on this face.
     pub fn plane(self, mesh: &WingedMesh, verts: &[glam::Vec4]) -> Plane {
-        let [a, b, c] = mesh.triangle_from_face(&mesh.get_face(self));
-
-        Plane::from_three_points(verts[a].into(), verts[b].into(), verts[c].into())
+        mesh.get_face(self).plane(mesh, verts)
     }
 }

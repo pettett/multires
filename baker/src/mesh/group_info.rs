@@ -2,6 +2,8 @@ use std::collections::BTreeSet;
 
 use common::BoundingSphere;
 
+use super::winged_mesh::WingedMesh;
+
 /// Information for a group on layer n
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct GroupInfo {
@@ -10,10 +12,16 @@ pub struct GroupInfo {
     // Partitions that we created by subdividing ourselves
     pub clusters: Vec<usize>,
 
-    /// Indexes of all groups that touch this one and could be effected by an edge collapse in this group
-    // pub group_neighbours: BTreeSet<usize>,
-    pub tris: usize,
     /// Monotonic bounds for error function of partitions. Includes bounds of all other partitions in the group,
     /// and all partitions we are children to
-    pub monotonic_bound: BoundingSphere,
+    pub saturated_bound: BoundingSphere,
+}
+
+impl GroupInfo {
+    pub fn num_tris(&self, mesh: &WingedMesh) -> usize {
+        self.clusters
+            .iter()
+            .map(|&i| mesh.clusters[i].num_tris)
+            .sum()
+    }
 }

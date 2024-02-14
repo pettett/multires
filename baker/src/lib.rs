@@ -74,10 +74,11 @@ pub fn group_and_partition_and_simplify(
     mesh.partition_full_mesh(
         triangle_clustering_config,
         mesh.face_count().div_ceil(STARTING_CLUSTER_SIZE) as _,
+        &tri_mesh.verts,
     )
     .unwrap();
 
-    mesh.group(grouping_config, &tri_mesh.verts).unwrap();
+    mesh.group(grouping_config).unwrap();
 
     mesh.colour_within_clusters(non_contig_even_clustering_config, COLOUR_CLUSTER_SIZE)
         .unwrap();
@@ -125,7 +126,7 @@ pub fn group_and_partition_and_simplify(
             .groups
             .iter()
             .map(|g| {
-                g.tris / 4
+                g.num_tris(&mesh) / 4
                 //let halved_tris = g.tris / 4;
                 //let tris_to_remove_for_cluster_max = g
                 //    .tris
@@ -173,6 +174,7 @@ pub fn group_and_partition_and_simplify(
 
         let partition_count = match mesh.partition_within_groups(
             group_clustering_config,
+            &tri_mesh.verts,
             Some(CLUSTERS_PER_SIMPLIFIED_GROUP as _),
             None,
         ) {
@@ -187,7 +189,7 @@ pub fn group_and_partition_and_simplify(
 
         println!("{partition_count} Partitions from groups");
 
-        let group_count = mesh.group(grouping_config, &tri_mesh.verts).unwrap();
+        let group_count = mesh.group(grouping_config).unwrap();
 
         mesh.colour_within_clusters(non_contig_even_clustering_config, COLOUR_CLUSTER_SIZE)
             .unwrap();
@@ -225,14 +227,27 @@ pub fn group_and_partition_and_simplify(
         }
     }
 
+    println!("Optimising and generating strips");
+
+    optimise_clusters(&mut multi_res.clusters);
+
+    compress_clusters(&mut multi_res.clusters);
+
     let mut min_tris = 10000;
     let mut max_tris = 0;
+
+    let mut total_indices = 0;
+    let mut total_stripped_indices = 0;
+
     for m in &multi_res.clusters {
         min_tris = min_tris.min(m.index_count() / 3);
         max_tris = max_tris.max(m.index_count() / 3);
+
+        total_indices += m.index_count();
+        total_stripped_indices += m.stripped_index_count();
     }
 
-    println!("Done with partitioning. Min tris: {min_tris}, Max tris: {max_tris}");
+    println!("Done with partitioning. Min tris: {min_tris}, Max tris: {max_tris}. Total indices: {total_indices}, stripped indices: {total_stripped_indices}");
 
     //assert_eq!(partitions1.len() * 3, layer_1_indices.len());
 
@@ -329,6 +344,31 @@ pub fn grab_indices(mesh: &WingedMesh) -> Vec<u32> {
     indices
 }
 
+pub fn optimise_clusters(clusters: &mut Vec<MeshCluster>) {
+    for cluster in clusters {
+        for c in 0..cluster.colour_count() {
+            let meshlet = cluster.meshlet_for_colour_mut(c);
+            let vertex_count = meshlet.vert_count();
+            let indices = meshlet.local_indices_mut();
+
+            *indices = meshopt::optimize_vertex_cache(indices, vertex_count);
+        }
+    }
+}
+
+/// Compressed a previously optimised cluster array to triangle strips
+pub fn compress_clusters(clusters: &mut Vec<MeshCluster>) {
+    for cluster in clusters {
+        for c in 0..cluster.colour_count() {
+            let meshlet = cluster.meshlet_for_colour_mut(c);
+            let vertex_count = meshlet.vert_count();
+
+            *meshlet.strip_indices_mut() =
+                meshopt::stripify(meshlet.local_indices(), vertex_count, 0).unwrap();
+        }
+    }
+}
+
 /// Generate clusters, splitting too large meshlets by colour
 /// Also fix group indexing to be global scope, both in our own data and the global group array
 pub fn generate_clusters(
@@ -349,22 +389,18 @@ pub fn generate_clusters(
         .enumerate()
         .map(|(_i, cluster)| {
             let gi = cluster.group_index;
-            let g = &mesh.groups[gi];
-
-            let mut info = cluster.clone();
-
-            info.group_index += group_offset;
-            info.child_group_index = info.child_group_index.map(|c| c + child_group_offset);
+            let group = &mesh.groups[gi];
 
             MeshCluster::new(
                 cluster.num_colours,
                 //TODO: Connect to quadric error or something
                 1.0,
-                g.monotonic_bound.center(),
-                g.monotonic_bound.radius(),
-                cluster.tight_bound.radius(),
+                cluster.tight_bound,
+                cluster.tight_cone,
+                group.saturated_bound,
                 lod,
-                info,
+                cluster.group_index + group_offset,
+                cluster.child_group_index.map(|c| c + child_group_offset),
             )
         })
         .collect();
@@ -374,14 +410,14 @@ pub fn generate_clusters(
 
         let m = clusters.get_mut(face.cluster_idx).unwrap();
 
-        m.push_tri(face.colour, verts);
+        m.meshlet_for_colour_mut(face.colour).push_tri(verts);
 
         m.error += inds;
     }
 
-    for s in &clusters {
-        for i in 0..s.colour_count() {
-            assert!(s.colour_vert_count(i) <= 64)
+    for cluster in &mut clusters {
+        for i in 0..cluster.colour_count() {
+            assert!(cluster.meshlet_for_colour(i).vert_count() <= 64);
         }
     }
 
@@ -442,8 +478,10 @@ pub fn generate_clusters(
 #[cfg(test)]
 mod test {
 
+    use std::collections::HashMap;
+
     use super::*;
-    use common::graph;
+    use common::{graph, BoundingSphere};
 
     #[test]
     fn test_contiguous_meshes() {
@@ -466,6 +504,52 @@ mod test {
         //group_and_partition_full_res(working_mesh, &verts, mesh_name.to_owned());
         //apply_simplification(working_mesh, &verts, mesh_name.to_owned());
         group_and_partition_and_simplify(mesh, tri_mesh, "".to_owned());
+    }
+
+    #[test]
+    fn test_bounds_saturated() {
+        let mesh_name = "../../assets/sphere.glb";
+
+        println!("Loading from gltf!");
+        let (mesh, tri_mesh) = WingedMesh::from_gltf(mesh_name);
+
+        //group_and_partition_full_res(working_mesh, &verts, mesh_name.to_owned());
+        //apply_simplification(working_mesh, &verts, mesh_name.to_owned());
+        let mesh = group_and_partition_and_simplify(mesh, tri_mesh, "".to_owned());
+
+        let mut groups = HashMap::<usize, Vec<BoundingSphere>>::new();
+
+        for cluster in &mesh.clusters {
+            groups
+                .entry(cluster.group_index)
+                .or_default()
+                .push(cluster.saturated_bound);
+        }
+
+        println!("Checking {} groups have shared bounds", groups.len());
+
+        for bounds in groups.values() {
+            println!("Checking {} bounds", bounds.len());
+
+            let (eq, _) = bounds.iter().fold((true, None), |(eq, prev), current| {
+                let eq = match prev {
+                    None => eq,
+                    Some(prev) => eq && (prev == current),
+                };
+                (eq, Some(current))
+            });
+            assert!(eq, "All saturated bounds should be equal in a group")
+        }
+
+        println!("Checking {} groups have monotonic bounds", groups.len());
+
+        for cluster in &mesh.clusters {
+            let Some(child_group) = cluster.child_group_index else {
+                continue;
+            };
+
+            groups[&cluster.group_index][0].assert_contains_sphere(&groups[&child_group][0])
+        }
     }
 
     // #[test]

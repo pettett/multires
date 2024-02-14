@@ -16,3 +16,4 @@ bevy_ecs.workspace = true
 petgraph.workspace = true
 common = { path = "../common" }
 crevice.workspace = true
+mint.workspace = true

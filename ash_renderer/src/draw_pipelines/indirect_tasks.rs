@@ -12,7 +12,9 @@ use common_renderer::components::transform::Transform;
 use gpu_allocator::vulkan::Allocator;
 
 use crate::{
-    app::{frame_measure::RollingMeasure, mesh_data::MeshDataBuffers},
+    app::{
+        frame_measure::RollingMeasure, mesh_data::MeshDataBuffers, scene::ModelUniformBufferObject,
+    },
     core::Core,
     screen::Screen,
     utility::{
@@ -30,7 +32,7 @@ use crate::{
         render_pass::RenderPass,
         GraphicsPipeline, ShaderModule,
     },
-    ModelUniformBufferObject, VkHandle,
+    VkHandle,
 };
 
 use super::{
@@ -49,6 +51,11 @@ pub struct DrawMeshTasksIndirect {
     pub group_count_y: u32,
     pub group_count_z: u32,
     pub offset: u32,
+}
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum MeshShaderMode {
+    TriangleList,
+    TriangleStrip,
 }
 
 pub struct IndirectTasks {
@@ -81,6 +88,7 @@ impl IndirectTasks {
         uniform_camera_buffers: &[Arc<impl AsBuffer>],
         _cluster_count: u32,
         query: bool,
+        mode: MeshShaderMode,
     ) -> Self {
         let ubo_layout = create_descriptor_set_layout(core.device.clone());
 
@@ -89,6 +97,7 @@ impl IndirectTasks {
             render_pass,
             screen.swapchain().extent,
             ubo_layout.clone(),
+            mode,
         );
         let mut task_indirect_data = Vec::new();
 
@@ -117,7 +126,10 @@ impl IndirectTasks {
             &uniform_transform_buffer,
             &uniform_camera_buffers,
             &mesh_data.vertex_buffer,
-            &mesh_data.meshlet_buffer,
+            match mode {
+                MeshShaderMode::TriangleList => &mesh_data.meshlet_buffer,
+                MeshShaderMode::TriangleStrip => &mesh_data.stripped_meshlet_buffer,
+            },
             &mesh_data.cluster_buffer,
             &indirect_task_buffer,
             //&texture_image,
@@ -426,14 +438,21 @@ fn create_graphics_pipeline(
     render_pass: &RenderPass,
     swapchain_extent: vk::Extent2D,
     ubo_set_layout: Arc<DescriptorSetLayout>,
+    mode: MeshShaderMode,
 ) -> GraphicsPipeline {
     let task_shader_module = ShaderModule::new(
         device.clone(),
         bytemuck::cast_slice(include_bytes!("../../shaders/spv/mesh-shader.task")),
     );
+
     let mesh_shader_module = ShaderModule::new(
         device.clone(),
-        bytemuck::cast_slice(include_bytes!("../../shaders/spv/mesh-shader.mesh")),
+        bytemuck::cast_slice(match mode {
+            MeshShaderMode::TriangleList => include_bytes!("../../shaders/spv/mesh-shader.mesh"),
+            MeshShaderMode::TriangleStrip => {
+                include_bytes!("../../shaders/spv/mesh_tri_strip.mesh")
+            }
+        }),
     );
 
     let frag_shader_module = ShaderModule::new(

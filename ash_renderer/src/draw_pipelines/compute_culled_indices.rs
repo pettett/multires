@@ -10,7 +10,7 @@ use common::MeshVert;
 use gpu_allocator::vulkan::Allocator;
 
 use crate::{
-    app::mesh_data::MeshDataBuffers,
+    app::{mesh_data::MeshDataBuffers, scene::ModelUniformBufferObject},
     core::Core,
     screen::Screen,
     utility::{
@@ -28,7 +28,7 @@ use crate::{
         ComputePipeline, GraphicsPipeline, ShaderModule,
     },
     vertex::Vertex,
-    ModelUniformBufferObject, VkHandle,
+    VkHandle,
 };
 
 use super::{

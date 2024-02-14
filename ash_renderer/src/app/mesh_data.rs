@@ -17,6 +17,7 @@ pub struct MeshDataBuffers {
     pub cluster_count: u32,
     pub vertex_buffer: Arc<TBuffer<MeshVert>>,
     pub meshlet_buffer: Arc<TBuffer<GpuMeshlet>>,
+    pub stripped_meshlet_buffer: Arc<TBuffer<GpuMeshlet>>,
     pub cluster_buffer: Arc<TBuffer<ClusterData>>,
     pub meshlet_index_buffer: Arc<TBuffer<u32>>,
     pub index_buffer: Arc<TBuffer<u32>>,
@@ -29,7 +30,7 @@ impl MeshDataBuffers {
         let (cluster_order, cluster_groups) = data.order_clusters();
         let mut cluster_data = data.generate_cluster_data(&cluster_order, &cluster_groups);
 
-        let (clusters, meshlets) = multires::generate_meshlets(&cluster_order);
+        let (clusters, meshlets, stripped_meshlets) = multires::generate_meshlets(&cluster_order);
 
         assert_eq!(clusters.len(), cluster_data.len());
 
@@ -59,6 +60,15 @@ impl MeshDataBuffers {
             vk::BufferUsageFlags::STORAGE_BUFFER,
             &meshlets,
             "Meshlet Buffer",
+        );
+
+        let stripped_meshlet_buffer = TBuffer::new_filled(
+            core,
+            allocator.clone(),
+            graphics_queue,
+            vk::BufferUsageFlags::STORAGE_BUFFER,
+            &stripped_meshlets,
+            "Stripped Meshlet Buffer",
         );
 
         let cluster_buffer = TBuffer::new_filled(
@@ -91,6 +101,7 @@ impl MeshDataBuffers {
         Self {
             vertex_buffer,
             meshlet_buffer,
+            stripped_meshlet_buffer,
             cluster_buffer,
             meshlet_index_buffer,
             index_buffer,

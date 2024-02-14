@@ -1,31 +1,96 @@
 use std::collections::HashSet;
 
-use bincode::{Decode, Encode};
-use glam::Vec3;
+use bincode::{BorrowDecode, Decode, Encode};
 
 use crate::asset;
 
 pub const MAX_INDICES_PER_COLOUR: usize = 126 * 3;
 
-#[derive(Debug, Default, Clone, Decode, Encode, PartialEq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
+#[repr(transparent)]
+pub struct Vec3(glam::Vec3);
+
+impl Into<Vec3> for glam::Vec3 {
+    fn into(self) -> Vec3 {
+        Vec3(self)
+    }
+}
+impl Into<glam::Vec3> for Vec3 {
+    fn into(self) -> glam::Vec3 {
+        self.0
+    }
+}
+
+impl Encode for Vec3 {
+    fn encode<E: bincode::enc::Encoder>(
+        &self,
+        encoder: &mut E,
+    ) -> Result<(), bincode::error::EncodeError> {
+        bincode::Encode::encode(&self.0.x, encoder)?;
+        bincode::Encode::encode(&self.0.y, encoder)?;
+        bincode::Encode::encode(&self.0.z, encoder)?;
+        Ok(())
+    }
+}
+
+impl Decode for Vec3 {
+    fn decode<D: bincode::de::Decoder>(
+        decoder: &mut D,
+    ) -> Result<Self, bincode::error::DecodeError> {
+        Ok(Self(glam::Vec3 {
+            x: bincode::Decode::decode(decoder)?,
+            y: bincode::Decode::decode(decoder)?,
+            z: bincode::Decode::decode(decoder)?,
+        }))
+    }
+}
+impl BorrowDecode<'_> for Vec3 {
+    fn borrow_decode<D: bincode::de::Decoder>(
+        decoder: &mut D,
+    ) -> Result<Self, bincode::error::DecodeError> {
+        Ok(Self(glam::Vec3 {
+            x: bincode::Decode::decode(decoder)?,
+            y: bincode::Decode::decode(decoder)?,
+            z: bincode::Decode::decode(decoder)?,
+        }))
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy, Decode, Encode, PartialEq)]
 pub struct BoundingSphere {
-    center: [f32; 3],
+    center: Vec3,
     radius: f32,
+}
+
+#[derive(Debug, Default, Clone, Copy, Decode, Encode, PartialEq)]
+pub struct OriginCone {
+    axis: Vec3,
+    cutoff: f32,
+}
+
+#[derive(Debug, Clone, Decode, Encode, Default)]
+pub struct Meshlet {
+    indices: Vec<u32>,
+    local_indices: Vec<u32>,
+    local_strip_indices: Vec<u32>,
+    verts: Vec<u32>,
 }
 
 #[derive(Debug, Clone, Decode, Encode)]
 pub struct MeshCluster {
-    indices: Vec<Vec<u32>>,
+    meshlets: Vec<Meshlet>,
     // Bounding sphere for the submesh
-    // TODO: bounding sphere radii
     // Will only be used for culling, so uncomment later
-    //pub tight_sphere: BoundingSphere,
+    pub tight_bound: BoundingSphere,
+    pub tight_cone: OriginCone,
+
     // Similarly, the bounding sphere must be enlarged to enclose the bounding spheres of all its children in the DAG,
     // in order to ensure a monotonic view-dependent error function.
-    pub saturated_sphere: BoundingSphere,
+    pub saturated_bound: BoundingSphere,
     pub lod: usize, //TODO: In future, we should not need this - group indexes should be consistent across LOD
     pub error: f32,
-    pub info: ClusterInfo,
+    pub group_index: usize,
+    pub child_group_index: Option<usize>,
 }
 
 #[repr(C)]
@@ -45,20 +110,7 @@ pub struct MultiResMesh {
     pub group_count: usize,
 }
 
-/// Information for a partition on layer n
-#[derive(Debug, Clone, Decode, Encode, PartialEq, Default)]
-pub struct ClusterInfo {
-    /// Group in the previous LOD layer (LOD`n-1`) we have been attached to. LOD0 will have none
-    pub child_group_index: Option<usize>,
-    /// Group in this layer. will be usize::MAX if not yet grouped, but always valid in a loaded asset
-    pub group_index: usize,
-    /// For culling purposes - smallest bounding sphere for the partition
-    pub tight_bound: BoundingSphere,
-    /// Number of colours within its triangles
-    pub num_colours: usize,
-}
-
-#[derive(Clone, Decode, Encode)]
+#[derive(Clone, Decode, Encode, Default)]
 pub struct MeshLevel {
     pub partition_indices: Vec<usize>,
     pub group_indices: Vec<usize>,
@@ -68,67 +120,146 @@ pub struct MeshLevel {
 
 impl asset::Asset for MultiResMesh {}
 
-impl MeshCluster {
-    pub fn new(
-        colours: usize,
-        error: f32,
-        center: Vec3,
-        monotonic_radius: f32,
-        _radius: f32,
-        lod: usize,
-        info: ClusterInfo,
-    ) -> Self {
-        Self {
-            indices: vec![Vec::new(); colours],
-            // tight_sphere: BoundingSphere {
-            //     center: center.to_array(),
-            //     radius: radius,
-            // },
-            saturated_sphere: BoundingSphere {
-                center: center.to_array(),
-                radius: monotonic_radius,
-            },
-            error,
-            lod,
-            info,
-        }
+impl Meshlet {
+    pub fn vert_count(&self) -> usize {
+        self.verts.len()
     }
-    pub fn push_tri(&mut self, colour: usize, tri: [usize; 3]) {
+
+    pub fn local_to_global_vert_index(&self, local_vert: u32) -> u32 {
+        self.verts[local_vert as usize]
+    }
+
+    fn global_to_local_vert_index(&mut self, mesh_vert: u32) -> u32 {
+        (match self.verts.iter().position(|&x| x == mesh_vert) {
+            Some(idx) => idx,
+            None => {
+                self.verts.push(mesh_vert);
+
+                self.verts.len() - 1
+            }
+        }) as _
+    }
+
+    pub fn push_tri(&mut self, tri: [usize; 3]) {
         for v in tri {
-            self.indices[colour].push(v as _)
+            let id = self.global_to_local_vert_index(v as _);
+            self.local_indices.push(id);
+            self.indices.push(v as _);
         }
 
         assert!(self.indices.len() <= MAX_INDICES_PER_COLOUR);
     }
-    pub fn indices_for_colour(&self, colour: usize) -> &Vec<u32> {
-        &self.indices[colour]
+    pub fn local_indices(&self) -> &[u32] {
+        self.local_indices.as_ref()
     }
+    pub fn local_indices_mut(&mut self) -> &mut Vec<u32> {
+        self.local_indices.as_mut()
+    }
+
+    pub fn indices(&self) -> &[u32] {
+        self.indices.as_ref()
+    }
+
+    pub fn strip_indices(&self) -> &[u32] {
+        self.local_strip_indices.as_ref()
+    }
+
+    pub fn strip_indices_mut(&mut self) -> &mut Vec<u32> {
+        &mut self.local_strip_indices
+    }
+
+    pub fn verts(&self) -> &[u32] {
+        self.verts.as_ref()
+    }
+}
+
+impl MeshCluster {
+    pub fn new(
+        colours: usize,
+        error: f32,
+        tight_bound: BoundingSphere,
+        tight_cone: OriginCone,
+        saturated_bound: BoundingSphere,
+        lod: usize,
+        group_index: usize,
+        child_group_index: Option<usize>,
+    ) -> Self {
+        Self {
+            meshlets: vec![Meshlet::default(); colours],
+            tight_bound,
+            tight_cone,
+
+            saturated_bound,
+            error,
+            lod,
+            group_index,
+            child_group_index,
+        }
+    }
+
+    pub fn meshlet_for_colour(&self, colour: usize) -> &Meshlet {
+        &self.meshlets[colour]
+    }
+
+    pub fn meshlet_for_colour_mut(&mut self, colour: usize) -> &mut Meshlet {
+        &mut self.meshlets[colour]
+    }
+
+    pub fn meshlets(&self) -> &[Meshlet] {
+        &self.meshlets
+    }
+
     pub fn colour_count(&self) -> usize {
-        self.indices.len()
+        self.meshlets.len()
     }
+
     pub fn index_count(&self) -> usize {
-        self.indices.iter().map(|x| x.len()).sum()
+        self.meshlets.iter().map(|x| x.indices.len()).sum()
     }
-    pub fn colour_vert_count(&self, colour: usize) -> usize {
-        self.indices[colour].iter().collect::<HashSet<_>>().len()
+    pub fn stripped_index_count(&self) -> usize {
+        self.meshlets
+            .iter()
+            .map(|x| x.local_strip_indices.len())
+            .sum()
+    }
+}
+
+impl OriginCone {
+    pub fn add_axis(&mut self, axis: glam::Vec3) {
+        self.axis.0 += axis;
+    }
+    pub fn axis(&self) -> glam::Vec3 {
+        self.axis.0
+    }
+    pub fn normalise_axis(&mut self) {
+        self.axis.0 = self.axis.0.normalize_or_zero()
+    }
+    pub fn packed(&self) -> glam::Vec4 {
+        (self.axis.0, self.cutoff).into()
+    }
+    pub fn min_cutoff(&mut self, cutoff: f32) {
+        self.cutoff = self.cutoff.min(cutoff);
     }
 }
 
 impl BoundingSphere {
-    pub fn new(center: Vec3, radius: f32) -> Self {
+    pub fn new(center: glam::Vec3, radius: f32) -> Self {
         Self {
             center: center.into(),
             radius,
         }
     }
 
-    pub fn center(&self) -> Vec3 {
-        Vec3::from_array(self.center)
+    pub fn center(&self) -> glam::Vec3 {
+        self.center.0
     }
-    pub fn set_center(&mut self, center: Vec3) {
+    pub fn packed(&self) -> glam::Vec4 {
+        (self.center.0, self.radius).into()
+    }
+    pub fn set_center(&mut self, center: glam::Vec3) {
         self.center = center.into();
     }
-    pub fn translate(&mut self, offset: Vec3) {
+    pub fn translate(&mut self, offset: glam::Vec3) {
         self.center = (self.center() + offset).into();
     }
     pub fn normalise(&mut self, count: usize) {
@@ -138,8 +269,9 @@ impl BoundingSphere {
         self.radius
     }
 
-    pub fn include_point(&mut self, point: Vec3) {
-        self.candidate_radius(self.center().distance(point))
+    /// Wrapper around including a sphere with 0 radius
+    pub fn include_point(&mut self, point: glam::Vec3) {
+        self.include_sphere(&BoundingSphere::new(point, 0.0))
     }
 
     /// Shift this bounding sphere so it completely envelops `other`, with the minimal increase in volume.
@@ -148,9 +280,9 @@ impl BoundingSphere {
         let towards_other = other.center() - self.center();
         let distance_towards_other = towards_other.length();
 
-        let furthest_point = distance_towards_other + other.radius;
+        let furthest_point = distance_towards_other + other.radius();
 
-        let increase_needed = furthest_point - self.radius;
+        let increase_needed = furthest_point - self.radius();
 
         let test_before_edit = self.clone();
 
@@ -181,11 +313,7 @@ impl BoundingSphere {
         self.assert_contains_sphere(&test_before_edit);
     }
 
-    fn candidate_radius(&mut self, radius: f32) {
-        self.radius = self.radius.max(radius)
-    }
-
-    fn assert_contains_sphere(&self, sphere: &BoundingSphere) {
+    pub fn assert_contains_sphere(&self, sphere: &BoundingSphere) {
         let max_dist = self.center().distance(sphere.center()) + sphere.radius();
         assert!(
             max_dist <= self.radius,
@@ -198,7 +326,7 @@ impl BoundingSphere {
 pub mod test {
     use glam::{vec3, Vec3};
 
-    use crate::BoundingSphere;
+    use crate::{BoundingSphere, Meshlet};
 
     #[test]
     fn test_sphere_include_0() {
@@ -206,6 +334,15 @@ pub mod test {
         let s1 = BoundingSphere::new(Vec3::ONE * 2.0, 1.0);
 
         s0.include_sphere(&s1);
+
+        println!("{s0:?}")
+    }
+
+    #[test]
+    fn test_point_include_0() {
+        let mut s0 = BoundingSphere::new(Vec3::ONE, 0.0);
+
+        s0.include_point(Vec3::ONE * 2.0);
 
         println!("{s0:?}")
     }
@@ -237,5 +374,18 @@ pub mod test {
         s0.include_sphere(&s1);
 
         println!("{s0:?}")
+    }
+
+    #[test]
+    fn test_meshlet_creation() {
+        let mut meshlet = Meshlet::default();
+
+        meshlet.push_tri([5, 3, 7]);
+
+        assert_eq!(meshlet.local_indices(), [0, 1, 2]);
+
+        meshlet.push_tri([5, 3, 8]);
+
+        assert_eq!(meshlet.local_indices(), [0, 1, 2, 0, 1, 3]);
     }
 }
