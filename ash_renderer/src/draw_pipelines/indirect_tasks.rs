@@ -442,17 +442,17 @@ fn create_graphics_pipeline(
 ) -> GraphicsPipeline {
     let task_shader_module = ShaderModule::new(
         device.clone(),
-        bytemuck::cast_slice(include_bytes!("../../shaders/spv/mesh-shader.task")),
+        include_bytes!("../../shaders/spv/mesh-shader.task"),
     );
 
     let mesh_shader_module = ShaderModule::new(
         device.clone(),
-        bytemuck::cast_slice(match mode {
+        match mode {
             MeshShaderMode::TriangleList => include_bytes!("../../shaders/spv/mesh-shader.mesh"),
             MeshShaderMode::TriangleStrip => {
                 include_bytes!("../../shaders/spv/mesh_tri_strip.mesh")
             }
-        }),
+        },
     );
 
     let frag_shader_module = ShaderModule::new(

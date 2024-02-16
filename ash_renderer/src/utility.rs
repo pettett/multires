@@ -9,7 +9,6 @@ pub mod instance;
 mod macros;
 pub mod physical_device;
 mod pipeline;
-pub mod platforms;
 pub mod pooled;
 pub mod render_pass;
 pub mod structures;

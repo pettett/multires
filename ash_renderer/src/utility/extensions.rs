@@ -5,34 +5,33 @@ use ash::vk;
 use super::instance::Instance;
 
 /// Stores a sorted list of extensions
-#[derive( Debug)]
+#[derive(Debug)]
 pub struct Extensions {
     names: Vec<&'static ffi::CStr>,
 }
 
-impl PartialEq for Extensions{
+impl PartialEq for Extensions {
     fn eq(&self, other: &Self) -> bool {
-        for n in &self.names{
-			if other.names.binary_search(n).is_err(){
-				return false;
-			}
-		}
-		return true;
+        for n in &self.names {
+            if other.names.binary_search(n).is_err() {
+                return false;
+            }
+        }
+        return true;
     }
 }
 
 impl Extensions {
     pub fn new(mut names: Vec<&'static ffi::CStr>) -> Self {
-		names.sort();
+        names.sort();
 
         Self { names }
     }
     pub fn union(mut self, other: &Extensions) -> Self {
         self.names.extend_from_slice(&other.names);
-		
+
         Extensions::new(self.names)
     }
-
 
     pub fn get_extensions_names(&self) -> &[&'static ffi::CStr] {
         &self.names
@@ -75,20 +74,20 @@ impl Extensions {
 }
 
 #[cfg(test)]
-mod tests{
+mod tests {
     use super::Extensions;
 
-	#[test]
-	fn test_equality(){
-		let e1 = Extensions::new(vec![
+    #[test]
+    fn test_equality() {
+        let e1 = Extensions::new(vec![
             ash::extensions::khr::BufferDeviceAddress::name(),
             ash::extensions::khr::Swapchain::name(),
         ]);
-		let e2 = Extensions::new(vec![
+        let e2 = Extensions::new(vec![
             ash::extensions::khr::Swapchain::name(),
             ash::extensions::khr::BufferDeviceAddress::name(),
         ]);
 
-		assert_eq!(e1, e2)
-	}
+        assert_eq!(e1, e2)
+    }
 }

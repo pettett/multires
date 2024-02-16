@@ -5,11 +5,12 @@ use std::{
 };
 
 use ash::vk;
+use raw_window_handle::HasRawDisplayHandle;
 
 use crate::{
     utility::{
         constants::{API_VERSION, APPLICATION_VERSION, ENGINE_VERSION, VALIDATION},
-        debug, platforms,
+        debug,
     },
     VkHandle,
 };
@@ -37,6 +38,8 @@ impl Instance {
         entry: &ash::Entry,
         window_title: &str,
         is_enable_debug: bool,
+        window: &winit::window::Window,
+        required_instance_extensions: Extensions,
         required_validation_layers: &Vec<&str>,
     ) -> Arc<Self> {
         if is_enable_debug
@@ -49,19 +52,23 @@ impl Instance {
         let engine_name = CString::new("Vulkan Engine").unwrap();
         let app_info = vk::ApplicationInfo {
             p_application_name: app_name.as_ptr(),
-            s_type: vk::StructureType::APPLICATION_INFO,
-            p_next: ptr::null(),
             application_version: APPLICATION_VERSION,
             p_engine_name: engine_name.as_ptr(),
             engine_version: ENGINE_VERSION,
             api_version: API_VERSION,
+            ..Default::default()
         };
 
         // This create info used to debug issues in vk::createInstance and vk::destroyInstance.
         let debug_utils_create_info = debug::populate_debug_messenger_create_info();
 
         // VK_EXT debug report has been requested here.
-        let extension_names = platforms::required_extension_names();
+
+        let mut extension_names = required_instance_extensions.get_extensions_raw_names();
+
+        extension_names.extend_from_slice(
+            ash_window::enumerate_required_extensions(window.raw_display_handle()).unwrap(),
+        );
 
         let requred_validation_layer_raw_names: Vec<CString> = required_validation_layers
             .iter()
@@ -184,12 +191,11 @@ impl Instance {
         });
 
         match result {
-            Some((p_physical_device, supported_extensions)) => {
-
-				
-
-                Arc::new(PhysicalDevice::new(*p_physical_device, self.clone(), supported_extensions))
-            }
+            Some((p_physical_device, supported_extensions)) => Arc::new(PhysicalDevice::new(
+                *p_physical_device,
+                self.clone(),
+                supported_extensions,
+            )),
             None => panic!("Failed to find a suitable GPU!"),
         }
     }

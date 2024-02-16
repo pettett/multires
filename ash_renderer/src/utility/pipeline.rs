@@ -1,4 +1,4 @@
-use std::{ffi::CString, sync::Arc};
+use std::{ffi::CString, io::Read, sync::Arc};
 
 use ash::vk;
 
@@ -105,8 +105,20 @@ impl<const T: bool> Drop for Pipeline<T> {
 vk_device_owned_wrapper!(ShaderModule, destroy_shader_module);
 
 impl ShaderModule {
-    pub fn new(device: Arc<Device>, code: &[u32]) -> Self {
-        let shader_module_create_info = vk::ShaderModuleCreateInfo::builder().code(code);
+
+    pub fn new(device: Arc<Device>, code: &[u8]) -> Self {
+        assert_eq!(code.len() % 4, 0);
+
+		// Make an uninitialised vector the correct size for our program
+        let mut new_code = Vec::<u32>::with_capacity(code.len() / 4);
+        unsafe { new_code.set_len(new_code.capacity()) }
+
+        // Cast our vec to u8s, and copy code into it
+        // This ensures vectors are aligned to u32, but is fast
+        bytemuck::cast_slice_mut(&mut new_code[..]).copy_from_slice(code);
+
+
+		let shader_module_create_info = vk::ShaderModuleCreateInfo::builder().code(&new_code);
 
         ShaderModule {
             handle: unsafe {

@@ -92,9 +92,6 @@ pub fn setup_debug_utils(
 
 pub fn populate_debug_messenger_create_info() -> vk::DebugUtilsMessengerCreateInfoEXT {
     vk::DebugUtilsMessengerCreateInfoEXT {
-        s_type: vk::StructureType::DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
-        p_next: ptr::null(),
-        flags: vk::DebugUtilsMessengerCreateFlagsEXT::empty(),
         message_severity: vk::DebugUtilsMessageSeverityFlagsEXT::WARNING |
             // vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE |
             // vk::DebugUtilsMessageSeverityFlagsEXT::INFO |
@@ -103,6 +100,6 @@ pub fn populate_debug_messenger_create_info() -> vk::DebugUtilsMessengerCreateIn
             | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE
             | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION,
         pfn_user_callback: Some(vulkan_debug_utils_callback),
-        p_user_data: ptr::null_mut(),
+        ..Default::default()
     }
 }

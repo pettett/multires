@@ -1,8 +1,9 @@
 use std::sync::Arc;
 
 use ash::vk;
+use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 
-use super::{instance::Instance, macros::vk_handle_wrapper, platforms};
+use super::{instance::Instance, macros::vk_handle_wrapper};
 
 pub struct Surface {
     pub instance: Arc<Instance>,
@@ -28,9 +29,11 @@ impl Surface {
         screen_width: u32,
         screen_height: u32,
     ) -> Arc<Surface> {
-        let surface = unsafe {
-            platforms::create_surface(entry, &instance, window).expect("Failed to create surface.")
-        };
+
+		let surface =unsafe {	
+			ash_window::create_surface(entry, &instance, window.raw_display_handle(), window.raw_window_handle(), None).expect("Failed to create surface.")
+		
+		};
 
         Arc::new(Surface {
             instance,

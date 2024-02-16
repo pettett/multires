@@ -25,7 +25,7 @@ use thiserror::Error;
 
 /// Specifies the used algorithm.
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
-#[repr(i32)]
+#[repr(u32)]
 pub enum PartitioningMethod {
     /// Multilevel k-way partitioning
     /// `METIS_PartGraphKway`
@@ -38,7 +38,7 @@ pub enum PartitioningMethod {
 /// Specifies the matching scheme to be used during coarsening
 /// `METIS_OPTION_CTYPE`
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
-#[repr(i32)]
+#[repr(u32)]
 pub enum CoarseningScheme {
     /// Random matching
     /// `METIS_CTYPE_RM`
@@ -51,7 +51,7 @@ pub enum CoarseningScheme {
 /// Specifies the algorithm used during initial partitioning
 /// `METIS_OPTION_IPTYPE`
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
-#[repr(i32)]
+#[repr(u32)]
 pub enum InitialPartitioningAlgorithm {
     /// Grows a bisection using a greedy strategy
     /// `METIS_IPTYPE_GROW`
@@ -71,7 +71,7 @@ pub enum InitialPartitioningAlgorithm {
 /// Specifies the algorithm used for refinement
 /// `METIS_OPTION_RTYPE`
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
-#[repr(i32)]
+#[repr(u32)]
 pub enum RefinementAlgorithm {
     /// FM-based cut refinement
     /// `METIS_RTYPE_FM`
@@ -89,7 +89,7 @@ pub enum RefinementAlgorithm {
 
 /// `METIS_OPTION_OBJTYPE`
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
-#[repr(i32)]
+#[repr(u32)]
 pub enum ObjectiveType {
     /// Edge-cut minimization
     /// `METIS_OBJTYPE_CUT`

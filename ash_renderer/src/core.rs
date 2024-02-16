@@ -39,10 +39,16 @@ impl Core {
         // init vulkan stuff
         println!("initing vulkan");
         let entry = ash::Entry::linked();
+
+        let required_instance_extensions =
+            Extensions::new(vec![ash::extensions::ext::DebugUtils::name()]);
+
         let instance = Instance::new(
             &entry,
             WINDOW_TITLE,
             VALIDATION.is_enable,
+            &window,
+            required_instance_extensions,
             &VALIDATION.required_validation_layers.to_vec(),
         );
 
@@ -62,6 +68,7 @@ impl Core {
             ash::extensions::khr::BufferDeviceAddress::name(),
             ash::extensions::khr::Swapchain::name(),
         ]);
+
         let optional_extensions = Extensions::new(vec![ash::extensions::ext::MeshShader::name()]);
 
         let physical_device =
@@ -74,7 +81,7 @@ impl Core {
         let (device, queue_family) = Device::create_logical_device(
             instance.clone(),
             physical_device.clone(),
-            &VALIDATION, 
+            &VALIDATION,
             &surface,
         );
 
@@ -107,6 +114,10 @@ impl Core {
     /// Name the object, if a debug util loader is attached
     /// Otherwise this function will do nothing
     pub fn name_object<T: Handle + Default>(&self, name: &str, object: T) {
+        if self.debug_messenger == vk::DebugUtilsMessengerEXT::null() {
+            return;
+        }
+
         let raw = object.as_raw();
         if raw == T::default().as_raw() {
             // Null pointer

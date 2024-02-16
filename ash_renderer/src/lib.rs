@@ -306,14 +306,15 @@ impl App {
             instances,
         });
 
+
         world.insert_non_send_resource(Renderer {
             fragment_colour: ShaderModule::new(
                 device.clone(),
-                bytemuck::cast_slice(include_bytes!("../shaders/spv/frag_colour.frag")),
+                include_bytes!("../shaders/spv/frag_colour.frag"),
             ),
             fragment_lit: ShaderModule::new(
                 device.clone(),
-                bytemuck::cast_slice(include_bytes!("../shaders/spv/frag_pbr.frag")),
+                include_bytes!("../shaders/spv/frag_pbr.frag"),
             ),
 
             graphics_queue,
