@@ -67,7 +67,24 @@ impl WingedMesh {
         }
     }
 
-    pub fn partition_full_mesh(
+    /// Partition the mesh into a single cluster
+    pub fn cluster_unity(&mut self, child_group_index : Option<usize>) {
+        self.clusters = vec![ClusterInfo {
+            child_group_index,
+            group_index: 0,
+            tight_bound: Default::default(),
+            tight_cone: Default::default(),
+            num_tris: self.face_count(),
+            num_colours: 0,
+        }];
+
+        for (fid, f) in self.iter_faces_mut() {
+            f.cluster_idx = 0;
+        }
+    }
+
+    /// Cluster the mesh ignoring group boundaries
+    pub fn cluster_full_mesh(
         &mut self,
         config: &metis::PartitioningConfig,
         partitions: u32,
@@ -77,7 +94,7 @@ impl WingedMesh {
 
         let mesh_dual = self.generate_face_graph();
 
-        #[cfg(test)]
+        #[cfg(debug)]
         {
             //if config.force_contiguous_partitions {
             //        assert_contiguous_graph(&mesh_dual);
@@ -448,7 +465,7 @@ impl WingedMesh {
 
             let parts = graph.node_count().div_ceil(tris_per_cluster);
 
-            #[cfg(test)]
+            #[cfg(debug)]
             {
                 assert_graph_contiguous(graph);
             }
@@ -522,7 +539,7 @@ pub mod tests {
 
         mesh.filter_tris_by_cluster(1).unwrap();
 
-        mesh.partition_full_mesh(
+        mesh.cluster_full_mesh(
             test_config,
             mesh.face_count().div_ceil(STARTING_CLUSTER_SIZE) as _,
             &tri_mesh.verts,
@@ -543,7 +560,7 @@ pub mod tests {
         .into();
         let (mut mesh, tri_mesh) = WingedMesh::from_gltf(TEST_MESH_LOW);
 
-        mesh.partition_full_mesh(
+        mesh.cluster_full_mesh(
             test_config,
             mesh.face_count().div_ceil(STARTING_CLUSTER_SIZE) as _,
             &tri_mesh.verts,

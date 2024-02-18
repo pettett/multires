@@ -121,6 +121,16 @@ pub struct MeshLevel {
 impl asset::Asset for MultiResMesh {}
 
 impl Meshlet {
+    //TODO: Generate  local, strip, verts, etc.
+    pub fn from_indices(indices: Vec<u32>) -> Self {
+        Self {
+            indices,
+            local_indices: Default::default(),
+            local_strip_indices: Default::default(),
+            verts: Default::default(),
+        }
+    }
+
     pub fn vert_count(&self) -> usize {
         self.verts.len()
     }
@@ -194,6 +204,19 @@ impl MeshCluster {
             lod,
             group_index,
             child_group_index,
+        }
+    }
+
+    pub fn new_raw_temp(indices: Vec<u32>, lod: usize) -> Self {
+        Self {
+            meshlets: vec![Meshlet::from_indices(indices); 1],
+            tight_bound: Default::default(),
+            tight_cone: Default::default(),
+            saturated_bound: Default::default(),
+            error: 0.0,
+            lod,
+            group_index: 0,
+            child_group_index: None,
         }
     }
 

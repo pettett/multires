@@ -1,10 +1,14 @@
+pub mod evaluation;
 pub mod mesh;
 pub mod pidge;
+
+use std::mem;
 
 use common::{graph, tri_mesh::TriMesh, MeshCluster, MeshLevel, MeshVert, MultiResMesh};
 
 use glam::Vec4;
 use mesh::winged_mesh::WingedMesh;
+use meshopt::SimplifyOptions;
 
 // use meshopt::VertexDataAdapter;
 
@@ -27,7 +31,7 @@ pub fn group_and_partition_and_simplify(
     mut mesh: WingedMesh,
     tri_mesh: TriMesh,
     name: String,
-) -> MultiResMesh {
+) -> anyhow::Result<MultiResMesh> {
     let triangle_clustering_config = &metis::MultilevelKWayPartitioningConfig {
         //u_factor: Some(10),
         //minimize_subgraph_degree: Some(true), // this will sometimes break contiguous partitions
@@ -71,17 +75,15 @@ pub fn group_and_partition_and_simplify(
     let mut quadrics = mesh.create_quadrics(&tri_mesh.verts);
 
     // Apply primary partition, that will define the lowest level clusterings
-    mesh.partition_full_mesh(
+    mesh.cluster_full_mesh(
         triangle_clustering_config,
         mesh.face_count().div_ceil(STARTING_CLUSTER_SIZE) as _,
         &tri_mesh.verts,
-    )
-    .unwrap();
+    )?;
 
     mesh.group(grouping_config).unwrap();
 
-    mesh.colour_within_clusters(non_contig_even_clustering_config, COLOUR_CLUSTER_SIZE)
-        .unwrap();
+    mesh.colour_within_clusters(non_contig_even_clustering_config, COLOUR_CLUSTER_SIZE)?;
 
     let mut multi_res = MultiResMesh {
         name,
@@ -141,7 +143,7 @@ pub fn group_and_partition_and_simplify(
         mesh.age();
 
         // Make sure groups are contiguous before reduction
-        #[cfg(test)]
+        #[cfg(debug)]
         {
             println!("Ensuring groups are contiguous... ");
             let graphs = mesh.generate_group_keyed_graphs();
@@ -189,10 +191,9 @@ pub fn group_and_partition_and_simplify(
 
         println!("{partition_count} Partitions from groups");
 
-        let group_count = mesh.group(grouping_config).unwrap();
+        let group_count = mesh.group(grouping_config)?;
 
-        mesh.colour_within_clusters(non_contig_even_clustering_config, COLOUR_CLUSTER_SIZE)
-            .unwrap();
+        mesh.colour_within_clusters(non_contig_even_clustering_config, COLOUR_CLUSTER_SIZE)?;
 
         // view a snapshot of the mesh ready to create the next layer
         // let error = (1.0 + i as f32) / 10.0 + rng.gen_range(-0.05..0.05);
@@ -227,6 +228,225 @@ pub fn group_and_partition_and_simplify(
         }
     }
 
+    opt_multires(&mut multi_res);
+
+    Ok(multi_res)
+}
+
+pub fn simplify_lod_chain(
+    mut mesh: WingedMesh,
+    tri_mesh: TriMesh,
+    name: String,
+) -> anyhow::Result<MultiResMesh> {
+    let non_contig_even_clustering_config = &metis::PartitioningConfig {
+        method: metis::PartitioningMethod::MultilevelRecursiveBisection,
+        //force_contiguous_partitions: true,
+        //u_factor: Some(1),
+        //objective_type: Some(metis::ObjectiveType::Volume),
+        minimize_subgraph_degree: Some(true), // this will sometimes break contiguous partitions
+        ..Default::default()
+    };
+
+    let grouping_config = &metis::MultilevelKWayPartitioningConfig {
+        //objective_type: Some(metis::ObjectiveType::Volume),
+        force_contiguous_partitions: Some(true),
+        u_factor: Some(100), // Allow large 'inequality' to get similar sized groups
+        //partitioning_attempts: Some(3),
+        //separator_attempts: Some(3),
+        //two_hop_matching: Some(true),
+        //initial_partitioning: Some(metis::InitialPartitioningAlgorithm::RandomRefined),
+        //refinement: Some(metis::RefinementAlgorithm::TwoSidedFm),
+        //refinement_iterations: Some(30),
+        //coarsening: Some(metis::CoarseningScheme::SortedHeavyEdgeMatching),
+        //minimize_subgraph_degree: Some(true), // this will sometimes break contiguous partitions
+        ..Default::default()
+    }
+    .into();
+
+    let mut quadrics = mesh.create_quadrics(&tri_mesh.verts);
+
+    // Apply primary partition, that will define the lowest level clusterings
+    mesh.cluster_unity(None);
+
+    mesh.group(grouping_config).unwrap();
+
+    mesh.colour_within_clusters(non_contig_even_clustering_config, COLOUR_CLUSTER_SIZE)?;
+
+    let mut multi_res = MultiResMesh {
+        name,
+        full_indices: tri_mesh.indices,
+        verts: tri_mesh
+            .verts
+            .iter()
+            .zip(tri_mesh.normals.iter())
+            .map(|(v, n)| MeshVert {
+                pos: [v.x, v.y, v.z, 1.0],
+                normal: [n.x, n.y, n.z, 1.0],
+            })
+            .collect(),
+        // layer_1_indices: indices.clone(),
+        lods: Vec::new(),
+        clusters: Vec::new(),
+        group_count: 0,
+    };
+
+    let mut lower_group_range = 0;
+    multi_res.group_count += &mesh.groups.len();
+    let mut upper_group_range = multi_res.group_count;
+
+    multi_res.lods.push(to_mesh_layer(&mesh));
+
+    multi_res
+        .clusters
+        .extend_from_slice(&generate_clusters(&mesh, 0, &tri_mesh.verts, 0, 0));
+
+    // Generate more meshes
+    for i in 1..10 {
+        // i = index of previous mesh layer
+        //working_mesh = reduce_mesh(working_mesh);
+
+        println!("Face count L{}: {}", i, mesh.face_count());
+
+        // We must regenerate the queue each time, as boundaries change.
+
+        // Each group requires half it's triangles removed
+
+        let collapse_requirements: Vec<usize> = mesh
+            .groups
+            .iter()
+            .map(|g| {
+                g.num_tris(&mesh) / 4
+                //let halved_tris = g.tris / 4;
+                //let tris_to_remove_for_cluster_max = g
+                //    .tris
+                //    .saturating_sub(MAX_TRIS_PER_CLUSTER * CLUSTERS_PER_SIMPLIFIED_GROUP - 25);
+                //
+                // Each operation removes 2 triangles.
+                // Do whichever we need to bring ourselves down to the limit. Error function will make up for variations in density
+                //halved_tris.max(halved_tris).div_ceil(2)
+            })
+            .collect();
+
+        mesh.age();
+
+        // Make sure groups are contiguous before reduction
+        #[cfg(debug)]
+        {
+            println!("Ensuring groups are contiguous... ");
+            let graphs = mesh.generate_group_keyed_graphs();
+            for graph in graphs {
+                graph::assert_graph_contiguous(&graph);
+            }
+        }
+
+        println!("Reducing within {} groups:", collapse_requirements.len());
+
+        let e =
+            match mesh.reduce_within_groups(&tri_mesh.verts, &mut quadrics, &collapse_requirements)
+            {
+                Ok(e) => e,
+                Err(e) => {
+                    println!(
+                        "Experience error {} with reducing, exiting early with what we have",
+                        e
+                    );
+                    break;
+                }
+            };
+        println!(
+            "Introduced error of {e}. Max edge age: {}, Mean: {}",
+            mesh.max_edge_age(),
+            mesh.avg_edge_age(),
+        );
+
+        // Make a new cluster for the new LOD level
+        mesh.cluster_unity(Some(0));
+
+        println!("1 Partitions from groups");
+
+        mesh.group(grouping_config)?;
+
+        mesh.colour_within_clusters(non_contig_even_clustering_config, COLOUR_CLUSTER_SIZE)?;
+
+        // view a snapshot of the mesh ready to create the next layer
+        // let error = (1.0 + i as f32) / 10.0 + rng.gen_range(-0.05..0.05);
+
+        println!("1 Groups from partitions");
+
+        multi_res.lods.push(to_mesh_layer(&mesh));
+
+        multi_res.clusters.extend_from_slice(&generate_clusters(
+            &mesh,
+            i,
+            &tri_mesh.verts,
+            lower_group_range,
+            upper_group_range,
+        ));
+
+        multi_res.group_count += mesh.groups.len();
+
+        lower_group_range = upper_group_range;
+        upper_group_range = multi_res.group_count;
+    }
+    // Patch cluster indexes within groups
+    // for gi in lower_group_range..upper_group_range {
+    //     for c in &mut multi_res.groups[gi].clusters {
+    //         *c += cluster_count;
+    //     }
+    // }
+
+    opt_multires(&mut multi_res);
+
+    Ok(multi_res)
+}
+
+pub fn meshopt_simplify_lod_chain(tri_mesh: TriMesh, name: String) -> anyhow::Result<MultiResMesh> {
+    let verts = meshopt::VertexDataAdapter::new(
+        bytemuck::cast_slice(&tri_mesh.verts),
+        mem::size_of::<glam::Vec4>(),
+        0,
+    )
+    .unwrap();
+
+    let mut indices = tri_mesh.indices.to_vec();
+
+    let mut multi_res = MultiResMesh {
+        name,
+        full_indices: tri_mesh.indices,
+        verts: tri_mesh
+            .verts
+            .iter()
+            .zip(tri_mesh.normals.iter())
+            .map(|(v, n)| MeshVert {
+                pos: [v.x, v.y, v.z, 1.0],
+                normal: [n.x, n.y, n.z, 1.0],
+            })
+            .collect(),
+        // layer_1_indices: indices.clone(),
+        lods: Vec::new(),
+        clusters: Vec::new(),
+        group_count: 0,
+    };
+
+    for i in 0..9 {
+        let prev_indices = indices.clone();
+
+        indices =
+            meshopt::simplify_sloppy(&prev_indices, &verts, prev_indices.len() / 2, 1.0, None);
+
+        println!("Simplified to {} indices", indices.len());
+
+        multi_res
+            .clusters
+            .push(MeshCluster::new_raw_temp(prev_indices, i));
+    }
+
+    //opt_multires(&mut multi_res);
+
+    Ok(multi_res)
+}
+
+fn opt_multires(multi_res: &mut MultiResMesh) {
     println!("Optimising and generating strips");
 
     optimise_clusters(&mut multi_res.clusters);
@@ -250,81 +470,7 @@ pub fn group_and_partition_and_simplify(
     println!("Done with partitioning. Min tris: {min_tris}, Max tris: {max_tris}. Total indices: {total_indices}, stripped indices: {total_stripped_indices}");
 
     //assert_eq!(partitions1.len() * 3, layer_1_indices.len());
-
-    multi_res
 }
-
-// pub fn apply_simplification(mut mesh: WingedMesh, verts: &[Vec4], name: String) -> WingedMesh {
-//     // Apply primary partition, that will define the lowest level clusterings
-
-//     mesh.groups = vec![
-//         GroupInfo {
-//             tris: 0,
-//             monotonic_bound: Default::default(),
-//             clusters: vec![0],
-//             group_neighbours: BTreeSet::new()
-//         };
-//         1
-//     ];
-
-//     let mut multi_res = MultiResMesh {
-//         name,
-//         verts: verts
-//             .iter()
-//             .map(|v| MeshVert {
-//                 pos: [v.x, v.y, v.z, 1.0],
-//                 normal: [0.0; 4],
-//             })
-//             .collect(),
-//         // layer_1_indices: indices.clone(),
-//         lods: Vec::new(),
-//         group_count : 0,
-//     };
-
-//     multi_res
-//         .lods
-//         .push(to_mesh_layer(&mesh, 0, &verts,  0, 0));
-
-//     let mut quadrics = mesh.create_quadrics(verts);
-//     // Generate 2 more meshes
-//     for i in 1..8 {
-//         // i = index of previous mesh layer
-//         println!(
-//             "Face count LOD{}: {}, beginning generating LOD{}",
-//             i,
-//             mesh.face_count(),
-//             i + 1
-//         );
-
-//         let _e = match mesh.reduce_within_groups(verts, &mut quadrics, &[mesh.face_count() / 4]) {
-//             Ok(e) => e,
-//             Err(e) => {
-//                 println!(
-//                     "Experience error {} with reducing, exiting early with what we have",
-//                     e
-//                 );
-//                 break;
-//             }
-//         };
-
-//         // View a snapshot of the mesh without any re-groupings applied
-
-//         multi_res
-//             .lods
-//             .push(to_mesh_layer(&mesh, i, &verts,  0, 0));
-
-//         if mesh.face_count() < 10 {
-//             println!("Reduced to low enough amount of faces, ending");
-//             break;
-//         }
-//     }
-
-//     println!("Done with partitioning");
-
-//     //assert_eq!(partitions1.len() * 3, layer_1_indices.len());
-
-//     mesh
-// }
 
 pub fn grab_indices(mesh: &WingedMesh) -> Vec<u32> {
     let mut indices = Vec::with_capacity(mesh.face_count() * 3);
@@ -511,11 +657,11 @@ mod test {
         let mesh_name = "../../assets/sphere.glb";
 
         println!("Loading from gltf!");
-        let (mesh, tri_mesh) = WingedMesh::from_gltf(mesh_name);
+        let (mut mesh, tri_mesh) = WingedMesh::from_gltf(mesh_name);
 
         //group_and_partition_full_res(working_mesh, &verts, mesh_name.to_owned());
         //apply_simplification(working_mesh, &verts, mesh_name.to_owned());
-        let mesh = group_and_partition_and_simplify(mesh, tri_mesh, "".to_owned());
+        let mesh = group_and_partition_and_simplify(mesh, tri_mesh, "".to_owned()).unwrap();
 
         let mut groups = HashMap::<usize, Vec<BoundingSphere>>::new();
 

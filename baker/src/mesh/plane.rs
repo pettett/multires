@@ -32,4 +32,10 @@ impl Plane {
     pub fn normal(&self) -> glam::Vec3A {
         self.0.into()
     }
+    pub fn signed_distance(&self, p: glam::Vec3A) -> f32 {
+        self.0.dot((p, 1.0).into())
+    }
+    pub fn is_above(&self, p: glam::Vec3A) -> bool {
+        self.signed_distance(p) > 0.0
+    }
 }

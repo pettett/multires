@@ -1,11 +1,22 @@
-use std::thread;
+use std::{default, fmt::Display, thread};
 
-use baker::{group_and_partition_and_simplify, mesh::winged_mesh::WingedMesh};
-use clap::Parser;
+use baker::{
+    group_and_partition_and_simplify, mesh::winged_mesh::WingedMesh, meshopt_simplify_lod_chain,
+    simplify_lod_chain,
+};
+use clap::{Parser, ValueEnum};
 use common::asset::Asset;
 
 // Castle
 // https://sketchfab.com/3d-models/upnor-castle-a08280d12911401aa6022c1a58f2b49a
+
+#[derive(Default, Clone, Copy, ValueEnum, Debug)]
+enum Mode {
+    #[default]
+    DAG,
+    MeshoptLOD,
+    BakerLOD,
+}
 
 /// Search for a pattern in a file and display the lines that contain it.
 #[derive(Parser)]
@@ -15,9 +26,12 @@ struct Args {
     input: String,
     #[arg(short, long)]
     output: std::path::PathBuf,
+
+    #[arg(short, long, default_value = "dag")]
+    mode: Mode,
 }
 
-fn bake_mesh(input: std::path::PathBuf, output: std::path::PathBuf) {
+fn bake_mesh(input: std::path::PathBuf, output: std::path::PathBuf, mode: Mode) {
     println!("Loading from gltf!");
     let (mut mesh, tri_mesh) = WingedMesh::from_gltf(&input);
 
@@ -42,10 +56,18 @@ fn bake_mesh(input: std::path::PathBuf, output: std::path::PathBuf) {
 
     assert_eq!(num_contiguous.len(), 1);
 
+    let name = input.to_str().unwrap().to_owned();
+
+    let multi_res = match mode {
+        Mode::DAG => group_and_partition_and_simplify(mesh, tri_mesh, name).unwrap(),
+        Mode::MeshoptLOD => {
+            meshopt_simplify_lod_chain(tri_mesh, name).expect("Failed to extract meshopt stuff")
+        }
+        Mode::BakerLOD => simplify_lod_chain(mesh, tri_mesh, name).unwrap(),
+    };
+
     //group_and_partition_full_res(working_mesh, &verts, mesh_name.to_owned());
     //apply_simplification(working_mesh, &verts, mesh_name.to_owned());
-    let multi_res =
-        group_and_partition_and_simplify(mesh, tri_mesh, input.to_str().unwrap().to_owned());
 
     multi_res.save(output).unwrap();
 }
@@ -64,14 +86,14 @@ fn main() {
                 println!("{:?}", path.display());
                 println!("{:?}", output.display());
 
-                threads.push(thread::spawn(move || bake_mesh(path, output)))
+                threads.push(thread::spawn(move || bake_mesh(path, output, args.mode)))
             }
             Err(e) => println!("{:?}", e),
         }
     }
 
     for t in threads {
-        t.join();
+        t.join().unwrap();
     }
 
     //let mesh_name = "../assets/torrin_main.glb";

@@ -3,11 +3,11 @@ pub mod face;
 pub mod quadric;
 pub mod vertex;
 pub mod winged_mesh;
+pub mod plane;
 
 mod cluster_info;
 mod graph;
 mod group_info;
 mod partition;
-mod plane;
 mod quadric_error;
 mod reduction;

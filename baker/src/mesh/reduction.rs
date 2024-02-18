@@ -3,7 +3,6 @@ use std::cmp;
 #[cfg(feature = "progress")]
 use indicatif::ProgressStyle;
 
-use parking_lot::Mutex;
 use rayon::prelude::*;
 
 use crate::mesh::graph::colour_graph;

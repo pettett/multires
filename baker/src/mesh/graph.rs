@@ -366,7 +366,7 @@ pub mod test {
         let (mut mesh, tri_mesh) = WingedMesh::from_gltf(mesh);
 
         // Apply primary partition, that will define the lowest level clusterings
-        mesh.partition_full_mesh(test_config, 9, &tri_mesh.verts)?;
+        mesh.cluster_full_mesh(test_config, 9, &tri_mesh.verts)?;
 
         println!(
             "Faces: {}, Verts: {}, Partitions: {}",
@@ -469,7 +469,7 @@ pub mod test {
         println!("Faces: {}, Verts: {}", mesh.face_count(), mesh.vert_count());
 
         // Apply primary partition, that will define the lowest level clusterings
-        mesh.partition_full_mesh(test_config, 60, &tri_mesh.verts)
+        mesh.cluster_full_mesh(test_config, 60, &tri_mesh.verts)
             .unwrap();
         mesh.group(test_config).unwrap();
 

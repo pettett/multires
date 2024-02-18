@@ -242,17 +242,21 @@ impl WingedMesh {
         [e0.vert_origin.0, e1.vert_origin.0, e2.vert_origin.0]
     }
 
+	/// Wrapper around [TriMesh::from_gltf] and [WingedMesh::from_tris]
     pub fn from_gltf(path: impl AsRef<std::path::Path>) -> (Self, TriMesh) {
         let tri_mesh = TriMesh::from_gltf(&path).unwrap();
-
-        let face_count = tri_mesh.indices.len() / 3;
-        let mut mesh = WingedMesh::new(face_count, tri_mesh.verts.len());
-
         println!(
             "Loading GLTF {:?} with {} faces:",
             fs::canonicalize(path).unwrap(),
-            face_count
+            tri_mesh.indices.len() / 3
         );
+        (Self::from_tris(&tri_mesh), tri_mesh)
+    }
+
+    pub fn from_tris(tri_mesh: &TriMesh) -> Self {
+        let face_count = tri_mesh.indices.len() / 3;
+        let mut mesh = WingedMesh::new(face_count, tri_mesh.verts.len());
+
         #[cfg(feature = "progress")]
         let bar = indicatif::ProgressBar::new(face_count as u64);
 
@@ -276,7 +280,7 @@ impl WingedMesh {
         #[cfg(feature = "progress")]
         bar.finish();
 
-        (mesh, tri_mesh)
+        mesh
     }
 
     fn find_edge(&self, a: VertID, b: VertID) -> Option<EdgeID> {
@@ -417,7 +421,7 @@ impl WingedMesh {
 
         let new = has_twin && joint_shared_count == 2 || !has_twin && joint_shared_count == 1;
 
-        #[cfg(test)]
+        #[cfg(debug)]
         {
             // Regression test / much easier logic to read
 
@@ -457,7 +461,7 @@ impl WingedMesh {
     pub fn collapse_edge(&mut self, eid: EdgeID) -> anyhow::Result<()> {
         let (vid_orig, vid_dest) = eid.src_dst(self)?;
 
-        #[cfg(test)]
+        #[cfg(debug)]
         {
             if !self.max_one_joint_neighbour_vertices_per_side(eid) {
                 Err(MeshError::EdgeCollapse(eid, vid_orig, vid_dest)).context(
@@ -472,7 +476,7 @@ impl WingedMesh {
             .context(MeshError::EdgeCollapse(eid, vid_orig, vid_dest))?;
 
         // Assert the vertexes are still valid, which they should be despite some invalid triangles around us
-        #[cfg(test)]
+        #[cfg(debug)]
         {
             self.assert_vertex_valid(vid_dest)
                 .context("Invalid dest vertex after single collapse")
@@ -491,7 +495,7 @@ impl WingedMesh {
         // Remove `vert_origin`
         self.wipe_vert(vid_orig, vid_dest);
 
-        #[cfg(test)]
+        #[cfg(debug)]
         {
             self.assert_vertex_valid(vid_dest)
                 .context(MeshError::EdgeCollapse(eid, vid_orig, vid_dest))
@@ -567,7 +571,7 @@ impl WingedMesh {
     }
 
     pub fn wipe_face(&mut self, face: FaceID) -> (Face, [EdgeID; 3], [HalfEdge; 3]) {
-        #[cfg(test)]
+        #[cfg(debug)]
         {
             self.assert_face_valid(face).unwrap();
         }
@@ -618,7 +622,7 @@ impl WingedMesh {
             let outgoing_edge = self.get_edge(outgoing);
 
             // Don't fix invalid edges
-            #[cfg(test)]
+            #[cfg(debug)]
             {
                 let (orig, dest) = outgoing_edge.src_dst(self).unwrap();
                 assert_eq!(orig, vid);
@@ -1017,7 +1021,7 @@ pub mod test {
             ..Default::default()
         };
 
-        mesh.partition_full_mesh(
+        mesh.cluster_full_mesh(
             test_config,
             mesh.verts.len().div_ceil(60) as u32,
             &tri_mesh.verts,
@@ -1092,7 +1096,7 @@ pub mod test {
         for i in 9..50 {
             println!("{i}");
 
-            mesh.partition_full_mesh(test_config, i, &tri_mesh.verts)?;
+            mesh.cluster_full_mesh(test_config, i, &tri_mesh.verts)?;
 
             println!("Partitioned");
             let mut graph = mesh.generate_face_graph();
