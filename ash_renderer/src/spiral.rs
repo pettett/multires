@@ -58,10 +58,9 @@ impl Iterator for Spiral {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
-    use crate::Spiral;
+    use super::*;
 
     #[test]
     fn test_spiral() {

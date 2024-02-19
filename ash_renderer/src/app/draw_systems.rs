@@ -11,7 +11,7 @@ use crate::{
         compute_culled_indices::ComputeCulledIndices, compute_culled_mesh::ComputeCulledMesh,
         draw_indirect::DrawIndirect, indirect_tasks::IndirectTasks, stub::Stub, DrawPipeline,
     },
-    MAX_FRAMES_IN_FLIGHT,
+    utility::constants::MAX_FRAMES_IN_FLIGHT,
 };
 
 use super::{
@@ -113,6 +113,7 @@ pub fn draw_frame(
     draw_events: EventWriter<MeshDrawingPipelineType>,
     fps: Res<FPSMeasure>,
     mesh_data: Res<MeshDataBuffers>,
+    mut commands: Commands,
 ) {
     let wait_fences = [renderer.sync_objects.in_flight_fences[renderer.current_frame]];
 
@@ -165,6 +166,7 @@ pub fn draw_frame(
         scene_events,
         draw_events,
         &fps,
+        commands,
     );
 
     let submit_infos = [vk::SubmitInfo::builder()

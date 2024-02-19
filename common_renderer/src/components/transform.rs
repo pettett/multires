@@ -41,20 +41,33 @@ impl Transform {
         self.pos += self.rot.mul_vec3a(translation)
     }
 
+    /// Forward in our right handed coordinate system
     pub fn forward(&self) -> Vec3A {
-        self.rot.mul_vec3a(Vec3A::X)
+        self.rot.mul_vec3a(-Vec3A::Z)
     }
 
+    /// Left in our right handed coordinate system
     pub fn left(&self) -> Vec3A {
+        self.rot.mul_vec3a(-Vec3A::X)
+    }
+
+    /// Up in our right handed coordinate system
+    pub fn up(&self) -> Vec3A {
         self.rot.mul_vec3a(Vec3A::Y)
     }
 
-    pub fn up(&self) -> Vec3A {
-        self.rot.mul_vec3a(Vec3A::Z)
+    pub fn look_at(&mut self, target: Vec3A) {
+        let look_at = Mat4::look_at_rh(self.pos.into(), target.into(), Vec3::Y);
+
+        self.rot = look_at.to_scale_rotation_translation().1;
     }
 
-    pub fn look_at(&mut self, target: Vec3A) {
-        self.rot = Quat::from_rotation_arc(Vec3::X, (self.pos - target).normalize().into());
+    pub fn get_euler(&self) -> Vec3 {
+        self.rot.to_euler(glam::EulerRot::YXZ).into()
+    }
+
+    pub fn set_euler(&mut self, rot: Vec3) -> () {
+        self.rot = glam::Quat::from_euler(glam::EulerRot::YXZ, rot.x, rot.y, rot.z);
     }
 
     pub fn get_rot(&self) -> &Quat {
@@ -69,5 +82,9 @@ impl Transform {
 
     pub fn scale_mut(&mut self) -> &mut Vec3A {
         &mut self.scale
+    }
+
+    pub fn set_pos(&mut self, pos: Vec3A) {
+        self.pos = pos;
     }
 }

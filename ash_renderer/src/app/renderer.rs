@@ -6,6 +6,7 @@ use common_renderer::components::camera::Camera;
 use gpu_allocator::vulkan::Allocator;
 
 use crate::{
+    components::benchmarker::Benchmarker,
     core::Core,
     draw_pipelines::{indirect_tasks::MeshShaderMode, DrawPipeline},
     gui::{gui::Gui, window::GuiWindow},
@@ -70,9 +71,8 @@ impl Renderer {
         self.core.device.wait_device_idle();
 
         let size = self.window_ref().inner_size();
-        {
-            cam.on_resize(&size);
-        }
+
+        cam.on_resize(&size);
 
         //self.cleanup_swapchain();
 
@@ -111,6 +111,7 @@ impl Renderer {
         mut scene_events: EventWriter<SceneEvent>,
         mut draw_events: EventWriter<MeshDrawingPipelineType>,
         fps: &FPSMeasure,
+        mut commands: Commands,
     ) -> vk::CommandBuffer {
         let mut add_more = false;
 
@@ -158,7 +159,7 @@ impl Renderer {
                         add_more = true;
                     }
 
-                    if egui::ComboBox::from_label("Select one!")
+                    egui::ComboBox::from_label("Select one!")
                         .selected_text(format!("{:?}", self.mesh_mode))
                         .show_ui(ui, |ui| {
                             ui.selectable_value(
@@ -171,17 +172,23 @@ impl Renderer {
                                 MeshShaderMode::TriangleStrip,
                                 "Triangle Strip",
                             );
-                        })
-                        .response
-                        .clicked()
-                    {
-                        // Refresh render pipeline
-                        draw_events.send(self.current_pipeline)
-                    }
+                        });
 
                     if ui.checkbox(&mut self.query, "Enable Queries").clicked() {
+                        draw_events.send(self.current_pipeline);
+                    }
+
+                    if ui.button("Refresh").clicked() {
+                        draw_events.send(self.current_pipeline);
+                    }
+
+                    if ui.button("Begin Benchmarking").clicked() {
                         // Refresh render pipeline
-                        draw_events.send(self.current_pipeline)
+                        commands.insert_resource(Benchmarker::new(
+                            glam::Vec3A::Z * 3.0,
+                            glam::Vec3A::Z * 500.0,
+                            20.0,
+                        ))
                     }
 
                     if self.query {

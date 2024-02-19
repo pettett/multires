@@ -38,14 +38,19 @@ impl FPSMeasure {
         self.delta_time_nanos.tick(time_elapsed.as_nanos() as _);
 
         if self.fps_measure_counter.elapsed() > Duration::from_secs_f32(0.03) {
-            self.fps_measure.tick(self.fps());
+            self.fps_measure.tick(self.long_fps());
             self.fps_measure_counter = Instant::now();
         }
     }
 
-    /// Calculate the current FPS.
-    pub fn fps(&self) -> f32 {
+    /// Calculate the current FPS. Slow to react, long running.
+    pub fn long_fps(&self) -> f32 {
         NANOS_PER_SEC / self.delta_time_nanos.mean() as f32
+    }
+
+    /// Calculate the current FPS. Quick to react, jumpy
+    pub fn short_fps(&self) -> f32 {
+        NANOS_PER_SEC / self.delta_time_nanos.last_sample() as f32
     }
 
     /// Return current delta time in seconds

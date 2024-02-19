@@ -10,6 +10,7 @@ use super::renderer::{MeshDrawingPipelineType, Renderer};
 #[derive(Debug, Clone, Copy, Event)]
 pub enum SceneEvent {
     AddInstances(usize),
+    ResetScene,
     UpdateInstanceBuffers,
 }
 
@@ -30,6 +31,19 @@ pub struct CameraUniformBufferObject {
     pub target_error: f32,
 }
 
+#[derive(Resource)]
+pub struct Scene {
+    //texture_image: Image,
+    pub uniform_transform_buffer: Arc<TBuffer<ModelUniformBufferObject>>,
+    pub uniform_camera: CameraUniformBufferObject,
+    pub target_error: f32,
+    pub uniform_camera_buffers: Vec<Arc<TBuffer<CameraUniformBufferObject>>>,
+    pub freeze_pos: bool,
+    pub instances: usize,
+}
+#[derive(Component)]
+pub struct Mesh;
+
 impl CameraUniformBufferObject {
     pub fn new(view_proj: glam::Mat4, cam_pos: glam::Vec3, target_error: f32) -> Self {
         Self {
@@ -46,18 +60,6 @@ impl CameraUniformBufferObject {
         }
     }
 }
-
-#[derive(Resource)]
-pub struct Scene {
-    //texture_image: Image,
-    pub uniform_transform_buffer: Arc<TBuffer<ModelUniformBufferObject>>,
-    pub uniform_camera: CameraUniformBufferObject,
-    pub target_error: f32,
-    pub uniform_camera_buffers: Vec<Arc<TBuffer<CameraUniformBufferObject>>>,
-    pub freeze_pos: bool,
-    pub instances: usize,
-}
-
 impl Scene {
     pub fn update_camera_uniform_buffer(
         &mut self,
@@ -86,19 +88,17 @@ pub fn process_scene_events(
     mut commands: Commands,
     mut event_read: EventReader<SceneEvent>,
     mut draw_write: EventWriter<MeshDrawingPipelineType>,
-    transforms: Query<&Transform>,
+    transforms: Query<(Entity, &Transform, &Mesh)>,
 ) {
     for e in event_read.read() {
         match e {
             SceneEvent::AddInstances(count) => {
                 for (i, j) in Spiral::default().skip(scene.instances).take(*count) {
-                    let p = glam::Vec3A::X * i as f32 * 20.0 + glam::Vec3A::Z * j as f32 * 40.0;
+                    let p = glam::Vec3A::X * i as f32 * 20.0 + glam::Vec3A::Y * j as f32 * 20.0;
 
                     let transform = Transform::new_pos(p);
 
-                    println!("{i} {j}");
-
-                    commands.spawn(transform);
+                    commands.spawn((transform, Mesh));
                 }
                 scene.instances += count;
                 // Update buffers after commands have been completed next frame
@@ -107,10 +107,21 @@ pub fn process_scene_events(
                     w.send_event(SceneEvent::UpdateInstanceBuffers);
                 });
             }
+            // Reset to 50 instances
+            SceneEvent::ResetScene => {
+                for (e, t, m) in transforms.iter() {
+                    commands.entity(e).despawn()
+                }
+                scene.instances = 0;
+
+                commands.add(|w: &mut World| {
+                    w.send_event(SceneEvent::AddInstances(50));
+                });
+            }
             SceneEvent::UpdateInstanceBuffers => {
                 let mut uniform_transforms = Vec::with_capacity(scene.instances);
 
-                for transform in transforms.iter() {
+                for (_, transform, _) in transforms.iter() {
                     uniform_transforms.push(ModelUniformBufferObject {
                         model: transform.get_local_to_world(),
                         inv_model: transform.get_local_to_world().inverse(),

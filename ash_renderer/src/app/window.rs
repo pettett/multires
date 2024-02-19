@@ -3,7 +3,8 @@ use std::sync::Arc;
 use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
 
-use crate::{App, Renderer};
+use super::app::App;
+use super::renderer::Renderer;
 
 pub fn init_window(
     event_loop: &EventLoop<()>,

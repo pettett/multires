@@ -245,8 +245,8 @@ pub fn graph_contiguous<V, E, Ty: petgraph::EdgeType>(graph: &petgraph::Graph<V,
     seen.iter().all(|&x| x)
 }
 
-pub fn assert_graph_contiguous<V: std::fmt::Debug, E: std::fmt::Debug>(
-    graph: &petgraph::Graph<V, E, petgraph::Undirected>,
+pub fn assert_graph_contiguous<V: std::fmt::Debug, E: std::fmt::Debug, Ty: petgraph::EdgeType>(
+    graph: &petgraph::Graph<V, E, Ty>,
 ) {
     let dir = if cfg!(test) {
         "..\\svg\\non_contig_graph.svg"

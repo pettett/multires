@@ -5,13 +5,11 @@ use ash::vk;
 use gpu_allocator::vulkan::Allocator;
 use raw_window_handle::HasRawDisplayHandle;
 
-use crate::{
-    utility::{
-        device::Device,
-        pooled::{command_buffer_group::CommandBufferGroup, command_pool::CommandPool},
-        swapchain::Swapchain,
-    },
-    QueueFamilyIndices,
+use crate::utility::{
+    device::Device,
+    pooled::{command_buffer_group::CommandBufferGroup, command_pool::CommandPool},
+    structures::QueueFamilyIndices,
+    swapchain::Swapchain,
 };
 
 use super::gpu_allocator::GpuAllocator;
@@ -34,7 +32,8 @@ impl Gui {
         graphics_queue: vk::Queue,
         swapchain: &Swapchain,
     ) -> Self {
-        let ui_command_buffers = CommandBufferGroup::new(command_pool.clone(), swapchain.images.len() as _);
+        let ui_command_buffers =
+            CommandBufferGroup::new(command_pool.clone(), swapchain.images.len() as _);
 
         let integration = egui_winit_ash_integration::Integration::<GpuAllocator>::new(
             target,

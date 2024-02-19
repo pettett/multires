@@ -46,11 +46,13 @@ impl Camera {
         //    Vec3::new(-5603.8857, -3556.1858, -132.67264),
         //    Vec3::Z,
         //);
-        let view = Mat4::look_to_rh(
-            (*transform.get_pos()).into(),
-            transform.forward().into(),
-            transform.up().into(),
-        );
+        // let view = Mat4::look_to_rh(
+        //     (*transform.get_pos()).into(),
+        //     transform.forward().into(),
+        //     transform.up().into(),
+        // );
+
+        let view = transform.get_local_to_world().inverse();
 
         // 2.
         let proj = Mat4::perspective_rh(self.fovy, self.aspect, self.znear, self.zfar);

@@ -17,7 +17,6 @@ pub struct CameraController {
     dragging: bool,
     last_mouse_pos: PhysicalPosition<f64>,
     mouse_delta: Vec2,
-    look: Vec2,
 }
 #[derive(Event)]
 pub struct KeyIn(pub KeyboardInput);
@@ -116,12 +115,17 @@ pub fn update_camera(mut q: Query<(&mut CameraController, &mut Transform)>, time
         // rotate camera
         if controller.dragging {
             let off = controller.mouse_delta / 100.0;
-            controller.look += off;
 
-            let rot = Quat::from_axis_angle(Vec3::Z, controller.look.x)
-                * Quat::from_axis_angle(Vec3::Y, -controller.look.y);
+            let mut e = transform.get_euler();
 
-            *transform.get_rot_mut() = rot;
+            e.z = 0.0;
+
+            e.x += off.x;
+            e.y += off.y;
+
+            e.y = e.y.clamp(-1.0, 1.0);
+
+            transform.set_euler(e);
         }
         controller.mouse_delta = Vec2::ZERO;
     }
@@ -138,7 +142,6 @@ impl CameraController {
             is_up_pressed: false,
             is_down_pressed: false,
             dragging: false,
-            look: Default::default(),
             last_mouse_pos: Default::default(),
             mouse_delta: Default::default(),
         }

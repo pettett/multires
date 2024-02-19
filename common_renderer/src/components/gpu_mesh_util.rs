@@ -1,6 +1,6 @@
 use std::cmp;
 
-use common::{MeshCluster, MultiResMesh};
+use common::{graph::assert_graph_contiguous, MeshCluster, MultiResMesh};
 
 #[repr(C)]
 #[derive(crevice::std430::AsStd430, Clone, Copy, PartialEq, Debug)]
@@ -148,15 +148,6 @@ impl MultiResData for MultiResMesh {
                 dag.add_edge(cluster_node_idx, child, ());
             }
         }
-        // petgraph_to_svg(
-        //     &dag,
-        //     "svg\\asset_dag.svg",
-        //     &|_, _| String::new(),
-        //     common::graph::GraphSVGRender::Directed {
-        //         node_label: common::graph::Label::Weight,
-        //     },
-        // )
-        // .unwrap();
 
         // Search for Co-parents
         for i in 0..clusters.len() {
@@ -284,6 +275,40 @@ mod tests {
 
                     assert!(p0 == i || p1 == i);
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn test_no_co_parents_at_zero() {
+        let mesh = MultiResMesh::load_from_cargo_manifest_dir().unwrap();
+
+        let (cluster_order, groups) = mesh.order_clusters();
+        let clusters = mesh.generate_cluster_data(&cluster_order, &groups);
+
+        for i in 0..clusters.len() {
+            if clusters[i].layer == 0 {
+                assert_eq!(clusters[i].co_parent, -1);
+            } else {
+                assert_ne!(clusters[i].co_parent, -1);
+            }
+        }
+    }
+
+    #[test]
+    fn test_no_parents_at_zero_top() {
+        let mesh = MultiResMesh::load_from_cargo_manifest_dir().unwrap();
+
+        let (cluster_order, groups) = mesh.order_clusters();
+        let clusters = mesh.generate_cluster_data(&cluster_order, &groups);
+
+        for i in 0..clusters.len() {
+            if clusters[i].layer == clusters[0].layer {
+                assert_eq!(clusters[i].parent0, -1);
+                assert_eq!(clusters[i].parent1, -1);
+            } else {
+                assert_ne!(clusters[i].parent0, -1);
+                assert_ne!(clusters[i].parent1, -1);
             }
         }
     }

@@ -60,7 +60,7 @@ float cluster_error(uint idx, vec3 local_cam_pos) {
 
 		vec3 vec = center - local_cam_pos;
 		float inv_center_distance = 1/(dot(vec, vec));
-        return error * error * radius * radius * inv_center_distance;
+        return (error * error * radius * radius) * inv_center_distance;
 		//return clusters[idx].error;
 	}
 }
@@ -107,8 +107,9 @@ void main() {
 	memoryBarrierBuffer();
 
     if (cluster_index >= max_cluster()) {
-    	payload.meshlet_start[local_index] = -1;
-    	payload.meshlet_count[local_index] = -1;
+		// this is a uint, DO NOT ASSIGN -1
+    	payload.meshlet_start[local_index] = 0;
+    	payload.meshlet_count[local_index] = 0;
         return;
     }
 
@@ -118,28 +119,35 @@ void main() {
 	// draw_error >= min(self.error, self.co-parent.error) 
 	// draw_error < min(parent0.error, parent1.error)
 
-	// lots of negative zeros
-    float this_error = -LARGE_ERROR;
 
-    if (clusters[cluster_index].co_parent >= 0) {
-        this_error = min(
-			cluster_error(cluster_index, local_cam_pos), 
-			cluster_error(uint(clusters[cluster_index].co_parent), local_cam_pos)
-			);
-    }
-
-	// lots of zeros
+	// lots of zeros - clusters at the end are always avaliable to draw
     float parent_error = LARGE_ERROR;
 
 	int parent0 = clusters[cluster_index].parent0;
 	int parent1 = clusters[cluster_index].parent1;
 
     if (parent0 >= 0) { // If we have one parent, we are guarenteed to have another.
-        parent_error = min(
+        parent_error = max(
 			cluster_error(uint(parent0), local_cam_pos), 
 			cluster_error(uint(parent1), local_cam_pos)
 			);
     }
+
+
+	// lots of negative zeros - clusters at the base are always avaliable to draw
+    float this_error = -LARGE_ERROR;
+	
+	int co_parent = clusters[cluster_index].co_parent;
+
+    if (co_parent >= 0) {
+        this_error = max(
+			cluster_error(cluster_index,   local_cam_pos), 
+			cluster_error(uint(co_parent), local_cam_pos)
+			);
+    }
+
+
+
 
 	float error = ubo.target_error * ubo.target_error;
 
@@ -169,7 +177,7 @@ void main() {
 
 	// bool in_clip = clamp(norm_clip_pos, vec3(0), vec3(CLIP_BOUND)) == norm_clip_pos;
 
-    payload.meshlet_start[local_index] = draw && in_clip ? clusters[cluster_index].meshlet_start : -1;
+    payload.meshlet_start[local_index] = draw && in_clip ? clusters[cluster_index].meshlet_start : 0;
     payload.meshlet_count[local_index] = draw && in_clip ? clusters[cluster_index].meshlet_count : 0;
     payload.instance = instance_index;
 	
