@@ -15,11 +15,11 @@ const float LARGE_ERROR = 100000000000000000.0;
 
 // Bindings and layout
 
-layout(binding = 1) readonly buffer Clusters {
+layout(binding = 2) readonly buffer Clusters {
     ClusterData clusters[];
 };
 
-layout(binding = 2) readonly buffer ShouldDraw {
+layout(binding = 1) readonly buffer ShouldDraw {
     uint should_draw[];
 };
 
@@ -41,7 +41,10 @@ void main() {
     bool draw = should_draw[gl_GlobalInvocationID.x] > 0;
     uint cluster_index = should_draw[gl_GlobalInvocationID.x] - 1;
 
-    payload.meshlet_start[local_index] = draw ? clusters[cluster_index].meshlet_start : -1;
+	// draw = true;
+	// cluster_index = gl_GlobalInvocationID.x;
+
+    payload.meshlet_start[local_index] = draw ? clusters[cluster_index].meshlet_start : 0;
     payload.meshlet_count[local_index] = draw ? clusters[cluster_index].meshlet_count : 0;
     payload.instance = instance_index;
 	

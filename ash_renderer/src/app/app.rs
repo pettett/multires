@@ -2,13 +2,14 @@ use crate::{
     app::{
         draw_systems::{draw_frame, tick_clocks, update_pipeline},
         mesh_data::MeshDataBuffers,
-        renderer::{MeshDrawingPipelineType, Renderer},
+        renderer::{Fragment, MeshDrawingPipelineType, Renderer},
         scene::{
             process_scene_events, CameraUniformBufferObject, ModelUniformBufferObject, SceneEvent,
         },
     },
     components::benchmarker::benchmark,
     core::Core,
+    draw_pipelines::indirect_tasks::MeshShaderMode,
     gui::allocator_visualiser_window::AllocatorVisualiserWindow,
     screen::find_depth_format,
     spiral::Spiral,
@@ -266,7 +267,7 @@ impl App {
             descriptor_pool,
             gui,
             windows: vec![Box::new(AllocatorVisualiserWindow::new(allocator.clone()))],
-            mesh_mode: crate::draw_pipelines::indirect_tasks::MeshShaderMode::TriangleList,
+            mesh_mode: MeshShaderMode::TriangleList,
             allocator,
             current_pipeline: MeshDrawingPipelineType::None,
             sync_objects,
@@ -276,6 +277,7 @@ impl App {
             app_info_open: true,
             core,
             screen,
+            fragment: Fragment::Lit,
         });
         world.insert_resource(mesh);
         world.insert_resource(FPSMeasure::new());

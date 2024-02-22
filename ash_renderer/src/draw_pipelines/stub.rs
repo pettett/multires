@@ -13,8 +13,6 @@ impl DrawPipeline for Stub {
         &mut self,
         _core: &crate::core::Core,
         _screen: &crate::screen::Screen,
-        _submesh_count: u32,
-        _instance_count: u32,
         _render_pass: &crate::utility::render_pass::RenderPass,
     ) {
     }

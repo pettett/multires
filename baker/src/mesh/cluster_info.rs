@@ -13,6 +13,4 @@ pub struct ClusterInfo {
 
     /// Number of triangles
     pub num_tris: usize,
-    /// Number of colours within its triangles
-    pub num_colours: usize,
 }

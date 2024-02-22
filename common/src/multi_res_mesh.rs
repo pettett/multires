@@ -87,7 +87,7 @@ pub struct MeshCluster {
     // Similarly, the bounding sphere must be enlarged to enclose the bounding spheres of all its children in the DAG,
     // in order to ensure a monotonic view-dependent error function.
     pub saturated_bound: BoundingSphere,
-    pub lod: usize, //TODO: In future, we should not need this - group indexes should be consistent across LOD
+    pub lod: usize, //We should not need this - group indexes are consistent across LOD
     pub error: f32,
     pub group_index: usize,
     pub child_group_index: Option<usize>,
@@ -123,12 +123,34 @@ impl asset::Asset for MultiResMesh {}
 impl Meshlet {
     //TODO: Generate  local, strip, verts, etc.
     pub fn from_indices(indices: Vec<u32>) -> Self {
-        Self {
+        let mut m = Self {
+            local_indices: Vec::with_capacity(indices.len()),
+            verts: Vec::with_capacity(indices.len() / 2),
+            local_strip_indices: Vec::with_capacity(indices.len() / 2),
             indices,
-            local_indices: Default::default(),
-            local_strip_indices: Default::default(),
-            verts: Default::default(),
+        };
+
+        for i in 0..m.indices.len() {
+            let id = m.global_to_local_vert_index(m.indices[i] as _);
+            m.local_indices.push(id);
         }
+
+        m
+    }
+
+    pub fn from_local_indices(indices: Vec<u32>, verts: Vec<u32>) -> Self {
+        let mut m = Self {
+            local_strip_indices: Vec::with_capacity(indices.len() / 2),
+            indices: Vec::with_capacity(indices.len()),
+            local_indices: indices,
+            verts,
+        };
+
+        for i in 0..m.local_indices.len() {
+            m.indices.push(m.verts[m.local_indices[i] as usize]);
+        }
+
+        m
     }
 
     pub fn vert_count(&self) -> usize {
@@ -139,7 +161,7 @@ impl Meshlet {
         self.verts[local_vert as usize]
     }
 
-    fn global_to_local_vert_index(&mut self, mesh_vert: u32) -> u32 {
+    pub fn global_to_local_vert_index(&mut self, mesh_vert: u32) -> u32 {
         (match self.verts.iter().position(|&x| x == mesh_vert) {
             Some(idx) => idx,
             None => {
@@ -159,9 +181,17 @@ impl Meshlet {
 
         assert!(self.indices.len() <= MAX_INDICES_PER_COLOUR);
     }
+
+    pub fn push_temp_tri(&mut self, tri: [usize; 3]) {
+        for v in tri {
+            self.indices.push(v as _);
+        }
+    }
+
     pub fn local_indices(&self) -> &[u32] {
         self.local_indices.as_ref()
     }
+
     pub fn local_indices_mut(&mut self) -> &mut Vec<u32> {
         self.local_indices.as_mut()
     }
@@ -220,6 +250,14 @@ impl MeshCluster {
         }
     }
 
+    pub fn reset_meshlets(&mut self) {
+        self.meshlets.clear()
+    }
+
+    pub fn add_meshlet(&mut self, m: Meshlet) {
+        self.meshlets.push(m)
+    }
+
     pub fn meshlet_for_colour(&self, colour: usize) -> &Meshlet {
         &self.meshlets[colour]
     }
@@ -239,6 +277,7 @@ impl MeshCluster {
     pub fn index_count(&self) -> usize {
         self.meshlets.iter().map(|x| x.indices.len()).sum()
     }
+
     pub fn stripped_index_count(&self) -> usize {
         self.meshlets
             .iter()
@@ -403,11 +442,11 @@ pub mod test {
     fn test_meshlet_creation() {
         let mut meshlet = Meshlet::default();
 
-        meshlet.push_tri([5, 3, 7]);
+        meshlet.push_temp_tri([5, 3, 7]);
 
         assert_eq!(meshlet.local_indices(), [0, 1, 2]);
 
-        meshlet.push_tri([5, 3, 8]);
+        meshlet.push_temp_tri([5, 3, 8]);
 
         assert_eq!(meshlet.local_indices(), [0, 1, 2, 0, 1, 3]);
     }

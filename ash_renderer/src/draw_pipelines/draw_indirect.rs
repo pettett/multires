@@ -111,20 +111,11 @@ impl DrawPipeline for DrawIndirect {
     fn draw(&self, frame_index: usize) -> vk::CommandBuffer {
         self.screen.as_ref().unwrap().command_buffers[frame_index]
     }
-    fn init_swapchain(
-        &mut self,
-        core: &Core,
-        screen: &Screen,
-        submesh_count: u32,
-        instance_count: u32,
-        render_pass: &RenderPass,
-    ) {
+    fn init_swapchain(&mut self, core: &Core, screen: &Screen, render_pass: &RenderPass) {
         self.screen = Some(ScreenData::create_command_buffers(
             &self,
             core,
             screen,
-            submesh_count,
-            instance_count,
             render_pass,
         ));
     }
@@ -143,8 +134,6 @@ impl ScreenData {
         core_draw: &DrawIndirect,
         core: &Core,
         screen: &Screen,
-        _submesh_count: u32,
-        _instance_count: u32,
         render_pass: &RenderPass,
     ) -> Self {
         let device = core.device.clone();

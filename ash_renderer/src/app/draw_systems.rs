@@ -9,7 +9,8 @@ use crate::{
     app::mesh_data::MeshDataBuffers,
     draw_pipelines::{
         compute_culled_indices::ComputeCulledIndices, compute_culled_mesh::ComputeCulledMesh,
-        draw_indirect::DrawIndirect, indirect_tasks::IndirectTasks, stub::Stub, DrawPipeline,
+        draw_indirect::DrawIndirect, expanding_compute_culled_mesh::ExpandingComputeCulledMesh,
+        indirect_tasks::IndirectTasks, stub::Stub, DrawPipeline,
     },
     utility::constants::MAX_FRAMES_IN_FLIGHT,
 };
@@ -44,21 +45,16 @@ pub fn update_pipeline(
     let mut draw_pipeline: Box<dyn DrawPipeline> = match s {
         MeshDrawingPipelineType::IndirectTasks => Box::new(IndirectTasks::new(
             renderer.core.clone(),
+            &renderer,
             &renderer.screen,
             transforms,
             &mesh_data,
-            renderer.allocator.clone(),
-            &renderer.render_pass,
-            renderer.graphics_queue,
-            renderer.descriptor_pool.clone(),
             scene.uniform_transform_buffer.clone(),
             &scene.uniform_camera_buffers,
-            mesh_data.cluster_count,
-            renderer.query,
-            renderer.mesh_mode,
         )),
         MeshDrawingPipelineType::ComputeCulledMesh => Box::new(ComputeCulledMesh::new(
             renderer.core.clone(),
+            &renderer,
             &renderer.screen,
             &mesh_data,
             renderer.allocator.clone(),
@@ -69,8 +65,22 @@ pub fn update_pipeline(
             &scene.uniform_camera_buffers,
             mesh_data.cluster_count,
         )),
+        MeshDrawingPipelineType::ExpandingComputeCulledMesh => {
+            Box::new(ExpandingComputeCulledMesh::new(
+                renderer.core.clone(),
+                &renderer,
+                &renderer.screen,
+                &scene,
+                &mesh_data,
+                renderer.allocator.clone(),
+                &renderer.render_pass,
+                renderer.graphics_queue,
+                renderer.descriptor_pool.clone(),
+            ))
+        }
         MeshDrawingPipelineType::ComputeCulledIndices => Box::new(ComputeCulledIndices::new(
             renderer.core.clone(),
+            &renderer,
             &renderer.screen,
             &mesh_data,
             renderer.allocator.clone(),
@@ -87,13 +97,7 @@ pub fn update_pipeline(
         MeshDrawingPipelineType::None => unreachable!(),
     };
 
-    draw_pipeline.init_swapchain(
-        &renderer.core,
-        &renderer.screen,
-        mesh_data.cluster_count,
-        scene.uniform_transform_buffer.item_len() as _,
-        &renderer.render_pass,
-    );
+    draw_pipeline.init_swapchain(&renderer.core, &renderer.screen, &renderer.render_pass);
 
     renderer.draw_pipeline = draw_pipeline;
     renderer.current_pipeline = *s;

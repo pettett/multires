@@ -49,18 +49,34 @@ vec3 integer_to_rgb(float integer) {
     return vec3(red, green, blue);
 }
 
+int calc_cluster_id(inout uint thread_id){
+
+	[[unroll]]
+	for (int i = 0; i < TASK_GROUP_SIZE; i++) {
+	
+		if (thread_id < payload.meshlet_count[i]){
+			return i;
+		}else{
+			thread_id -= payload.meshlet_count[i];
+		}
+
+
+	}
+
+	return -1;
+}
 
 void main() {
-    uint thread_id = gl_WorkGroupID.x;
+    uint meshlet_id = gl_WorkGroupID.x;
     uint local_id = gl_LocalInvocationID.x;
     uint cluster_id = gl_GlobalInvocationID.y;
 
-	if (thread_id >= payload.meshlet_count[cluster_id]){
+	if (meshlet_id >= payload.meshlet_count[cluster_id]){
     	SetMeshOutputsEXT(0, 0);
 		return;
 	}
 
-    uint meshlet_index = payload.meshlet_start[cluster_id] + thread_id;
+    uint meshlet_index = payload.meshlet_start[cluster_id] + meshlet_id;
 
 	vec3 colour = integer_to_rgb(meshlet_index);
 

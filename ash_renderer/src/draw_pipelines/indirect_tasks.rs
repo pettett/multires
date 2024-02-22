@@ -13,7 +13,8 @@ use gpu_allocator::vulkan::Allocator;
 
 use crate::{
     app::{
-        frame_measure::RollingMeasure, mesh_data::MeshDataBuffers, scene::ModelUniformBufferObject,
+        frame_measure::RollingMeasure, mesh_data::MeshDataBuffers, renderer::Renderer,
+        scene::ModelUniformBufferObject,
     },
     core::Core,
     screen::Screen,
@@ -77,27 +78,22 @@ pub struct IndirectTasks {
 impl IndirectTasks {
     pub fn new(
         core: Arc<Core>,
+        renderer: &Renderer,
         screen: &Screen,
         transforms: Query<&Transform>,
         mesh_data: &MeshDataBuffers,
-        allocator: Arc<Mutex<Allocator>>,
-        render_pass: &RenderPass,
-        graphics_queue: vk::Queue,
-        descriptor_pool: Arc<DescriptorPool>,
         uniform_transform_buffer: Arc<TBuffer<ModelUniformBufferObject>>,
         uniform_camera_buffers: &[Arc<impl AsBuffer>],
-        _cluster_count: u32,
-        query: bool,
-        mode: MeshShaderMode,
     ) -> Self {
         let ubo_layout = create_descriptor_set_layout(core.device.clone());
 
         let graphics_pipeline = create_graphics_pipeline(
             core.device.clone(),
-            render_pass,
+            &renderer.render_pass,
             screen.swapchain().extent,
             ubo_layout.clone(),
-            mode,
+            renderer.fragment(),
+            renderer.mesh_mode,
         );
         let mut task_indirect_data = Vec::new();
 
@@ -112,8 +108,8 @@ impl IndirectTasks {
 
         let indirect_task_buffer = TBuffer::new_filled(
             &core,
-            allocator.clone(),
-            graphics_queue,
+            renderer.allocator.clone(),
+            renderer.graphics_queue,
             vk::BufferUsageFlags::INDIRECT_BUFFER | vk::BufferUsageFlags::STORAGE_BUFFER,
             &task_indirect_data,
             "Indirect Task Buffer",
@@ -121,12 +117,12 @@ impl IndirectTasks {
 
         let descriptor_sets = create_descriptor_sets(
             &core.device,
-            &descriptor_pool,
+            &renderer.descriptor_pool,
             &ubo_layout,
             &uniform_transform_buffer,
             &uniform_camera_buffers,
             &mesh_data.vertex_buffer,
-            match mode {
+            match &renderer.mesh_mode {
                 MeshShaderMode::TriangleList => &mesh_data.meshlet_buffer,
                 MeshShaderMode::TriangleStrip => &mesh_data.stripped_meshlet_buffer,
             },
@@ -141,11 +137,11 @@ impl IndirectTasks {
         Self {
             graphics_pipeline,
             descriptor_sets,
-            descriptor_pool,
+            descriptor_pool: renderer.descriptor_pool.clone(),
             screen: None,
             indirect_task_buffer,
             query_pool,
-            query,
+            query: renderer.query,
             core,
             last_sample: time::Instant::now(),
             mesh_invocations: Default::default(),
@@ -158,20 +154,11 @@ impl DrawPipeline for IndirectTasks {
     fn draw(&self, frame_index: usize) -> vk::CommandBuffer {
         self.screen.as_ref().unwrap().command_buffers[frame_index]
     }
-    fn init_swapchain(
-        &mut self,
-        core: &Core,
-        screen: &Screen,
-        submesh_count: u32,
-        instance_count: u32,
-        render_pass: &RenderPass,
-    ) {
+    fn init_swapchain(&mut self, core: &Core, screen: &Screen, render_pass: &RenderPass) {
         self.screen = Some(ScreenData::create_command_buffers(
             &self,
             core,
             screen,
-            submesh_count,
-            instance_count,
             render_pass,
             &self.indirect_task_buffer,
         ));
@@ -205,8 +192,6 @@ impl ScreenData {
         core_draw: &IndirectTasks,
         core: &Core,
         screen: &Screen,
-        _submesh_count: u32,
-        instance_count: u32,
         render_pass: &RenderPass,
         indirect_task_buffer: &TBuffer<DrawMeshTasksIndirect>,
     ) -> Self {
@@ -314,7 +299,7 @@ impl ScreenData {
                     command_buffer,
                     indirect_task_buffer.handle(),
                     0,
-                    instance_count,
+                    indirect_task_buffer.item_len() as _,
                     indirect_task_buffer.stride() as _,
                 );
                 if query {
@@ -438,6 +423,7 @@ fn create_graphics_pipeline(
     render_pass: &RenderPass,
     swapchain_extent: vk::Extent2D,
     ubo_set_layout: Arc<DescriptorSetLayout>,
+    frag_shader_module: &ShaderModule,
     mode: MeshShaderMode,
 ) -> GraphicsPipeline {
     let task_shader_module = ShaderModule::new(
@@ -453,11 +439,6 @@ fn create_graphics_pipeline(
                 include_bytes!("../../shaders/spv/mesh_tri_strip.mesh")
             }
         },
-    );
-
-    let frag_shader_module = ShaderModule::new(
-        device.clone(),
-        bytemuck::cast_slice(include_bytes!("../../shaders/spv/frag_colour.frag")),
     );
 
     let main_function_name = CString::new("main").unwrap(); // the beginning function name in shader code.

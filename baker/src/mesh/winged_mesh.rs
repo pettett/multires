@@ -242,7 +242,7 @@ impl WingedMesh {
         [e0.vert_origin.0, e1.vert_origin.0, e2.vert_origin.0]
     }
 
-	/// Wrapper around [TriMesh::from_gltf] and [WingedMesh::from_tris]
+    /// Wrapper around [TriMesh::from_gltf] and [WingedMesh::from_tris]
     pub fn from_gltf(path: impl AsRef<std::path::Path>) -> (Self, TriMesh) {
         let tri_mesh = TriMesh::from_gltf(&path).unwrap();
         println!(
@@ -341,7 +341,6 @@ impl WingedMesh {
             Face {
                 edge: iea,
                 cluster_idx: 0,
-                colour: 0,
             },
         );
     }

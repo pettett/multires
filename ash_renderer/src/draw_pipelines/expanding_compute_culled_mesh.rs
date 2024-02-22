@@ -1,5 +1,6 @@
 use std::{
     ffi::CString,
+    mem,
     sync::{Arc, Mutex},
 };
 
@@ -10,7 +11,11 @@ use common::MeshVert;
 use gpu_allocator::vulkan::Allocator;
 
 use crate::{
-    app::{mesh_data::MeshDataBuffers, renderer::Renderer, scene::ModelUniformBufferObject},
+    app::{
+        mesh_data::MeshDataBuffers,
+        renderer::Renderer,
+        scene::{ModelUniformBufferObject, Scene},
+    },
     core::Core,
     screen::Screen,
     utility::{
@@ -27,15 +32,16 @@ use crate::{
         render_pass::RenderPass,
         ComputePipeline, GraphicsPipeline, ShaderModule,
     },
-    VkHandle,
+    VkHandle, TASK_GROUP_SIZE,
 };
 
 use super::{
-    init_color_blend_attachment_states, init_depth_state_create_info,
-    init_multisample_state_create_info, init_rasterization_statue_create_info, DrawPipeline,
+    indirect_tasks::DrawMeshTasksIndirect, init_color_blend_attachment_states,
+    init_depth_state_create_info, init_multisample_state_create_info,
+    init_rasterization_statue_create_info, DrawPipeline,
 };
 
-pub struct ComputeCulledMesh {
+pub struct ExpandingComputeCulledMesh {
     graphics_pipeline: GraphicsPipeline,
     should_draw_pipeline: ComputePipeline,
     descriptor_sets: Vec<DescriptorSet>,
@@ -43,22 +49,20 @@ pub struct ComputeCulledMesh {
     descriptor_pool: Arc<DescriptorPool>,
     core: Arc<Core>,
     should_cull_buffer: Arc<TBuffer<u32>>,
+    indirect_task_buffer: Arc<TBuffer<vk::DrawMeshTasksIndirectCommandEXT>>,
 }
 
-impl ComputeCulledMesh {
+impl ExpandingComputeCulledMesh {
     pub fn new(
         core: Arc<Core>,
         renderer: &Renderer,
         screen: &Screen,
-
+        scene: &Scene,
         mesh_data: &MeshDataBuffers,
         allocator: Arc<Mutex<Allocator>>,
         render_pass: &RenderPass,
         graphics_queue: vk::Queue,
         descriptor_pool: Arc<DescriptorPool>,
-        uniform_transform_buffer: Arc<TBuffer<ModelUniformBufferObject>>,
-        uniform_camera_buffers: &[Arc<impl AsBuffer>],
-        cluster_count: u32,
     ) -> Self {
         let ubo_layout = create_descriptor_set_layout(core.device.clone());
 
@@ -71,7 +75,7 @@ impl ComputeCulledMesh {
 
         let should_draw_pipeline = ComputePipeline::create_compute_pipeline(
             &core,
-            include_bytes!("../../shaders/spv/should_draw.comp"),
+            include_bytes!("../../shaders/spv/expanding_should_draw.comp"),
             ubo_layout.clone(),
             "Should Draw Pipeline",
         );
@@ -81,20 +85,37 @@ impl ComputeCulledMesh {
             allocator.clone(),
             graphics_queue,
             vk::BufferUsageFlags::STORAGE_BUFFER,
-            &vec![1; cluster_count as _],
+            &vec![1; mesh_data.cluster_count as _],
             "Should Cull Buffer",
         );
+
+        let task_indirect_data = vec![
+            vk::DrawMeshTasksIndirectCommandEXT {
+                group_count_x: 8,
+                group_count_y: 1,
+                group_count_z: 1,
+            };
+            scene.instances.min(1)
+        ];
+
+        let indirect_task_buffer: Arc<TBuffer<vk::DrawMeshTasksIndirectCommandEXT>> =
+            TBuffer::new_filled(
+                &core,
+                allocator.clone(),
+                graphics_queue,
+                vk::BufferUsageFlags::INDIRECT_BUFFER | vk::BufferUsageFlags::STORAGE_BUFFER,
+                &task_indirect_data,
+                "Indirect Task Buffer",
+            );
 
         let descriptor_sets = create_compute_culled_meshes_descriptor_sets(
             &core.device,
             &descriptor_pool,
             &ubo_layout,
-            &uniform_transform_buffer,
-            uniform_camera_buffers,
             &should_cull_buffer,
-            &mesh_data.vertex_buffer,
-            &mesh_data.meshlet_buffer,
-            &mesh_data.cluster_buffer,
+            &indirect_task_buffer,
+            &scene,
+            &mesh_data,
             //&texture_image,
             screen.swapchain().images.len(),
         );
@@ -107,11 +128,12 @@ impl ComputeCulledMesh {
             descriptor_pool,
             should_cull_buffer,
             should_draw_pipeline,
+            indirect_task_buffer,
         }
     }
 }
 
-impl DrawPipeline for ComputeCulledMesh {
+impl DrawPipeline for ExpandingComputeCulledMesh {
     fn draw(&self, frame_index: usize) -> vk::CommandBuffer {
         self.screen.as_ref().unwrap().command_buffers[frame_index]
     }
@@ -135,7 +157,7 @@ struct ScreenData {
 
 impl ScreenData {
     pub fn create_command_buffers(
-        core_draw: &ComputeCulledMesh,
+        core_draw: &ExpandingComputeCulledMesh,
         core: &Core,
         screen: &Screen,
         render_pass: &RenderPass,
@@ -200,12 +222,7 @@ impl ScreenData {
                     &[],
                 );
 
-                device.cmd_dispatch(
-                    command_buffer,
-                    core_draw.should_cull_buffer.item_len() as _,
-                    1,
-                    1,
-                );
+                device.cmd_dispatch(command_buffer, 1, 1, 1);
 
                 device.cmd_begin_render_pass(
                     command_buffer,
@@ -240,16 +257,6 @@ impl ScreenData {
                     core_draw.graphics_pipeline.handle(),
                 );
 
-                //let vertex_buffers = [vertex_buffer];
-                //let offsets = [0_u64];
-
-                //device.cmd_bind_vertex_buffers(command_buffer, 0, &vertex_buffers, &offsets);
-                //device.cmd_bind_index_buffer(
-                //    command_buffer,
-                //    index_buffer,
-                //    0,
-                //    vk::IndexType::UINT32,
-                //);
                 device.cmd_bind_descriptor_sets(
                     command_buffer,
                     vk::PipelineBindPoint::GRAPHICS,
@@ -259,20 +266,13 @@ impl ScreenData {
                     &[],
                 );
 
-                device.fn_mesh_shader.cmd_draw_mesh_tasks(
+                device.fn_mesh_shader.cmd_draw_mesh_tasks_indirect(
                     command_buffer,
-                    core_draw.should_cull_buffer.item_len() as _,
+                    core_draw.indirect_task_buffer.handle(),
+                    0,
                     1,
-                    1,
+                    core_draw.indirect_task_buffer.stride() as _,
                 );
-                // device.cmd_draw_indexed(
-                //     command_buffer,
-                //     RECT_TEX_COORD_INDICES_DATA.len() as u32,
-                //     1,
-                //     0,
-                //     0,
-                //     0,
-                // );
 
                 device.cmd_end_render_pass(command_buffer);
 
@@ -452,17 +452,22 @@ fn create_descriptor_set_layout(device: Arc<Device>) -> Arc<DescriptorSetLayout>
         DescriptorSetLayoutBinding::Storage {
             vis: vk::ShaderStageFlags::TASK_EXT | vk::ShaderStageFlags::COMPUTE,
         },
-        DescriptorSetLayoutBinding::Uniform {
+        DescriptorSetLayoutBinding::Storage {
             vis: vk::ShaderStageFlags::TASK_EXT | vk::ShaderStageFlags::COMPUTE,
         },
         DescriptorSetLayoutBinding::Uniform {
-            vis: vk::ShaderStageFlags::TASK_EXT | vk::ShaderStageFlags::COMPUTE,
+            vis: vk::ShaderStageFlags::MESH_EXT
+                | vk::ShaderStageFlags::TASK_EXT
+                | vk::ShaderStageFlags::COMPUTE,
         },
         DescriptorSetLayoutBinding::Storage {
             vis: vk::ShaderStageFlags::MESH_EXT,
         },
         DescriptorSetLayoutBinding::Storage {
             vis: vk::ShaderStageFlags::MESH_EXT,
+        },
+        DescriptorSetLayoutBinding::Storage {
+            vis: vk::ShaderStageFlags::COMPUTE,
         },
     ];
 
@@ -473,13 +478,11 @@ fn create_compute_culled_meshes_descriptor_sets(
     device: &Arc<Device>,
     descriptor_pool: &Arc<DescriptorPool>,
     descriptor_set_layout: &Arc<DescriptorSetLayout>,
-    uniform_transform_buffer: &Arc<TBuffer<ModelUniformBufferObject>>,
-    uniform_camera_buffers: &[Arc<impl AsBuffer>],
     should_draw_buffer: &Arc<impl AsBuffer>,
-    vertex_buffer: &Arc<TBuffer<MeshVert>>,
-    meshlet_buffer: &Arc<impl AsBuffer>,
-    submesh_buffer: &Arc<impl AsBuffer>,
-    //texture: &Image,
+    indirect_data: &Arc<impl AsBuffer>,
+
+    scene: &Scene,
+    mesh_data: &MeshDataBuffers,
     swapchain_images_size: usize,
 ) -> Vec<DescriptorSet> {
     let mut layouts: Vec<vk::DescriptorSetLayout> = vec![];
@@ -508,22 +511,25 @@ fn create_compute_culled_meshes_descriptor_sets(
                 device.clone(),
                 vec![
                     DescriptorWriteData::Buffer {
-                        buf: uniform_transform_buffer.buffer(),
-                    },
-                    DescriptorWriteData::Buffer {
-                        buf: submesh_buffer.buffer(), //
+                        buf: scene.uniform_transform_buffer.buffer(),
                     },
                     DescriptorWriteData::Buffer {
                         buf: should_draw_buffer.buffer(),
                     },
                     DescriptorWriteData::Buffer {
-                        buf: uniform_camera_buffers[i].buffer(),
+                        buf: mesh_data.cluster_buffer.buffer(), //
                     },
                     DescriptorWriteData::Buffer {
-                        buf: meshlet_buffer.buffer(), //
+                        buf: scene.uniform_camera_buffers[i].buffer(),
                     },
                     DescriptorWriteData::Buffer {
-                        buf: vertex_buffer.buffer(), //
+                        buf: mesh_data.meshlet_buffer.buffer(), //
+                    },
+                    DescriptorWriteData::Buffer {
+                        buf: mesh_data.vertex_buffer.buffer(), //
+                    },
+                    DescriptorWriteData::Buffer {
+                        buf: indirect_data.buffer(), //
                     },
                 ],
             )

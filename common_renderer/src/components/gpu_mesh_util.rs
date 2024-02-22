@@ -106,8 +106,8 @@ impl MultiResData for MultiResMesh {
                 co_parent: -1,
                 radius: cluster.saturated_bound.radius(),
                 layer: cluster.lod as _,
-                max_child_index: 0,
-                min_child_index: 0,
+                max_child_index: -1,
+                min_child_index: -1,
                 _4: 0,
                 meshlet_start: 0,
                 meshlet_count: 0,
@@ -270,7 +270,7 @@ mod tests {
 
         for i in 0..clusters.len() {
             if clusters[i].max_child_index >= 0 {
-                for c in clusters[i].min_child_index..(clusters[i].max_child_index + 1) {
+                for c in clusters[i].min_child_index..=clusters[i].max_child_index {
                     let (p0, p1) = clusters[c as usize].get_parents().unwrap();
 
                     assert!(p0 == i || p1 == i);

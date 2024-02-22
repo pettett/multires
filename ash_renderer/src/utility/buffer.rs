@@ -236,14 +236,12 @@ impl Buffer {
         name: &str,
     ) -> Buffer {
         let buffer_create_info = vk::BufferCreateInfo {
-            s_type: vk::StructureType::BUFFER_CREATE_INFO,
-            p_next: ptr::null(),
-            flags: vk::BufferCreateFlags::empty(),
-            size,
+            size: size.max(1),
             usage,
             sharing_mode: vk::SharingMode::EXCLUSIVE,
             queue_family_index_count: 0,
             p_queue_family_indices: ptr::null(),
+            ..Default::default()
         };
 
         let buffer = unsafe {

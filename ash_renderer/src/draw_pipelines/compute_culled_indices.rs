@@ -10,7 +10,7 @@ use common::MeshVert;
 use gpu_allocator::vulkan::Allocator;
 
 use crate::{
-    app::{mesh_data::MeshDataBuffers, scene::ModelUniformBufferObject},
+    app::{mesh_data::MeshDataBuffers, renderer::Renderer, scene::ModelUniformBufferObject},
     core::Core,
     screen::Screen,
     utility::{
@@ -54,6 +54,7 @@ pub struct ComputeCulledIndices {
 impl ComputeCulledIndices {
     pub fn new(
         core: Arc<Core>,
+        renderer: &Renderer,
         screen: &Screen,
         mesh_data: &MeshDataBuffers,
         allocator: Arc<Mutex<Allocator>>,
@@ -165,20 +166,11 @@ impl DrawPipeline for ComputeCulledIndices {
     fn draw(&self, frame_index: usize) -> vk::CommandBuffer {
         self.screen.as_ref().unwrap().command_buffers[frame_index]
     }
-    fn init_swapchain(
-        &mut self,
-        core: &Core,
-        screen: &Screen,
-        submesh_count: u32,
-        instance_count: u32,
-        render_pass: &RenderPass,
-    ) {
+    fn init_swapchain(&mut self, core: &Core, screen: &Screen, render_pass: &RenderPass) {
         self.screen = Some(ScreenData::create_command_buffers(
             &self,
             core,
             screen,
-            submesh_count,
-            instance_count,
             render_pass,
         ));
     }
@@ -197,8 +189,6 @@ impl ScreenData {
         core_draw: &ComputeCulledIndices,
         core: &Core,
         screen: &Screen,
-        submesh_count: u32,
-        instance_count: u32,
         render_pass: &RenderPass,
     ) -> Self {
         let device = core.device.clone();
@@ -298,14 +288,22 @@ impl ScreenData {
                     &[],
                 );
 
-                for instance in 0..instance_count {
+                for instance in 0..core_draw.draw_indexed_indirect_buffer.item_len() {
                     device.cmd_bind_pipeline(
                         command_buffer,
                         vk::PipelineBindPoint::COMPUTE,
                         core_draw.should_draw_pipeline.handle(),
                     );
 
-                    device.cmd_dispatch_base(command_buffer, 0, instance, 0, submesh_count, 1, 1);
+                    device.cmd_dispatch_base(
+                        command_buffer,
+                        0,
+                        instance as _,
+                        0,
+                        core_draw.should_cull_buffer.item_len() as _,
+                        1,
+                        1,
+                    );
 
                     // Force previous compute shader to be complete before this one
                     device.cmd_pipeline_barrier2(command_buffer, &should_draw_dependency_info);
@@ -319,9 +317,9 @@ impl ScreenData {
                     device.cmd_dispatch_base(
                         command_buffer,
                         0,
-                        instance,
+                        instance as _,
                         0,
-                        submesh_count.div_ceil(16),
+                        core_draw.should_cull_buffer.item_len().div_ceil(16) as _,
                         1,
                         1,
                     );
@@ -411,7 +409,7 @@ impl ScreenData {
                     command_buffer,
                     core_draw.draw_indexed_indirect_buffer.handle(),
                     0,
-                    instance_count,
+                    core_draw.draw_indexed_indirect_buffer.item_len() as _,
                     core_draw.draw_indexed_indirect_buffer.stride() as _,
                 );
                 // device.cmd_draw_indexed(
@@ -618,7 +616,7 @@ fn create_compute_culled_indices_descriptor_sets(
     uniform_camera_buffers: &[Arc<impl AsBuffer>],
     should_draw_buffer: &Arc<impl AsBuffer>,
     meshlet_buffer: &Arc<impl AsBuffer>,
-    submesh_buffer: &Arc<impl AsBuffer>,
+    cluster_buffer: &Arc<impl AsBuffer>,
     result_indices_buffer: &Arc<impl AsBuffer>,
     indices_buffer: &Arc<impl AsBuffer>,
     draw_indexed_indirect_buffer: &Arc<TBuffer<vk::DrawIndexedIndirectCommand>>,
@@ -656,11 +654,11 @@ fn create_compute_culled_indices_descriptor_sets(
                     },
                     DescriptorWriteData::Buffer {
                         // 1
-                        buf: submesh_buffer.buffer(), //
+                        buf: should_draw_buffer.buffer(),
                     },
                     DescriptorWriteData::Buffer {
                         // 2
-                        buf: should_draw_buffer.buffer(),
+                        buf: cluster_buffer.buffer(), //
                     },
                     DescriptorWriteData::Buffer {
                         // 3

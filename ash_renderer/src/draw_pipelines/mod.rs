@@ -6,20 +6,14 @@ use crate::{core::Core, screen::Screen, utility::render_pass::RenderPass};
 pub mod compute_culled_indices;
 pub mod compute_culled_mesh;
 pub mod draw_indirect;
+pub mod expanding_compute_culled_mesh;
 pub mod indirect_tasks;
 pub mod stub;
 
 pub trait DrawPipeline {
     fn draw(&self, frame_index: usize) -> vk::CommandBuffer;
 
-    fn init_swapchain(
-        &mut self,
-        core: &Core,
-        screen: &Screen,
-        submesh_count: u32,
-        instance_count: u32,
-        render_pass: &RenderPass,
-    );
+    fn init_swapchain(&mut self, core: &Core, screen: &Screen, render_pass: &RenderPass);
 
     /// Draw our stats UI
     fn stats_gui(&mut self, ui: &mut egui::Ui, frame_index: usize);

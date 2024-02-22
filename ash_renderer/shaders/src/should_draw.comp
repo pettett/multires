@@ -27,11 +27,11 @@ layout (binding = 0) readonly buffer ModelUniformBufferObject {
     Model models[];
 };
 
-layout(binding = 1) readonly buffer Clusters {
+layout(binding = 2) readonly buffer Clusters {
     ClusterData clusters[];
 };
 
-layout(binding = 2) writeonly buffer ShouldDraw {
+layout(binding = 1) writeonly buffer ShouldDraw {
     uint should_draw[];
 };
 
@@ -97,8 +97,8 @@ void main() {
     if (clusters[i].parent0 >= 0) { // If we have one parent, we are guarenteed to have another.
         parent_error = min(cluster_error(clusters[i].parent0, instance), cluster_error(clusters[i].parent1, instance));
     }
-
-    bool cull = ubo.target_error >= this_error && ubo.target_error < parent_error;
+	float error = ubo.target_error * ubo.target_error;
+    bool cull = error >= this_error && error < parent_error;
 
     should_draw[i] = cull ? i + 1 : 0;
 	

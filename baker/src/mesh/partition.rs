@@ -68,14 +68,13 @@ impl WingedMesh {
     }
 
     /// Partition the mesh into a single cluster
-    pub fn cluster_unity(&mut self, child_group_index : Option<usize>) {
+    pub fn cluster_unity(&mut self, child_group_index: Option<usize>) {
         self.clusters = vec![ClusterInfo {
             child_group_index,
             group_index: 0,
             tight_bound: Default::default(),
             tight_cone: Default::default(),
             num_tris: self.face_count(),
-            num_colours: 0,
         }];
 
         for (fid, f) in self.iter_faces_mut() {
@@ -140,7 +139,6 @@ impl WingedMesh {
                 tight_bound: Default::default(),
                 tight_cone: Default::default(),
                 num_tris: 0,
-                num_colours: 0,
             };
             cluster_count
         ];
@@ -387,7 +385,6 @@ impl WingedMesh {
                     group_index: usize::MAX,
                     tight_bound: Default::default(),
                     tight_cone: Default::default(),
-                    num_colours: 0,
                     num_tris: 0,
                 })
             }
@@ -446,66 +443,6 @@ impl WingedMesh {
             // We are able to see a plane if the dot product of our view to its normal is over 0, so subtract 1
             cluster.tight_cone.min_cutoff(plane_dot - 1.0);
         }
-    }
-
-    /// Colour within clusters, for splitting too large clusters into smaller units for use in mesh shaders
-    pub fn colour_within_clusters(
-        &mut self,
-        config: &metis::PartitioningConfig,
-        tris_per_cluster: usize,
-    ) -> Result<(), metis::PartitioningError> {
-        let graphs = self.generate_cluster_keyed_graphs();
-        // Ungrouped partitions but with a dependence on an old group
-
-        for (cluster_idx, graph) in graphs.iter().enumerate() {
-            if graph.node_count() == 0 {
-                println!("WARNING: Cluster {cluster_idx} face graph has no nodes!");
-                continue;
-            }
-
-            let parts = graph.node_count().div_ceil(tris_per_cluster);
-
-            #[cfg(debug)]
-            {
-                assert_graph_contiguous(graph);
-            }
-
-            let partitioning = match config.partition_from_graph(parts as u32, graph) {
-                Ok(part) => part,
-                e => {
-                    petgraph_to_svg(
-                        graph,
-                        "error_partition_within_clusters.svg",
-                        &|_, _| String::new(),
-                        common::graph::GraphSVGRender::Undirected {
-                            edge_label: common::graph::Label::None,
-                            positions: false,
-                        },
-                    )
-                    .unwrap();
-                    e?
-                }
-            };
-
-            let mut occupancies = vec![0; parts as usize];
-
-            // Update colours of the actual triangles
-            for x in graph.node_indices() {
-                self.get_face_mut(graph[x]).colour = partitioning[x.index()] as usize;
-                occupancies[self.get_face_mut(graph[x]).colour] += 1;
-            }
-
-            assert!(
-                *occupancies.iter().max().unwrap() <= 126,
-                "{:?}",
-                occupancies
-            );
-
-            self.clusters[cluster_idx].num_colours = parts;
-        }
-
-        Ok(())
-        //Ok(groups)
     }
 }
 

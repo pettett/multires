@@ -9,11 +9,11 @@
 
 #include "structs\cluster_data.glsl"
 
-layout(binding = 1) readonly buffer Clusters {
+layout(binding = 2) readonly buffer Clusters {
     ClusterData clusters[];
 };
 
-layout(binding = 2) readonly buffer ShouldDraw {
+layout(binding = 1) readonly buffer ShouldDraw {
     uint should_draw[];
 };
 

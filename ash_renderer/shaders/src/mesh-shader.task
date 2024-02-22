@@ -66,6 +66,7 @@ float cluster_error(uint idx, vec3 local_cam_pos) {
 }
 
 
+
 void extract_planes_from_mat(
         const mat4 mat,
         out vec4 left,   out vec4 right,
@@ -149,7 +150,7 @@ void main() {
 
 
 
-	float error = ubo.target_error * ubo.target_error;
+	float error = ubo.target_error * ubo.target_error * ubo.target_error  ;
 
     bool draw = error >= this_error && error < parent_error;
 
@@ -166,6 +167,8 @@ void main() {
 	if (dot(normalize(local_cam_pos - clusters[cluster_index].tight_sphere.xyz), clusters[cluster_index].tight_cone.xyz) < clusters[cluster_index].tight_cone.w){
 		in_clip = false;
 	}
+
+	//in_clip = true;
 
 	// vec4 clip_pos = MVP * vec4(clusters[cluster_index].center, 1);
 	// vec3 norm_clip_pos = clip_pos.xyz / clip_pos.w;

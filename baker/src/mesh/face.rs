@@ -6,7 +6,6 @@ use super::{edge::EdgeID, plane::Plane, winged_mesh::WingedMesh};
 pub struct Face {
     pub edge: EdgeID,
     pub cluster_idx: usize,
-    pub colour: usize,
 }
 #[derive(Default, Hash, Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(transparent)]

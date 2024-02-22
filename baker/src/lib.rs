@@ -4,7 +4,7 @@ pub mod pidge;
 
 use std::mem;
 
-use common::{graph, tri_mesh::TriMesh, MeshCluster, MeshLevel, MeshVert, MultiResMesh};
+use common::{graph, tri_mesh::TriMesh, MeshCluster, MeshLevel, MeshVert, Meshlet, MultiResMesh};
 
 use glam::Vec4;
 use mesh::winged_mesh::WingedMesh;
@@ -82,8 +82,6 @@ pub fn group_and_partition_and_simplify(
     )?;
 
     mesh.group(grouping_config).unwrap();
-
-    mesh.colour_within_clusters(non_contig_even_clustering_config, COLOUR_CLUSTER_SIZE)?;
 
     let mut multi_res = MultiResMesh {
         name,
@@ -193,8 +191,6 @@ pub fn group_and_partition_and_simplify(
 
         let group_count = mesh.group(grouping_config)?;
 
-        mesh.colour_within_clusters(non_contig_even_clustering_config, COLOUR_CLUSTER_SIZE)?;
-
         // view a snapshot of the mesh ready to create the next layer
         // let error = (1.0 + i as f32) / 10.0 + rng.gen_range(-0.05..0.05);
 
@@ -269,8 +265,6 @@ pub fn simplify_lod_chain(
     mesh.cluster_unity(None);
 
     mesh.group(grouping_config).unwrap();
-
-    mesh.colour_within_clusters(non_contig_even_clustering_config, COLOUR_CLUSTER_SIZE)?;
 
     let mut multi_res = MultiResMesh {
         name,
@@ -366,8 +360,6 @@ pub fn simplify_lod_chain(
 
         mesh.group(grouping_config)?;
 
-        mesh.colour_within_clusters(non_contig_even_clustering_config, COLOUR_CLUSTER_SIZE)?;
-
         // view a snapshot of the mesh ready to create the next layer
         // let error = (1.0 + i as f32) / 10.0 + rng.gen_range(-0.05..0.05);
 
@@ -449,25 +441,31 @@ pub fn meshopt_simplify_lod_chain(tri_mesh: TriMesh, name: String) -> anyhow::Re
 fn opt_multires(multi_res: &mut MultiResMesh) {
     println!("Optimising and generating strips");
 
+    meshify_clusters(&mut multi_res.clusters, &multi_res.verts);
+
     optimise_clusters(&mut multi_res.clusters);
 
     compress_clusters(&mut multi_res.clusters);
 
     let mut min_tris = 10000;
     let mut max_tris = 0;
+    let mut max_colours = 0;
 
+    let mut total_colours = 0;
     let mut total_indices = 0;
     let mut total_stripped_indices = 0;
 
     for m in &multi_res.clusters {
         min_tris = min_tris.min(m.index_count() / 3);
         max_tris = max_tris.max(m.index_count() / 3);
+        max_colours = max_colours.max(m.colour_count());
 
+        total_colours += m.colour_count();
         total_indices += m.index_count();
         total_stripped_indices += m.stripped_index_count();
     }
 
-    println!("Done with partitioning. Min tris: {min_tris}, Max tris: {max_tris}. Total indices: {total_indices}, stripped indices: {total_stripped_indices}");
+    println!("Done with partitioning. Min tris: {min_tris}, Max tris: {max_tris}, Max colours: {max_colours}, Indices per colours: {}. Total indices: {total_indices}, stripped indices: {total_stripped_indices}", total_indices/total_colours);
 
     //assert_eq!(partitions1.len() * 3, layer_1_indices.len());
 }
@@ -488,6 +486,29 @@ pub fn grab_indices(mesh: &WingedMesh) -> Vec<u32> {
     //}
 
     indices
+}
+
+pub fn meshify_clusters(clusters: &mut Vec<MeshCluster>, verts: &[MeshVert]) {
+    let verts = meshopt::VertexDataAdapter::new(
+        bytemuck::cast_slice(&verts),
+        mem::size_of::<MeshVert>(),
+        0,
+    )
+    .unwrap();
+    for cluster in clusters {
+        let i = cluster.meshlet_for_colour(0).indices();
+
+        let meshlets = meshopt::build_meshlets(i, &verts, 64, 124, 0.1);
+
+        cluster.reset_meshlets();
+
+        for m in meshlets.iter() {
+            cluster.add_meshlet(Meshlet::from_local_indices(
+                m.triangles.iter().map(|&x| x as _).collect(),
+                m.vertices.to_vec(),
+            ));
+        }
+    }
 }
 
 pub fn optimise_clusters(clusters: &mut Vec<MeshCluster>) {
@@ -538,7 +559,7 @@ pub fn generate_clusters(
             let group = &mesh.groups[gi];
 
             MeshCluster::new(
-                cluster.num_colours,
+                1,
                 //TODO: Connect to quadric error or something
                 1.0,
                 cluster.tight_bound,
@@ -556,7 +577,7 @@ pub fn generate_clusters(
 
         let m = clusters.get_mut(face.cluster_idx).unwrap();
 
-        m.meshlet_for_colour_mut(face.colour).push_tri(verts);
+        m.meshlet_for_colour_mut(0).push_temp_tri(verts);
 
         m.error += inds;
     }

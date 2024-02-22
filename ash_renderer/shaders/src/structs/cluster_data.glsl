@@ -1,4 +1,5 @@
 
+
 struct ClusterData {
     // Range into the index array that this submesh resides
     vec3 center;

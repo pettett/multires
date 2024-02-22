@@ -8,7 +8,7 @@ impl Plane {
         let ab = b - a;
         let ac = c - a;
 
-        let normal = glam::Vec3A::cross(ab, ac).normalize();
+        let normal = glam::Vec3A::cross(ab, ac).normalize_or_zero();
 
         Self::from_normal_and_point(normal, a)
     }

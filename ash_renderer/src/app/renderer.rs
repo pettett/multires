@@ -27,11 +27,12 @@ pub enum MeshDrawingPipelineType {
     IndirectTasks,
     DrawIndirect,
     ComputeCulledMesh,
+    ExpandingComputeCulledMesh,
     ComputeCulledIndices,
     None,
 }
 
-#[derive(Debug, Clone, Copy, Event)]
+#[derive(Debug, Clone, Copy, Event, PartialEq)]
 pub enum Fragment {
     VertexColour,
     Lit,
@@ -59,6 +60,8 @@ pub struct Renderer {
 
     pub fragment_colour: ShaderModule,
     pub fragment_lit: ShaderModule,
+
+    pub fragment: Fragment,
 }
 
 impl Renderer {
@@ -82,13 +85,8 @@ impl Renderer {
             self.allocator.clone(),
         );
 
-        self.draw_pipeline.init_swapchain(
-            &self.core,
-            &self.screen,
-            mesh_data.cluster_count,
-            scene.uniform_transform_buffer.item_len() as _,
-            &self.render_pass,
-        );
+        self.draw_pipeline
+            .init_swapchain(&self.core, &self.screen, &self.render_pass);
 
         // Egui Integration
         self.gui.update_swapchain(self.screen.swapchain());
@@ -96,6 +94,13 @@ impl Renderer {
 
     pub fn resize_framebuffer(&mut self) {
         self.is_framebuffer_resized = true;
+    }
+
+    pub fn fragment(&self) -> &ShaderModule {
+        match self.fragment {
+            Fragment::VertexColour => &self.fragment_colour,
+            Fragment::Lit => &self.fragment_lit,
+        }
     }
 
     pub fn window_ref(&self) -> &winit::window::Window {
@@ -141,11 +146,13 @@ impl Renderer {
                         }
                     });
 
-                    ui.add_enabled_ui(false, |ui| {
-                        if ui.button("Compute Culled Mesh").clicked() {
-                            draw_events.send(MeshDrawingPipelineType::ComputeCulledMesh)
-                        }
-                    });
+                    // if ui.button("Compute Culled Mesh").clicked() {
+                    //     draw_events.send(MeshDrawingPipelineType::ComputeCulledMesh)
+                    // }
+
+                    if ui.button("Expanding Compute Culled Mesh").clicked() {
+                        draw_events.send(MeshDrawingPipelineType::ExpandingComputeCulledMesh)
+                    }
 
                     if ui.button("Compute Culled Indices").clicked() {
                         draw_events.send(MeshDrawingPipelineType::ComputeCulledIndices)
@@ -159,7 +166,7 @@ impl Renderer {
                         add_more = true;
                     }
 
-                    egui::ComboBox::from_label("Select one!")
+                    egui::ComboBox::from_label("Cluster Tri Encoding")
                         .selected_text(format!("{:?}", self.mesh_mode))
                         .show_ui(ui, |ui| {
                             ui.selectable_value(
@@ -171,6 +178,17 @@ impl Renderer {
                                 &mut self.mesh_mode,
                                 MeshShaderMode::TriangleStrip,
                                 "Triangle Strip",
+                            );
+                        });
+
+                    egui::ComboBox::from_label("Fragment")
+                        .selected_text(format!("{:?}", self.fragment))
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut self.fragment, Fragment::Lit, "Lit");
+                            ui.selectable_value(
+                                &mut self.fragment,
+                                Fragment::VertexColour,
+                                "Vertex Colour",
                             );
                         });
 
