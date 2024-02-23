@@ -67,6 +67,7 @@ impl Core {
         let required_extensions = Extensions::new(vec![
             ash::extensions::khr::BufferDeviceAddress::name(),
             ash::extensions::khr::Swapchain::name(),
+            vk::KhrShaderNonSemanticInfoFn::name(), // Only needed for vulkan 1.2 debugprintfext
         ]);
 
         let optional_extensions = Extensions::new(vec![ash::extensions::ext::MeshShader::name()]);

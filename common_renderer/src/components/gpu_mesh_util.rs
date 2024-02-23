@@ -237,6 +237,8 @@ impl MultiResData for MultiResMesh {
 #[cfg(test)]
 mod tests {
 
+    use std::collections::VecDeque;
+
     use common::{asset::Asset, MultiResMesh};
 
     use super::MultiResData;
@@ -311,5 +313,92 @@ mod tests {
                 assert_ne!(clusters[i].parent1, -1);
             }
         }
+    }
+
+    /// For expanding searches of the dag, starting at the top and
+    #[test]
+    fn test_dag_queue_traversal() {
+        let mesh = MultiResMesh::load_from_cargo_manifest_dir().unwrap();
+
+        let (cluster_order, groups) = mesh.order_clusters();
+        let clusters = mesh.generate_cluster_data(&cluster_order, &groups);
+
+        let mut q = VecDeque::new();
+        let mut seen = vec![false; clusters.len()];
+
+        let starting = 32;
+
+        for i in 0..starting {
+            q.push_back(i);
+        }
+
+        while let Some(i) = q.pop_front() {
+            assert!(!seen[i]);
+            seen[i] = true;
+
+            if (i as i32) < clusters[i].co_parent {
+                for c in clusters[i].min_child_index..=clusters[i].max_child_index {
+                    if c as usize >= starting {
+                        q.push_back(c as _);
+                    }
+                }
+            }
+            println!("{}", q.len());
+        }
+        println!("Seen {}", seen.len());
+
+        assert!(seen.iter().all(|&p| p))
+    }
+
+    /// For expanding searches of the dag, starting at the top and
+    #[test]
+    fn test_dag_buffer_queue_traversal() {
+        const QUEUE_SIZE: usize = 3000;
+        const STARTING: usize = 8;
+
+        let mesh = MultiResMesh::load_from_cargo_manifest_dir().unwrap();
+        let (cluster_order, groups) = mesh.order_clusters();
+        let clusters = mesh.generate_cluster_data(&cluster_order, &groups);
+
+        let mut q = vec![0; QUEUE_SIZE];
+
+        let mut seen = vec![false; clusters.len()];
+
+        for i in 0..STARTING {
+            q[i] = i;
+        }
+
+        let mut queue_tail = STARTING;
+        let mut queue_head = 0;
+        let mut max_queue_size = 0;
+
+        while queue_tail - queue_head > 0 {
+            let i = q[queue_head % QUEUE_SIZE];
+            queue_head += 1;
+
+            assert!(!seen[i]);
+            seen[i] = true;
+
+            //let can_queue_children = clusters[i].max_child_index >= STARTING as _;
+
+            if (i as i32) < clusters[i].co_parent {
+                assert!((i as i32) < clusters[i].min_child_index);
+                assert!((i as i32) < clusters[i].max_child_index);
+
+                for c in clusters[i].min_child_index..=clusters[i].max_child_index {
+                    if (c >= STARTING as _) && (queue_tail - queue_head < QUEUE_SIZE) {
+                        q[queue_tail % QUEUE_SIZE] = c as _;
+                        queue_tail += 1;
+                    }
+                }
+            }
+            //println!("{}", (queue_tail - queue_head));
+            max_queue_size = max_queue_size.max(queue_tail - queue_head);
+        }
+        println!("Seen {}", seen.len());
+        println!("Iterations: {}", queue_head);
+        println!("Max queue size: {}", max_queue_size);
+
+        assert!(seen.iter().all(|&p| p))
     }
 }

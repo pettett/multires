@@ -5,6 +5,8 @@
 #extension GL_ARB_shader_draw_parameters: require
 #extension GL_KHR_shader_subgroup_arithmetic: enable
 #extension GL_KHR_shader_subgroup_vote: enable
+#extension GL_EXT_control_flow_attributes: require
+#extension GL_EXT_debug_printf : enable
 
 #include "structs\cluster_data.glsl"
 #include "structs\indirect_draw_data.glsl"
@@ -45,7 +47,7 @@ layout (binding = 3) readonly uniform CameraUniformBufferObject {
 
 layout (std430, binding = 6) buffer IndirectDrawBuffer {
     IndirectDrawData indirect_draw[]; 
-} ;
+};
 
 const float LARGE_ERROR = 100000000000000000.0;
 
@@ -66,29 +68,53 @@ float cluster_error(uint idx, uint idy) {
     }
 }
 
-const uint LOCAL_SIZE_X = 32;
+bool can_draw(uint idx, uint idy){
 
-const uint STARTING = 32;
+	float this_error = -LARGE_ERROR;
+
+	if (clusters[idx].co_parent >= 0) {
+		this_error = min(cluster_error(idx, idy), cluster_error(clusters[idx].co_parent, idy));
+	}
+
+	// lots of zeros
+	float parent_error = LARGE_ERROR;
+
+	if (clusters[idx].parent0 >= 0) { // If we have one parent, we are guarenteed to have another.
+		parent_error = min(cluster_error(clusters[idx].parent0, idy), cluster_error(clusters[idx].parent1, idy));
+	}
+	float error = ubo.target_error * ubo.target_error;
+
+	bool draw = error >= this_error && error < parent_error;
+
+	return draw;
+}
+
+const uint LOCAL_SIZE_X = 1;
+
 
 layout (local_size_x = LOCAL_SIZE_X, local_size_y = 1, local_size_z = 1) in;
 
-const uint QUEUE_SIZE = 10000;
+const int QUEUE_SIZE = 3000;
+const int STARTING = 8;
 
-shared uint[QUEUE_SIZE] queue;
+shared int[QUEUE_SIZE] queue;
 
  
 void main() {
 	uint idx = gl_GlobalInvocationID.x;
     uint instance = gl_GlobalInvocationID.y;
 
+
+	[[unroll]]
 	for (int i = 0; i < STARTING; i++){
 		queue[i] = i;
 	}
 
-	uint queue_tail = STARTING;
 
-	uint old_queue_size = 0;
-	uint queue_head = 0;
+	int queue_tail = STARTING;
+	int queue_head = 0;
+
+	//int old_queue_size = 0;
 
     //uint len = indices.result.length();
 
@@ -110,87 +136,82 @@ void main() {
 
 	uint pos = 0;
 
-	uint its = 3;
-
 	//for (uint i = id.x; i < clusters.length(); i += LOCAL_SIZE_X){
 		// lots of negative zeros
 
 	// only evaluate if we are within the bounds of the queue
 
-	while (queue_tail - queue_head > 0 && its > 0){
-		its--;
+	while (queue_tail - queue_head > 0){
 
-		old_queue_size = queue_tail - queue_head;
+		//old_queue_size = queue_tail - queue_head;
 
 		memoryBarrierShared();
 
-		if (idx < old_queue_size){
+		if (idx < queue_tail - queue_head){
 
-			queue_head += idx;
+		queue_head += subgroupExclusiveAdd(1);
+		int i = queue[queue_head % QUEUE_SIZE];
 
-			uint i = queue[queue_head % QUEUE_SIZE];
-
-
-			float this_error = -LARGE_ERROR;
-
-			if (clusters[i].co_parent >= 0) {
-				this_error = min(cluster_error(i, instance), cluster_error(clusters[i].co_parent, instance));
-			}
-
-			// lots of zeros
-			float parent_error = LARGE_ERROR;
-
-			if (clusters[i].parent0 >= 0) { // If we have one parent, we are guarenteed to have another.
-				parent_error = min(cluster_error(clusters[i].parent0, instance), cluster_error(clusters[i].parent1, instance));
-			}
-			float error = ubo.target_error * ubo.target_error;
-
-			bool draw = error >= this_error && error < parent_error;
+		//should_draw[queue_head] = queue_head + 1;
 
 
-			bool can_queue_children = clusters[i].min_child_index >= 0 && queue_tail  < QUEUE_SIZE;
+		bool draw = can_draw(i, instance);
+		
+		if (draw){
+			pos += subgroupExclusiveAdd(1);
+			should_draw[pos] = i + 1;
+			pos += 1;
+		}
+		queue_head += 1;
 
-			if (draw  ){
+		// pos += 1;
 
-				pos += idx + 1;
-				should_draw[pos-1] = i + 1;
+		bool can_queue_children = clusters[i].max_child_index >= STARTING ;
 
-			}else{
-				// add children to queue
+		
+		// add children to queue if we dont draw this
 
-				if (i < clusters[i].co_parent && can_queue_children){
-					uint children = min(clusters[i].max_child_index - clusters[i].min_child_index, 8);
+		if (i < clusters[i].co_parent && can_queue_children && !draw){
 
-					queue_tail += subgroupExclusiveAdd(children);
-					// add to queue
-					for (uint c = 0; c < children; c++){
-						uint index = c + clamp(clusters[i].min_child_index, 0, 8);
-						if (index >= STARTING){
-							queue[(queue_tail + c) % QUEUE_SIZE] = index;
-						}
-					}
-					queue_tail += children;
-						
-					//queue[(queue_tail) % QUEUE_SIZE] = clusters[i].min_child_index;
+			// debugPrintfEXT("Min child index %d\n", clusters[i].min_child_index);
+			// if (clusters[i].min_child_index < i){
+			// 	while (true){}
+			// }
+
+			// add to queue
+
+			int min_child_index = max(clusters[i].min_child_index, STARTING);
+
+			//Allocate ourselves space at the end of the queue. max_child_index >= STARTING from before
+			queue_tail += subgroupExclusiveAdd(clusters[i].max_child_index - min_child_index);
+
+
+			for (int c = min_child_index ; c <= clusters[i].max_child_index  ; c++){
+	
+				if ((queue_tail - queue_head) < QUEUE_SIZE) {
 					
+					queue[queue_tail % QUEUE_SIZE] = c;
+					queue_tail += 1;
 
 				}
-
 			}
+				
+			//queue[(queue_tail) % QUEUE_SIZE] = clusters[i].min_child_index;
+			
+
+		}
 		}
 
-		pos = subgroupMax(pos) ;
-		// Increment by the amount of work done.
-		//queue_head += 1;// ;
-
+		pos = subgroupMax(pos);
 		queue_head = subgroupMax(queue_head);
 		queue_tail = subgroupMax(queue_tail);
 	}
 
+
 	if (subgroupElect()) {
 
 		for (int i = 0; i < TASK_GROUP_SIZE; i++){
-			should_draw[pos + i + 1] = 0;
+			should_draw[pos + i] = 0;
 		}
 
 		indirect_draw[instance].group_size_x = ((pos + 3) / TASK_GROUP_SIZE);
