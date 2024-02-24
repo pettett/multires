@@ -1,65 +1,61 @@
 #version 460
 
-#extension GL_EXT_mesh_shader: require
+#extension GL_EXT_mesh_shader : require
 #extension GL_GOOGLE_include_directive : enable
-#extension GL_EXT_control_flow_attributes: require
-#extension GL_ARB_separate_shader_objects: enable
+#extension GL_EXT_control_flow_attributes : require
+#extension GL_ARB_separate_shader_objects : enable
 
-#include "structs\mesh_task_payload.glsl"
+#include "structs\camera.glsl" // CameraUniformObject
 #include "structs\mesh_frag_payload.glsl"
-#include "structs\camera.glsl" // CameraUniformObject 
-#include "structs\vertex.glsl" // Vertex
+#include "structs\mesh_task_payload.glsl"
 #include "structs\meshlet.glsl" // s_meshlet
-#include "structs\model.glsl" // Model
+#include "structs\model.glsl"	// Model
+#include "structs\vertex.glsl"	// Vertex
 
-  
 const uint GROUP_SIZE = 32;
 
-layout (binding = 0) readonly buffer ModelUniformBufferObject {
-    Model models[];
+layout(binding = 0) readonly buffer ModelUniformBufferObject {
+	Model models[];
 };
 
-layout (binding = 3) uniform CameraUniformBufferObject {
-    CameraUniformObject ubo; 
+layout(binding = 3) uniform CameraUniformBufferObject {
+	CameraUniformObject ubo;
 };
 
-layout (std430, binding = 4) readonly buffer InputBufferI {
-    s_meshlet meshlets[];
+layout(std430, binding = 4) readonly buffer InputBufferI {
+	s_meshlet meshlets[];
 };
 
 // std430 is **really** important
-layout (std430, binding = 5) readonly buffer InputBufferV {
-    Vertex verts[];
+layout(std430, binding = 5) readonly buffer InputBufferV {
+	Vertex verts[];
 };
 
+layout(local_size_x = GROUP_SIZE, local_size_y = 1, local_size_z = 1) in;
+layout(triangles, max_vertices = MAX_VERTS, max_primitives = MAX_PRIMITIVES) out;
 
-layout (local_size_x = GROUP_SIZE, local_size_y = 1, local_size_z = 1) in;
-layout (triangles, max_vertices = MAX_VERTS, max_primitives = MAX_PRIMITIVES) out;
-
-layout (location = 0) out Interpolants OUT[];
-
+layout(location = 0) out Interpolants OUT[];
 
 taskPayloadSharedEXT MeshTaskPayload payload;
 
 vec3 integer_to_rgb(float integer) {
-    float red = mod((integer * 109.0 + 47.0), 269.0) / 269.0;
-    float green = mod((integer * 83.0 + 251.0), 127.0) / 127.0;
-    float blue = mod((integer * 251.0 + 83.0), 293.0) / 293.0;
-    return vec3(red, green, blue);
+	float red = mod((integer * 109.0 + 47.0), 269.0) / 269.0;
+	float green = mod((integer * 83.0 + 251.0), 127.0) / 127.0;
+	float blue = mod((integer * 251.0 + 83.0), 293.0) / 293.0;
+	return vec3(red, green, blue);
 }
 
-
 void main() {
-    uint thread_id = gl_WorkGroupID.x;
-    uint local_id = gl_LocalInvocationID.x;
-    uint cluster_id = gl_GlobalInvocationID.y;
+	uint thread_id = gl_WorkGroupID.x;
+	uint local_id = gl_LocalInvocationID.x;
+	uint cluster_id = gl_GlobalInvocationID.y;
 
-	if (thread_id >= payload.meshlet_count[cluster_id]){
-    	SetMeshOutputsEXT(0, 0);
+	if (thread_id >= payload.meshlet_count[cluster_id]) {
+		SetMeshOutputsEXT(0, 0);
 		return;
 	}
 
-    uint meshlet_index = payload.meshlet_start[cluster_id] + thread_id;
+	uint meshlet_index = payload.meshlet_start[cluster_id] + thread_id;
 
 	vec3 colour = integer_to_rgb(meshlet_index);
 
@@ -67,51 +63,49 @@ void main() {
 
 	const uint primitive_count = min(MAX_PRIMITIVES, meshlets[meshlet_index].tri_count * 4 - 2);
 
-    SetMeshOutputsEXT(vertex_count, primitive_count);
+	SetMeshOutputsEXT(vertex_count, primitive_count);
 
-    // pub const RECT_TEX_COORD_INDICES_DATA: [u32; 12] = [0, 1, 2, 2, 3, 0, 4, 5, 6, 6, 7, 4];
-	[[unroll]]
-    for (uint i = local_id; i < vertex_count; i += GROUP_SIZE) {
+	// pub const RECT_TEX_COORD_INDICES_DATA: [u32; 12] = [0, 1, 2, 2, 3, 0, 4, 5, 6, 6, 7, 4];
+	[[unroll]] for (uint i = local_id; i < vertex_count; i += GROUP_SIZE) {
 
 		uint vert_idx = meshlets[meshlet_index].vertices[i];
-		
-		gl_MeshVerticesEXT[i].gl_Position = ubo.view_proj * models[payload.instance].model * vec4(verts[vert_idx].pos.xyz, 1);
-		
+
+		gl_MeshVerticesEXT[i].gl_Position =
+			ubo.view_proj * models[payload.instance].model * vec4(verts[vert_idx].pos.xyz, 1);
+
 		OUT[i].world_normal = (models[payload.instance].model * vec4(verts[vert_idx].normal.xyz, 0)).xyz;
-		
+
 		OUT[i].fragColor = colour;
-		
+
 		OUT[i].fragTexCoord = vec2(1, 1);
-    }
+	}
 
 	// Unroll strip compressed index array
 
-	[[unroll]]
-    for (uint i = local_id; i < meshlets[meshlet_index].tri_count; i += GROUP_SIZE) {
+	[[unroll]] for (uint i = local_id; i < meshlets[meshlet_index].tri_count; i += GROUP_SIZE) {
 
 		uint tri = meshlets[meshlet_index].indices[i];
 
 		uint a = (tri >> 0) & 255;
 		uint b = (tri >> 8) & 255;
 
-		if (i > 0){
-			uint prev_tri = meshlets[meshlet_index].indices[i-1];
+		if (i > 0) {
+			uint prev_tri = meshlets[meshlet_index].indices[i - 1];
 
-			uint prev_c = (prev_tri >> (8*2)) & 255;
-			uint prev_d = (prev_tri >> (8*3)) & 255;
+			uint prev_c = (prev_tri >> (8 * 2)) & 255;
+			uint prev_d = (prev_tri >> (8 * 3)) & 255;
 
 			gl_PrimitiveTriangleIndicesEXT[i * 4 - 1] = uvec3(prev_c, prev_d, a);
 			gl_PrimitiveTriangleIndicesEXT[i * 4 - 2] = uvec3(prev_d, b, a);
 		}
 
-		uint c = (tri >> (8*2)) & 255;
-		uint d = (tri >> (8*3)) & 255;
+		uint c = (tri >> (8 * 2)) & 255;
+		uint d = (tri >> (8 * 3)) & 255;
 
 		// gl_PrimitiveTriangleIndicesEXT has triangles sourced from indexes:
 		// 00 1111 2222 etc
 
 		gl_PrimitiveTriangleIndicesEXT[i * 4 + 0] = uvec3(a, b, c);
-		gl_PrimitiveTriangleIndicesEXT[i * 4 + 1] = uvec3(b, d,  c);
-    }
-
+		gl_PrimitiveTriangleIndicesEXT[i * 4 + 1] = uvec3(b, d, c);
+	}
 }

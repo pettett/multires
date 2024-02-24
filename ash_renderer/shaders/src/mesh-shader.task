@@ -1,45 +1,43 @@
 #version 460
-#extension GL_EXT_mesh_shader: require
-#extension GL_ARB_separate_shader_objects: enable
+
+#extension GL_EXT_mesh_shader : require
+#extension GL_ARB_separate_shader_objects : enable
 #extension GL_GOOGLE_include_directive : enable
-#extension GL_ARB_shader_draw_parameters: require
+#extension GL_ARB_shader_draw_parameters : require
+#extension GL_KHR_shader_subgroup_arithmetic : enable
 
-#extension GL_KHR_shader_subgroup_arithmetic: enable
-
-#include "structs\mesh_task_payload.glsl"
-#include "structs\indirect_draw_data.glsl"
-#include "structs\cluster_data.glsl"
 #include "structs\camera.glsl"
+#include "structs\cluster_data.glsl"
+#include "structs\indirect_draw_data.glsl"
+#include "structs\mesh_task_payload.glsl"
 #include "structs\model.glsl"
 
 const float LARGE_ERROR = 100000000000000000.0;
 
-
 // Bindings and layout
 
-
-layout (binding = 0) readonly buffer ModelUniformBufferObject {
-    Model models[];
+layout(binding = 0) readonly buffer ModelUniformBufferObject {
+	Model models[];
 };
 
-layout (std430, binding = 2) readonly buffer InputBufferC {
-    ClusterData clusters[];
+layout(std430, binding = 2) readonly buffer InputBufferC {
+	ClusterData clusters[];
 };
 
-layout (binding = 3) uniform CameraUniformBufferObject {
-    CameraUniformObject ubo;
+layout(binding = 3) uniform CameraUniformBufferObject {
+	CameraUniformObject ubo;
 };
 
 // Access to the indirect draw params for the next frame
-layout (std430, binding = 6) buffer IndirectDrawBuffer {
-    IndirectDrawData data[]; 
-} indirect_draw;
+layout(std430, binding = 6) buffer IndirectDrawBuffer {
+	IndirectDrawData data[];
+}
+indirect_draw;
 
-layout (local_size_x = TASK_GROUP_SIZE, local_size_y = 1, local_size_z = 1) in;
-
+layout(local_size_x = TASK_GROUP_SIZE, local_size_y = 1, local_size_z = 1) in;
 
 // Workgroup Shared memory
-//shared uint max_count;
+// shared uint max_count;
 taskPayloadSharedEXT MeshTaskPayload payload;
 
 // uint max_cluster(){
@@ -65,8 +63,6 @@ taskPayloadSharedEXT MeshTaskPayload payload;
 // 	}
 // }
 
-
-
 #include "util\culling.glsl"
 
 // Define INVOKE_PER_CLUSTER to say that workgroup count corresponds to maximum cluster being evaluated
@@ -75,38 +71,35 @@ taskPayloadSharedEXT MeshTaskPayload payload;
 #include "util\cluster.glsl"
 
 void main() {
-    uint local_index = gl_LocalInvocationID.x;
-    uint instance_index = gl_DrawID;
-    // uint cluster_index = gl_GlobalInvocationID.x + indirect_draw.data[instance_index].offset;
-    uint cluster_index = gl_GlobalInvocationID.x;
-	
-	if (gl_GlobalInvocationID.x == 0){
+	uint local_index = gl_LocalInvocationID.x;
+	uint instance_index = gl_DrawID;
+	// uint cluster_index = gl_GlobalInvocationID.x + indirect_draw.data[instance_index].offset;
+	uint cluster_index = gl_GlobalInvocationID.x;
+
+	if (gl_GlobalInvocationID.x == 0) {
 		// Agressively lower the amount of tasks being invoked, and allow atomic max function below to pick it up
 		indirect_draw.data[instance_index].group_size_x -= 1;
-		//indirect_draw.data[instance_index].offset += 1;
+		// indirect_draw.data[instance_index].offset += 1;
 	}
 	memoryBarrierBuffer();
 
-    if (cluster_index >= max_cluster()) {
+	if (cluster_index >= max_cluster()) {
 		// this is a uint, DO NOT ASSIGN -1
-    	payload.meshlet_start[local_index] = 0;
-    	payload.meshlet_count[local_index] = 0;
-        return;
-    }
+		payload.meshlet_start[local_index] = 0;
+		payload.meshlet_count[local_index] = 0;
+		return;
+	}
 
-
-	vec3 local_cam_pos = (models[instance_index].inv_model * vec4(ubo.camera_pos, 1.0)).xyz ;
+	vec3 local_cam_pos = (models[instance_index].inv_model * vec4(ubo.camera_pos, 1.0)).xyz;
 	// Calculate if this cluster should be drawn:
-	// draw_error >= min(self.error, self.co-parent.error) 
+	// draw_error >= min(self.error, self.co-parent.error)
 	// draw_error < min(parent0.error, parent1.error)
-    float parent_error = get_parent_error(cluster_index, local_cam_pos);
-    float this_error = get_this_error(cluster_index, local_cam_pos);
+	float parent_error = get_parent_error(cluster_index, local_cam_pos);
+	float this_error = get_this_error(cluster_index, local_cam_pos);
 
+	float error = ubo.target_error * ubo.target_error * ubo.target_error;
 
-	float error = ubo.target_error * ubo.target_error * ubo.target_error  ;
-
-    bool draw = error >= this_error && error < parent_error;
-
+	bool draw = error >= this_error && error < parent_error;
 
 	const float CLIP_BOUND = 1.1;
 
@@ -117,70 +110,75 @@ void main() {
 	extract_planes_from_mat(MVP, planes[0], planes[1], planes[2], planes[3], planes[4], planes[5]);
 	bool in_clip = sphere_inside_planes(planes, clusters[cluster_index].tight_sphere);
 
-	if (dot(normalize(local_cam_pos - clusters[cluster_index].tight_sphere.xyz), clusters[cluster_index].tight_cone.xyz) < clusters[cluster_index].tight_cone.w){
+	if (dot(normalize(local_cam_pos - clusters[cluster_index].tight_sphere.xyz),
+			clusters[cluster_index].tight_cone.xyz) < clusters[cluster_index].tight_cone.w) {
 		in_clip = false;
 	}
 
-	//in_clip = true;
+	// in_clip = true;
 
 	// vec4 clip_pos = MVP * vec4(clusters[cluster_index].center, 1);
 	// vec3 norm_clip_pos = clip_pos.xyz / clip_pos.w;
 	// norm_clip_pos.z = clamp(norm_clip_pos.z, 0, CLIP_BOUND);
 
-	// //vec4 clip_rad = ubo.view_proj * model.models[instance_index] * vec4(cluster_data.clusters[cluster_index].radius, cluster_data.clusters[cluster_index].radius, cluster_data.clusters[cluster_index].radius, 0);
+	// //vec4 clip_rad = ubo.view_proj * model.models[instance_index] *
+	// vec4(cluster_data.clusters[cluster_index].radius, cluster_data.clusters[cluster_index].radius,
+	// cluster_data.clusters[cluster_index].radius, 0);
 
 	// norm_clip_pos.xy = abs(norm_clip_pos.xy) ;//- abs(clip_rad.xy);
 
 	// bool in_clip = clamp(norm_clip_pos, vec3(0), vec3(CLIP_BOUND)) == norm_clip_pos;
 
-    payload.meshlet_start[local_index] = draw && in_clip ? clusters[cluster_index].meshlet_start : 0;
-    payload.meshlet_count[local_index] = draw && in_clip ? clusters[cluster_index].meshlet_count : 0;
-    payload.instance = instance_index;
-	
+	payload.meshlet_start[local_index] = draw && in_clip ? clusters[cluster_index].meshlet_start : 0;
+	payload.meshlet_count[local_index] = draw && in_clip ? clusters[cluster_index].meshlet_count : 0;
+	payload.instance = instance_index;
+
 	// Calculate the largest possible index for the purpose of narrowing down the number of tasks dispatched.
 	// May cause empty spots if the camera moves through more than 1 LOD per frame (highly unlikely)
-	
+
 	// (if not -1) parent0 < parent1 < cluster_index < max_child_index
 	// (if root)   -1 <= -1 < cluster_index < max_child_index
-	// (if leaf)   -1 < parent0 < parent1 < cluster_index 
+	// (if leaf)   -1 < parent0 < parent1 < cluster_index
 
-	uint max_needed_workgroups = (draw ? 
-				cluster_index :  // Perfect error, continue doing this
-				(error < this_error ? 
-					max(clusters[cluster_index].max_child_index, cluster_index)  : // Error is lower then ours, draw a child if we have one
-					clusters[cluster_index].parent1 == -1 ? cluster_index : clusters[cluster_index].parent1  // Error is higher then ours, only need to draw the parent (parent1 > parent0)
-				)
-			) / TASK_GROUP_SIZE + 2;												
+	uint max_needed_workgroups =
+		(draw ? cluster_index : // Perfect error, continue doing this
+			 (error < this_error ? max(clusters[cluster_index].max_child_index, cluster_index)
+								 : // Error is lower then ours, draw a child if we have one
+				  clusters[cluster_index].parent1 == -1
+				  ? cluster_index
+				  : clusters[cluster_index]
+						.parent1 // Error is higher then ours, only need to draw the parent (parent1 > parent0)
+			  )) /
+			TASK_GROUP_SIZE +
+		2;
 
-	// uint min_needed_index = (draw ? 
+	// uint min_needed_index = (draw ?
 	// 			cluster_index :  // Perfect error, continue doing this
-	// 			(error < this_error ? 
-	// 				max(clusters[cluster_index].min_child_index, cluster_index)  : // Error is lower then ours, draw a child if we have one
-	// 				parent1 == -1 ? cluster_index : parent0  // Error is higher then ours, only need to draw the parent (parent1 > parent0)
+	// 			(error < this_error ?
+	// 				max(clusters[cluster_index].min_child_index, cluster_index)  : // Error is lower then ours, draw a
+	// child if we have one 				parent1 == -1 ? cluster_index : parent0  // Error is higher then ours, only
+	// need to draw the parent (parent1 > parent0)
 	// 			)
-	// 		);	
+	// 		);
 
-	//max_needed_workgroups = min(max_needed_workgroups, max_cluster() / TASK_GROUP_SIZE + 1);
+	// max_needed_workgroups = min(max_needed_workgroups, max_cluster() / TASK_GROUP_SIZE + 1);
 
-	//max_count = 0;
+	// max_count = 0;
 
-	//barrier();
+	// barrier();
 
-	//if (local_index % 2 == 0){
+	// if (local_index % 2 == 0){
 	//	atomicMax(max_count, max(payload.meshlet_count[local_index], payload.meshlet_count[local_index+1]) );
-	//}
+	// }
 
 	uint max_count = subgroupMax(payload.meshlet_count[local_index]);
-	
+
 	uint subroup_max_needed_workgroups = subgroupMax(max_needed_workgroups);
-	//uint subroup_min_needed_index = subgroupMax(min_needed_index);
+	// uint subroup_min_needed_index = subgroupMax(min_needed_index);
 
-	if (subgroupElect()){
+	if (subgroupElect()) {
 		atomicMax(indirect_draw.data[instance_index].group_size_x, subroup_max_needed_workgroups);
-		//atomicMin(indirect_draw.data[instance_index].offset, subroup_min_needed_index);
-    	EmitMeshTasksEXT(max_count, TASK_GROUP_SIZE, 1);
+		// atomicMin(indirect_draw.data[instance_index].offset, subroup_min_needed_index);
+		EmitMeshTasksEXT(max_count, TASK_GROUP_SIZE, 1);
 	}
-
-	
-
-} 
+}

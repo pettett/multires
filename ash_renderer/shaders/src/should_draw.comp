@@ -1,18 +1,15 @@
 #version 460
 
-#extension GL_ARB_separate_shader_objects: enable
+#extension GL_ARB_separate_shader_objects : enable
 #extension GL_GOOGLE_include_directive : enable
-#extension GL_ARB_shader_draw_parameters: require
-#extension GL_KHR_shader_subgroup_arithmetic: enable
+#extension GL_ARB_shader_draw_parameters : require
+#extension GL_KHR_shader_subgroup_arithmetic : enable
 
-#include "structs\cluster_data.glsl"
 #include "structs\camera.glsl"
+#include "structs\cluster_data.glsl"
 #include "structs\model.glsl"
 
-
-
 //@group(0) @binding(0) var<storage, write> result_indicies: array<i32>;
-
 
 // layout(binding = 0) writeonly buffer ResultIndicies {
 //     uint result[];
@@ -20,86 +17,83 @@
 
 // layout(binding = 1) writeonly buffer DrawIndirectParams {
 //     DrawIndexedIndirect result[];
-// } draw_indirect_params; 
+// } draw_indirect_params;
 
-
-layout (binding = 0) readonly buffer ModelUniformBufferObject {
-    Model models[];
+layout(binding = 0) readonly buffer ModelUniformBufferObject {
+	Model models[];
 };
 
 layout(binding = 2) readonly buffer Clusters {
-    ClusterData clusters[];
+	ClusterData clusters[];
 };
 
 layout(binding = 1) writeonly buffer ShouldDraw {
-    uint should_draw[];
+	uint should_draw[];
 };
 
-layout (binding = 3) readonly uniform CameraUniformBufferObject {
-    CameraUniformObject ubo; 
+layout(binding = 3) readonly uniform CameraUniformBufferObject {
+	CameraUniformObject ubo;
 };
 
 const float LARGE_ERROR = 100000000000000000.0;
 
 float cluster_error(uint idx, uint idy) {
-    bool out_of_range = false;
-    if (out_of_range) {
-        return LARGE_ERROR;
-    } else {
-		vec3 cam = (models[idy].inv_model * vec4(ubo.camera_pos, 1.0)).xyz ;
+	bool out_of_range = false;
+	if (out_of_range) {
+		return LARGE_ERROR;
+	} else {
+		vec3 cam = (models[idy].inv_model * vec4(ubo.camera_pos, 1.0)).xyz;
 		vec3 center = clusters[idx].center;
 		float radius = clusters[idx].radius;
 		float error = clusters[idx].error;
 
 		vec3 vec = center - cam;
-		float inv_center_distance = 1/(dot(vec, vec));
-        return error * error * radius * radius * inv_center_distance;
-		
-    }
+		float inv_center_distance = 1 / (dot(vec, vec));
+		return error * error * radius * radius * inv_center_distance;
+	}
 }
 
 const uint LOCAL_SIZE_X = 1;
 
-layout (local_size_x = LOCAL_SIZE_X, local_size_y = 1, local_size_z = 1) in;
- 
+layout(local_size_x = LOCAL_SIZE_X, local_size_y = 1, local_size_z = 1) in;
+
 void main() {
 	uvec3 id = gl_GlobalInvocationID;
-    uint i = id.x;
-    uint instance = id.y;
-    //uint len = indices.result.length();
+	uint i = id.x;
+	uint instance = id.y;
+	// uint len = indices.result.length();
 
-    // if (i == 0) {
-    //     should_draw.result[offset + 0] = len;
-    // }
+	// if (i == 0) {
+	//     should_draw.result[offset + 0] = len;
+	// }
 
-    // if (i >= len) {
-    //     return;
-    // }
-    // should_draw[i] = i32(clusters[i].index_offset);
+	// if (i >= len) {
+	//     return;
+	// }
+	// should_draw[i] = i32(clusters[i].index_offset);
 
-    //uint start = clusters[i].index_offset;
-    //uint end = start + clusters[i].index_count;
+	// uint start = clusters[i].index_offset;
+	// uint end = start + clusters[i].index_count;
 
 	// Calculate if this cluster should be drawn:
-	// draw_error >= min(self.error, self.co-parent.error) 
+	// draw_error >= min(self.error, self.co-parent.error)
 	// draw_error < min(parent0.error, parent1.error)
 
 	// lots of negative zeros
-    float this_error = -LARGE_ERROR;
+	float this_error = -LARGE_ERROR;
 
-    if (clusters[i].co_parent >= 0) {
-        this_error = min(cluster_error(i, instance), cluster_error(clusters[i].co_parent, instance));
-    }
+	if (clusters[i].co_parent >= 0) {
+		this_error = min(cluster_error(i, instance), cluster_error(clusters[i].co_parent, instance));
+	}
 
 	// lots of zeros
-    float parent_error = LARGE_ERROR;
+	float parent_error = LARGE_ERROR;
 
-    if (clusters[i].parent0 >= 0) { // If we have one parent, we are guarenteed to have another.
-        parent_error = min(cluster_error(clusters[i].parent0, instance), cluster_error(clusters[i].parent1, instance));
-    }
+	if (clusters[i].parent0 >= 0) { // If we have one parent, we are guarenteed to have another.
+		parent_error = min(cluster_error(clusters[i].parent0, instance), cluster_error(clusters[i].parent1, instance));
+	}
 	float error = ubo.target_error * ubo.target_error;
-    bool cull = error >= this_error && error < parent_error;
+	bool cull = error >= this_error && error < parent_error;
 
-    should_draw[i] = cull ? i + 1 : 0;
-	
+	should_draw[i] = cull ? i + 1 : 0;
 }

@@ -1,59 +1,52 @@
 #version 460
 
-#extension GL_EXT_mesh_shader: require
-#extension GL_ARB_separate_shader_objects: enable
+#extension GL_EXT_mesh_shader : require
+#extension GL_ARB_separate_shader_objects : enable
 #extension GL_GOOGLE_include_directive : enable
-#extension GL_ARB_shader_draw_parameters: require
-#extension GL_KHR_shader_subgroup_arithmetic: enable
-//#extension GL_EXT_shader_16bit_storage : enable
+#extension GL_ARB_shader_draw_parameters : require
+#extension GL_KHR_shader_subgroup_arithmetic : enable
+// #extension GL_EXT_shader_16bit_storage : enable
 
-#include "structs\mesh_task_payload.glsl"
 #include "structs\cluster_data.glsl"
+#include "structs\mesh_task_payload.glsl"
 
 const float LARGE_ERROR = 100000000000000000.0;
-
 
 // Bindings and layout
 
 layout(binding = 2) readonly buffer Clusters {
-    ClusterData clusters[];
+	ClusterData clusters[];
 };
 
 layout(binding = 1) readonly buffer ShouldDraw {
-    uint should_draw[];
+	uint should_draw[];
 };
-
 
 // Access to the indirect draw params for the next frame
 
-layout (local_size_x = TASK_GROUP_SIZE, local_size_y = 1, local_size_z = 1) in;
-
+layout(local_size_x = TASK_GROUP_SIZE, local_size_y = 1, local_size_z = 1) in;
 
 // Workgroup Shared memory
-//shared uint max_count;
+// shared uint max_count;
 taskPayloadSharedEXT MeshTaskPayload payload;
 
-
 void main() {
-    uint local_index = gl_LocalInvocationID.x;
-    uint instance_index = gl_DrawID;
+	uint local_index = gl_LocalInvocationID.x;
+	uint instance_index = gl_DrawID;
 
-    bool draw = should_draw[gl_GlobalInvocationID.x] > 0;
-    uint cluster_index = should_draw[gl_GlobalInvocationID.x] - 1;
+	bool draw = should_draw[gl_GlobalInvocationID.x] > 0;
+	uint cluster_index = should_draw[gl_GlobalInvocationID.x] - 1;
 
 	// draw = true;
 	// cluster_index = gl_GlobalInvocationID.x;
 
-    payload.meshlet_start[local_index] = draw ? clusters[cluster_index].meshlet_start : 0;
-    payload.meshlet_count[local_index] = draw ? clusters[cluster_index].meshlet_count : 0;
-    payload.instance = instance_index;
-	
+	payload.meshlet_start[local_index] = draw ? clusters[cluster_index].meshlet_start : 0;
+	payload.meshlet_count[local_index] = draw ? clusters[cluster_index].meshlet_count : 0;
+	payload.instance = instance_index;
+
 	uint max_count = subgroupMax(payload.meshlet_count[local_index]);
 
-	if (subgroupElect()){
-    	EmitMeshTasksEXT(max_count, TASK_GROUP_SIZE, 1);
+	if (subgroupElect()) {
+		EmitMeshTasksEXT(max_count, TASK_GROUP_SIZE, 1);
 	}
-
-	
-
-} 
+}

@@ -1,0 +1,7 @@
+UseTab: Always
+IndentWidth: 4
+TabWidth: 4
+BasedOnStyle: Microsoft
+BreakBeforeBraces: Attach
+AllowShortLoopsOnASingleLine: true
+AllowShortBlocksOnASingleLine: false
