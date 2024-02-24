@@ -88,7 +88,7 @@ impl IndirectTasks {
         let ubo_layout = create_descriptor_set_layout(core.device.clone());
 
         let graphics_pipeline = create_graphics_pipeline(
-            core.device.clone(),
+            &core,
             &renderer.render_pass,
             screen.swapchain().extent,
             ubo_layout.clone(),
@@ -202,8 +202,7 @@ impl ScreenData {
         );
 
         for (i, &command_buffer) in command_buffers.iter().enumerate() {
-            let command_buffer_begin_info = vk::CommandBufferBeginInfo::builder()
-                .flags(vk::CommandBufferUsageFlags::SIMULTANEOUS_USE);
+            let command_buffer_begin_info = vk::CommandBufferBeginInfo::builder(); //    .flags(vk::CommandBufferUsageFlags::SIMULTANEOUS_USE);
 
             unsafe {
                 device
@@ -215,7 +214,7 @@ impl ScreenData {
                 vk::ClearValue {
                     // clear value for color buffer
                     color: vk::ClearColorValue {
-                        float32: [0.0, 0.0, 0.0, 1.0],
+                        float32: [0.0, 0.0, 0.0, 0.0],
                     },
                 },
                 vk::ClearValue {
@@ -419,7 +418,7 @@ fn create_descriptor_sets(
 }
 
 fn create_graphics_pipeline(
-    device: Arc<Device>,
+    core: &Core,
     render_pass: &RenderPass,
     swapchain_extent: vk::Extent2D,
     ubo_set_layout: Arc<DescriptorSetLayout>,
@@ -427,12 +426,12 @@ fn create_graphics_pipeline(
     mode: MeshShaderMode,
 ) -> GraphicsPipeline {
     let task_shader_module = ShaderModule::new(
-        device.clone(),
+        core.device.clone(),
         include_bytes!("../../shaders/spv/mesh-shader.task"),
     );
 
     let mesh_shader_module = ShaderModule::new(
-        device.clone(),
+        core.device.clone(),
         match mode {
             MeshShaderMode::TriangleList => include_bytes!("../../shaders/spv/mesh-shader.mesh"),
             MeshShaderMode::TriangleStrip => {
@@ -523,7 +522,7 @@ fn create_graphics_pipeline(
         .dynamic_states(&[vk::DynamicState::SCISSOR, vk::DynamicState::VIEWPORT]);
 
     let pipeline_layout = unsafe {
-        device
+        core.device
             .create_pipeline_layout(&pipeline_layout_create_info, None)
             .expect("Failed to create pipeline layout!")
     };
@@ -557,7 +556,7 @@ fn create_graphics_pipeline(
     // };
 
     let graphics_pipelines = unsafe {
-        device
+        core.device
             .create_graphics_pipelines(
                 vk::PipelineCache::null(),
                 &graphic_pipeline_create_infos,
@@ -566,8 +565,10 @@ fn create_graphics_pipeline(
             .expect("Failed to create Graphics Pipeline!.")
     };
 
+    core.name_object("Indirect Tasks", graphics_pipelines[0]);
+
     GraphicsPipeline::new(
-        device,
+        core.device.clone(),
         graphics_pipelines[0],
         pipeline_layout,
         ubo_set_layout,

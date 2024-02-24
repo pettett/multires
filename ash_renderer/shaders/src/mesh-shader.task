@@ -42,57 +42,37 @@ layout (local_size_x = TASK_GROUP_SIZE, local_size_y = 1, local_size_z = 1) in;
 //shared uint max_count;
 taskPayloadSharedEXT MeshTaskPayload payload;
 
-uint max_cluster(){
-	return min(clusters.length(), gl_NumWorkGroups.x * TASK_GROUP_SIZE);
-}
+// uint max_cluster(){
+// 	return min(clusters.length(), gl_NumWorkGroups.x * TASK_GROUP_SIZE);
+// }
 
-float cluster_error(uint idx, vec3 local_cam_pos) {
-    bool out_of_range = idx >= max_cluster();
-    if (out_of_range) {
-        return LARGE_ERROR;
-    } else {
-		vec3 center =  clusters[idx].center;
-		//vec3 cam =  ubo.camera_pos;
-		//vec3 center = (models[idy].model * vec4(clusters[idx].center, 1.0)).xyz ;
-		float radius = clusters[idx].radius ;
-		//float radius = length((models[idy].model * vec4(normalize(vec3(1)) * clusters[idx].radius, 0.0)).xyz);
-		float error = clusters[idx].error;
+// float cluster_error(uint idx, vec3 local_cam_pos) {
+//     bool out_of_range = idx >= max_cluster();
+//     if (out_of_range) {
+//         return LARGE_ERROR;
+//     } else {
+// 		vec3 center =  clusters[idx].center;
+// 		//vec3 cam =  ubo.camera_pos;
+// 		//vec3 center = (models[idy].model * vec4(clusters[idx].center, 1.0)).xyz ;
+// 		float radius = clusters[idx].radius ;
+// 		//float radius = length((models[idy].model * vec4(normalize(vec3(1)) * clusters[idx].radius, 0.0)).xyz);
+// 		float error = clusters[idx].error;
 
-		vec3 vec = center - local_cam_pos;
-		float inv_center_distance = 1/(dot(vec, vec));
-        return (error * error * radius * radius) * inv_center_distance;
-		//return clusters[idx].error;
-	}
-}
+// 		vec3 vec = center - local_cam_pos;
+// 		float inv_center_distance = 1/(dot(vec, vec));
+//         return (error * error * radius * radius) * inv_center_distance;
+// 		//return clusters[idx].error;
+// 	}
+// }
 
 
 
-void extract_planes_from_mat(
-        const mat4 mat,
-        out vec4 left,   out vec4 right,
-        out vec4 bottom, out vec4 top,
-        out vec4 near,   out vec4 far)
-{
-    for (int i = 4; i > 0; i--) { left[i]   = mat[i][3] + mat[i][0]; }
-    for (int i = 4; i > 0; i--) { right[i]  = mat[i][3] - mat[i][0]; }
-    for (int i = 4; i > 0; i--) { bottom[i] = mat[i][3] + mat[i][1]; }
-    for (int i = 4; i > 0; i--) { top[i]    = mat[i][3] - mat[i][1]; }
-    for (int i = 4; i > 0; i--) { near[i]   = mat[i][3] + mat[i][2]; }
-    for (int i = 4; i > 0; i--) { far[i]    = mat[i][3] - mat[i][2]; }
-}
+#include "util\culling.glsl"
 
-float dist_to_plane(const vec4 plane, const vec3 point){
-	return dot(plane.xyz, point) + plane.w;
-}
+// Define INVOKE_PER_CLUSTER to say that workgroup count corresponds to maximum cluster being evaluated
+#define INVOKE_PER_CLUSTER
 
-bool sphere_inside_planes(const vec4 planes[6], const vec4 sphere){
-	for (int i = 0; i < 6; i++){
-		if (dist_to_plane(planes[i], sphere.xyz) + sphere.w * 2 < 0){
-			return false;
-		}
-	}
-	return true;
-}
+#include "util\cluster.glsl"
 
 void main() {
     uint local_index = gl_LocalInvocationID.x;
@@ -119,35 +99,8 @@ void main() {
 	// Calculate if this cluster should be drawn:
 	// draw_error >= min(self.error, self.co-parent.error) 
 	// draw_error < min(parent0.error, parent1.error)
-
-
-	// lots of zeros - clusters at the end are always avaliable to draw
-    float parent_error = LARGE_ERROR;
-
-	int parent0 = clusters[cluster_index].parent0;
-	int parent1 = clusters[cluster_index].parent1;
-
-    if (parent0 >= 0) { // If we have one parent, we are guarenteed to have another.
-        parent_error = max(
-			cluster_error(uint(parent0), local_cam_pos), 
-			cluster_error(uint(parent1), local_cam_pos)
-			);
-    }
-
-
-	// lots of negative zeros - clusters at the base are always avaliable to draw
-    float this_error = -LARGE_ERROR;
-	
-	int co_parent = clusters[cluster_index].co_parent;
-
-    if (co_parent >= 0) {
-        this_error = max(
-			cluster_error(cluster_index,   local_cam_pos), 
-			cluster_error(uint(co_parent), local_cam_pos)
-			);
-    }
-
-
+    float parent_error = get_parent_error(cluster_index, local_cam_pos);
+    float this_error = get_this_error(cluster_index, local_cam_pos);
 
 
 	float error = ubo.target_error * ubo.target_error * ubo.target_error  ;
@@ -195,7 +148,7 @@ void main() {
 				cluster_index :  // Perfect error, continue doing this
 				(error < this_error ? 
 					max(clusters[cluster_index].max_child_index, cluster_index)  : // Error is lower then ours, draw a child if we have one
-					parent1 == -1 ? cluster_index : parent1  // Error is higher then ours, only need to draw the parent (parent1 > parent0)
+					clusters[cluster_index].parent1 == -1 ? cluster_index : clusters[cluster_index].parent1  // Error is higher then ours, only need to draw the parent (parent1 > parent0)
 				)
 			) / TASK_GROUP_SIZE + 2;												
 

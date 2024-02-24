@@ -48,7 +48,7 @@ pub struct ExpandingComputeCulledMesh {
     screen: Option<ScreenData>,
     descriptor_pool: Arc<DescriptorPool>,
     core: Arc<Core>,
-    should_cull_buffer: Arc<TBuffer<u32>>,
+    should_draw_buffer: Arc<TBuffer<u32>>,
     indirect_task_buffer: Arc<TBuffer<vk::DrawMeshTasksIndirectCommandEXT>>,
 }
 
@@ -126,7 +126,7 @@ impl ExpandingComputeCulledMesh {
             screen: None,
             core,
             descriptor_pool,
-            should_cull_buffer,
+            should_draw_buffer: should_cull_buffer,
             should_draw_pipeline,
             indirect_task_buffer,
         }
@@ -170,8 +170,7 @@ impl ScreenData {
         );
 
         for (i, &command_buffer) in command_buffers.iter().enumerate() {
-            let command_buffer_begin_info = vk::CommandBufferBeginInfo::builder()
-                .flags(vk::CommandBufferUsageFlags::SIMULTANEOUS_USE);
+            let command_buffer_begin_info = vk::CommandBufferBeginInfo::builder(); //.flags(vk::CommandBufferUsageFlags::SIMULTANEOUS_USE);
 
             unsafe {
                 device
@@ -183,7 +182,7 @@ impl ScreenData {
                 vk::ClearValue {
                     // clear value for color buffer
                     color: vk::ClearColorValue {
-                        float32: [0.0, 0.0, 0.0, 1.0],
+                        float32: [0.0, 0.0, 0.0, 0.0],
                     },
                 },
                 vk::ClearValue {
@@ -206,6 +205,28 @@ impl ScreenData {
 
             let descriptor_sets_to_bind = [*core_draw.descriptor_sets[i]];
 
+            let result_indices_buffer_barriers = [
+                vk::BufferMemoryBarrier2::builder()
+                    .buffer(core_draw.indirect_task_buffer.handle())
+                    .src_access_mask(vk::AccessFlags2::SHADER_STORAGE_WRITE)
+                    .dst_access_mask(vk::AccessFlags2::INDIRECT_COMMAND_READ)
+                    .src_stage_mask(vk::PipelineStageFlags2::COMPUTE_SHADER)
+                    .dst_stage_mask(vk::PipelineStageFlags2::DRAW_INDIRECT)
+                    .size(vk::WHOLE_SIZE)
+                    .build(),
+                vk::BufferMemoryBarrier2::builder()
+                    .buffer(core_draw.should_draw_buffer.handle())
+                    .src_access_mask(vk::AccessFlags2::SHADER_STORAGE_WRITE)
+                    .dst_access_mask(vk::AccessFlags2::SHADER_STORAGE_READ)
+                    .src_stage_mask(vk::PipelineStageFlags2::COMPUTE_SHADER)
+                    .dst_stage_mask(vk::PipelineStageFlags2::TASK_SHADER_EXT)
+                    .size(vk::WHOLE_SIZE)
+                    .build(),
+            ];
+
+            let result_indices_dependency_info = vk::DependencyInfo::builder()
+                .buffer_memory_barriers(&result_indices_buffer_barriers);
+
             unsafe {
                 device.cmd_bind_pipeline(
                     command_buffer,
@@ -223,6 +244,9 @@ impl ScreenData {
                 );
 
                 device.cmd_dispatch(command_buffer, 1, 1, 1);
+
+                // Mark barrier between compute write and task read, and between indirect write and indirect read
+                device.cmd_pipeline_barrier2(command_buffer, &result_indices_dependency_info);
 
                 device.cmd_begin_render_pass(
                     command_buffer,

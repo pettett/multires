@@ -148,8 +148,7 @@ impl ScreenData {
         );
 
         for (i, &command_buffer) in command_buffers.iter().enumerate() {
-            let command_buffer_begin_info = vk::CommandBufferBeginInfo::builder()
-                .flags(vk::CommandBufferUsageFlags::SIMULTANEOUS_USE);
+            let command_buffer_begin_info = vk::CommandBufferBeginInfo::builder(); //.flags(vk::CommandBufferUsageFlags::SIMULTANEOUS_USE);
 
             unsafe {
                 device
@@ -161,7 +160,7 @@ impl ScreenData {
                 vk::ClearValue {
                     // clear value for color buffer
                     color: vk::ClearColorValue {
-                        float32: [0.0, 0.0, 0.0, 1.0],
+                        float32: [0.0, 0.0, 0.0, 0.0],
                     },
                 },
                 vk::ClearValue {

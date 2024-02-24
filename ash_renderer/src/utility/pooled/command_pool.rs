@@ -24,15 +24,11 @@ impl Drop for SingleTimeCommandBuffer {
         let buffers_to_submit = [self.handle];
 
         let sumbit_infos = [vk::SubmitInfo {
-            s_type: vk::StructureType::SUBMIT_INFO,
-            p_next: ptr::null(),
-            wait_semaphore_count: 0,
-            p_wait_semaphores: ptr::null(),
-            p_wait_dst_stage_mask: ptr::null(),
             command_buffer_count: 1,
             p_command_buffers: buffers_to_submit.as_ptr(),
             signal_semaphore_count: 0,
-            p_signal_semaphores: ptr::null(),
+
+            ..Default::default()
         }];
 
         unsafe {
@@ -94,8 +90,6 @@ impl CommandPool {
             handle: pool,
         })
     }
-
-
 
     pub fn begin_single_time_command(
         self: &Arc<Self>,

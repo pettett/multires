@@ -65,7 +65,8 @@ impl Gui {
     ) -> vk::CommandBuffer {
         let cmd = self.ui_command_buffers[image_index];
 
-        let command_buffer_begin_info = vk::CommandBufferBeginInfo::builder();
+        let command_buffer_begin_info = vk::CommandBufferBeginInfo::builder()
+            .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
 
         unsafe {
             self.device
