@@ -47,12 +47,6 @@ pub struct IndirectTasksQueryResults {
     avail: u32,
 }
 
-pub struct DrawMeshTasksIndirect {
-    pub group_count_x: u32,
-    pub group_count_y: u32,
-    pub group_count_z: u32,
-    pub offset: u32,
-}
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum MeshShaderMode {
     TriangleList,
@@ -65,7 +59,7 @@ pub struct IndirectTasks {
     screen: Option<ScreenData>,
     descriptor_pool: Arc<DescriptorPool>,
     core: Arc<Core>,
-    indirect_task_buffer: Arc<TBuffer<DrawMeshTasksIndirect>>,
+    indirect_task_buffer: Arc<TBuffer<vk::DrawMeshTasksIndirectCommandEXT>>,
 
     // Evaluation data
     last_sample: time::Instant,
@@ -98,11 +92,10 @@ impl IndirectTasks {
         let mut task_indirect_data = Vec::new();
 
         for _e in transforms.iter() {
-            task_indirect_data.push(DrawMeshTasksIndirect {
+            task_indirect_data.push(vk::DrawMeshTasksIndirectCommandEXT {
                 group_count_x: 8,
                 group_count_y: 1,
                 group_count_z: 1,
-                offset: 0,
             });
         }
 
@@ -193,7 +186,7 @@ impl ScreenData {
         core: &Core,
         screen: &Screen,
         render_pass: &RenderPass,
-        indirect_task_buffer: &TBuffer<DrawMeshTasksIndirect>,
+        indirect_task_buffer: &TBuffer<vk::DrawMeshTasksIndirectCommandEXT>,
     ) -> Self {
         let device = core.device.clone();
         let command_buffers = CommandBufferGroup::new(
@@ -294,13 +287,10 @@ impl ScreenData {
                     &[],
                 );
 
-                device.fn_mesh_shader.cmd_draw_mesh_tasks_indirect(
-                    command_buffer,
-                    indirect_task_buffer.handle(),
-                    0,
-                    indirect_task_buffer.item_len() as _,
-                    indirect_task_buffer.stride() as _,
-                );
+                core_draw
+                    .indirect_task_buffer
+                    .draw_tasks_indirect(command_buffer);
+
                 if query {
                     device.cmd_end_query(command_buffer, core_draw.query_pool.handle(), q);
                 }

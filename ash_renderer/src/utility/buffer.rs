@@ -64,6 +64,10 @@ impl<T> TBuffer<T> {
             _p: PhantomData,
         }
     }
+
+    pub fn get_buffer(&self) -> &Buffer {
+        &self.buffer
+    }
 }
 
 impl<T> VkHandle for TBuffer<T> {
@@ -177,13 +181,30 @@ impl<T> TBuffer<T> {
         })
     }
 
-    pub fn item_len(&self) -> usize {
+    pub fn len(&self) -> usize {
         (self.size() as usize) / self.stride()
     }
     pub fn stride(&self) -> usize {
         mem::size_of::<T>()
     }
 }
+
+impl TBuffer<vk::DrawMeshTasksIndirectCommandEXT> {
+    /// Add cmd_draw_mesh_tasks_indirect to this task buffer
+    pub unsafe fn draw_tasks_indirect(&self, cmd: vk::CommandBuffer) {
+        self.buffer
+            .device
+            .fn_mesh_shader
+            .cmd_draw_mesh_tasks_indirect(
+                cmd,
+                self.handle(),
+                0,
+                self.len() as _,
+                self.stride() as _,
+            );
+    }
+}
+
 pub struct Buffer {
     // exists to allow drop
     device: Arc<Device>,
@@ -343,6 +364,11 @@ impl Buffer {
         // println!("Created buffer, size: {}", buffer_size);
 
         Arc::new(buffer)
+    }
+
+    pub unsafe fn fill(&self, cmd: vk::CommandBuffer, data: u32) {
+        self.device
+            .cmd_fill_buffer(cmd, self.handle(), 0, self.size, data)
     }
 
     pub fn copy_to_other(

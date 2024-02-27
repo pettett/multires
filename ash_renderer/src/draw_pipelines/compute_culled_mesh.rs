@@ -201,7 +201,7 @@ impl ScreenData {
 
                 device.cmd_dispatch(
                     command_buffer,
-                    core_draw.should_cull_buffer.item_len() as _,
+                    core_draw.should_cull_buffer.len() as _,
                     1,
                     1,
                 );
@@ -260,7 +260,7 @@ impl ScreenData {
 
                 device.fn_mesh_shader.cmd_draw_mesh_tasks(
                     command_buffer,
-                    core_draw.should_cull_buffer.item_len() as _,
+                    core_draw.should_cull_buffer.len() as _,
                     1,
                     1,
                 );

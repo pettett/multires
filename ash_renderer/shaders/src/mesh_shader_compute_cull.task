@@ -6,9 +6,11 @@
 #extension GL_ARB_shader_draw_parameters : require
 #extension GL_KHR_shader_subgroup_arithmetic : enable
 // #extension GL_EXT_shader_16bit_storage : enable
+#extension GL_EXT_debug_printf : enable
 
 #include "structs\cluster_data.glsl"
 #include "structs\mesh_task_payload.glsl"
+#include "structs\range.glsl"
 
 const float LARGE_ERROR = 100000000000000000.0;
 
@@ -19,7 +21,11 @@ layout(binding = 2) readonly buffer Clusters {
 };
 
 layout(binding = 1) readonly buffer ShouldDraw {
-	uint should_draw[];
+	uint draw_clusters[];
+};
+
+layout(binding = 7) readonly buffer Ranges {
+	Range ranges[];
 };
 
 // Access to the indirect draw params for the next frame
@@ -34,8 +40,20 @@ void main() {
 	uint local_index = gl_LocalInvocationID.x;
 	uint instance_index = gl_DrawID;
 
-	bool draw = should_draw[gl_GlobalInvocationID.x] > 0;
-	uint cluster_index = should_draw[gl_GlobalInvocationID.x] - 1;
+	uint draw_idx = gl_GlobalInvocationID.x + ranges[instance_index].start;
+
+	// if (draw_idx - local_index > ranges[instance_index].end) {
+	// 	// somehow everything in this workgroup is out of range. Should not be possible, but emit 0 anyway
+	// 	EmitMeshTasksEXT(0, 0, 0);
+	// 	return;
+	// }
+
+	bool in_range = draw_idx <= ranges[instance_index].end;
+
+	// debugPrintfEXT("%d - %d %d\n", instance_index, ranges[instance_index].start, ranges[instance_index].end);
+
+	bool draw = in_range && draw_clusters[draw_idx] > 0;
+	uint cluster_index = draw_clusters[draw_idx] - 1;
 
 	// draw = true;
 	// cluster_index = gl_GlobalInvocationID.x;

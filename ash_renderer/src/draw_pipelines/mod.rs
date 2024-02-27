@@ -10,6 +10,12 @@ pub mod expanding_compute_culled_mesh;
 pub mod indirect_tasks;
 pub mod stub;
 
+#[derive(Clone)]
+pub struct BufferRange {
+    start: u32,
+    end: u32,
+}
+
 pub trait DrawPipeline {
     fn draw(&self, frame_index: usize) -> vk::CommandBuffer;
 

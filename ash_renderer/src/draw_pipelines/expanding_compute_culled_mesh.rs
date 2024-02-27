@@ -36,9 +36,9 @@ use crate::{
 };
 
 use super::{
-    indirect_tasks::DrawMeshTasksIndirect, init_color_blend_attachment_states,
-    init_depth_state_create_info, init_multisample_state_create_info,
-    init_rasterization_statue_create_info, DrawPipeline,
+    init_color_blend_attachment_states, init_depth_state_create_info,
+    init_multisample_state_create_info, init_rasterization_statue_create_info, BufferRange,
+    DrawPipeline,
 };
 
 pub struct ExpandingComputeCulledMesh {
@@ -48,8 +48,9 @@ pub struct ExpandingComputeCulledMesh {
     screen: Option<ScreenData>,
     descriptor_pool: Arc<DescriptorPool>,
     core: Arc<Core>,
-    should_draw_buffer: Arc<TBuffer<u32>>,
+    cluster_draw_buffer: Arc<TBuffer<u32>>,
     indirect_task_buffer: Arc<TBuffer<vk::DrawMeshTasksIndirectCommandEXT>>,
+    range_buffer: Arc<TBuffer<BufferRange>>,
 }
 
 impl ExpandingComputeCulledMesh {
@@ -80,12 +81,12 @@ impl ExpandingComputeCulledMesh {
             "Should Draw Pipeline",
         );
 
-        let should_cull_buffer = TBuffer::new_filled(
+        let cluster_draw_buffer = TBuffer::new_filled(
             &core,
             allocator.clone(),
             graphics_queue,
             vk::BufferUsageFlags::STORAGE_BUFFER,
-            &vec![1; mesh_data.cluster_count as _],
+            &vec![1; (scene.instances.max(1) as u32 * mesh_data.cluster_count / 2) as _],
             "Should Cull Buffer",
         );
 
@@ -95,25 +96,36 @@ impl ExpandingComputeCulledMesh {
                 group_count_y: 1,
                 group_count_z: 1,
             };
-            scene.instances.min(1)
+            scene.instances.max(1)
         ];
 
-        let indirect_task_buffer: Arc<TBuffer<vk::DrawMeshTasksIndirectCommandEXT>> =
-            TBuffer::new_filled(
-                &core,
-                allocator.clone(),
-                graphics_queue,
-                vk::BufferUsageFlags::INDIRECT_BUFFER | vk::BufferUsageFlags::STORAGE_BUFFER,
-                &task_indirect_data,
-                "Indirect Task Buffer",
-            );
+        let indirect_task_buffer = TBuffer::new_filled(
+            &core,
+            allocator.clone(),
+            graphics_queue,
+            vk::BufferUsageFlags::INDIRECT_BUFFER | vk::BufferUsageFlags::STORAGE_BUFFER,
+            &task_indirect_data,
+            "Indirect Task Buffer",
+        );
+
+        let task_range_data = vec![BufferRange { start: 0, end: 0 }; scene.instances.max(1)];
+
+        let range_buffer = TBuffer::new_filled(
+            &core,
+            allocator.clone(),
+            graphics_queue,
+            vk::BufferUsageFlags::STORAGE_BUFFER,
+            &task_range_data,
+            "Indirect Range Buffer",
+        );
 
         let descriptor_sets = create_compute_culled_meshes_descriptor_sets(
             &core.device,
             &descriptor_pool,
             &ubo_layout,
-            &should_cull_buffer,
+            &cluster_draw_buffer,
             &indirect_task_buffer,
+            &range_buffer,
             &scene,
             &mesh_data,
             //&texture_image,
@@ -126,9 +138,10 @@ impl ExpandingComputeCulledMesh {
             screen: None,
             core,
             descriptor_pool,
-            should_draw_buffer: should_cull_buffer,
+            cluster_draw_buffer,
             should_draw_pipeline,
             indirect_task_buffer,
+            range_buffer,
         }
     }
 }
@@ -205,7 +218,19 @@ impl ScreenData {
 
             let descriptor_sets_to_bind = [*core_draw.descriptor_sets[i]];
 
-            let result_indices_buffer_barriers = [
+            // let compute_to_compute_barriers = [vk::BufferMemoryBarrier2::builder()
+            //     .buffer(core_draw.range_buffer.handle())
+            //     .src_access_mask(vk::AccessFlags2::SHADER_STORAGE_WRITE)
+            //     .dst_access_mask(vk::AccessFlags2::SHADER_STORAGE_READ)
+            //     .src_stage_mask(vk::PipelineStageFlags2::COMPUTE_SHADER)
+            //     .dst_stage_mask(vk::PipelineStageFlags2::COMPUTE_SHADER)
+            //     .size(vk::WHOLE_SIZE)
+            //     .build()];
+
+            // let compute_to_compute_dependency_info =
+            //     vk::DependencyInfo::builder().buffer_memory_barriers(&compute_to_compute_barriers);
+
+            let compute_to_task_barriers = [
                 vk::BufferMemoryBarrier2::builder()
                     .buffer(core_draw.indirect_task_buffer.handle())
                     .src_access_mask(vk::AccessFlags2::SHADER_STORAGE_WRITE)
@@ -215,7 +240,15 @@ impl ScreenData {
                     .size(vk::WHOLE_SIZE)
                     .build(),
                 vk::BufferMemoryBarrier2::builder()
-                    .buffer(core_draw.should_draw_buffer.handle())
+                    .buffer(core_draw.cluster_draw_buffer.handle())
+                    .src_access_mask(vk::AccessFlags2::SHADER_STORAGE_WRITE)
+                    .dst_access_mask(vk::AccessFlags2::SHADER_STORAGE_READ)
+                    .src_stage_mask(vk::PipelineStageFlags2::COMPUTE_SHADER)
+                    .dst_stage_mask(vk::PipelineStageFlags2::TASK_SHADER_EXT)
+                    .size(vk::WHOLE_SIZE)
+                    .build(),
+                vk::BufferMemoryBarrier2::builder()
+                    .buffer(core_draw.range_buffer.handle())
                     .src_access_mask(vk::AccessFlags2::SHADER_STORAGE_WRITE)
                     .dst_access_mask(vk::AccessFlags2::SHADER_STORAGE_READ)
                     .src_stage_mask(vk::PipelineStageFlags2::COMPUTE_SHADER)
@@ -224,10 +257,17 @@ impl ScreenData {
                     .build(),
             ];
 
-            let result_indices_dependency_info = vk::DependencyInfo::builder()
-                .buffer_memory_barriers(&result_indices_buffer_barriers);
+            let compute_to_task_dependency_info =
+                vk::DependencyInfo::builder().buffer_memory_barriers(&compute_to_task_barriers);
 
             unsafe {
+                // core_draw
+                //     .cluster_draw_buffer
+                //     .get_buffer()
+                //     .fill(command_buffer, 0);
+
+                // core_draw.range_buffer.get_buffer().fill(command_buffer, 0);
+
                 device.cmd_bind_pipeline(
                     command_buffer,
                     vk::PipelineBindPoint::COMPUTE,
@@ -243,10 +283,24 @@ impl ScreenData {
                     &[],
                 );
 
-                device.cmd_dispatch(command_buffer, 1, 1, 1);
+                // for i in 0..core_draw.indirect_task_buffer.len() {
+                //     println!("{i}");
+                //     // Push this instance's clusters to the buffer, then do the next one
+                //     device.cmd_dispatch_base(command_buffer, 0, i as _, 0, 1, 1, 1);
+
+                //     device
+                //         .cmd_pipeline_barrier2(command_buffer, &compute_to_compute_dependency_info);
+                // }
+
+                device.cmd_dispatch(
+                    command_buffer,
+                    1,
+                    core_draw.indirect_task_buffer.len() as _,
+                    1,
+                );
 
                 // Mark barrier between compute write and task read, and between indirect write and indirect read
-                device.cmd_pipeline_barrier2(command_buffer, &result_indices_dependency_info);
+                device.cmd_pipeline_barrier2(command_buffer, &compute_to_task_dependency_info);
 
                 device.cmd_begin_render_pass(
                     command_buffer,
@@ -290,13 +344,9 @@ impl ScreenData {
                     &[],
                 );
 
-                device.fn_mesh_shader.cmd_draw_mesh_tasks_indirect(
-                    command_buffer,
-                    core_draw.indirect_task_buffer.handle(),
-                    0,
-                    1,
-                    core_draw.indirect_task_buffer.stride() as _,
-                );
+                core_draw
+                    .indirect_task_buffer
+                    .draw_tasks_indirect(command_buffer);
 
                 device.cmd_end_render_pass(command_buffer);
 
@@ -354,26 +404,6 @@ fn create_graphics_pipeline(
             .stage(vk::ShaderStageFlags::FRAGMENT)
             .build(),
     ];
-
-    // let binding_description = VertexV3::get_binding_descriptions();
-    // let attribute_description = VertexV3::get_attribute_descriptions();
-
-    // let vertex_input_state_create_info = vk::PipelineVertexInputStateCreateInfo {
-    //     s_type: vk::StructureType::PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-    //     p_next: ptr::null(),
-    //     flags: vk::PipelineVertexInputStateCreateFlags::empty(),
-    //     vertex_attribute_description_count: attribute_description.len() as u32,
-    //     p_vertex_attribute_descriptions: attribute_description.as_ptr(),
-    //     vertex_binding_description_count: binding_description.len() as u32,
-    //     p_vertex_binding_descriptions: binding_description.as_ptr(),
-    // };
-    // let vertex_input_assembly_state_info = vk::PipelineInputAssemblyStateCreateInfo {
-    //     s_type: vk::StructureType::PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-    //     flags: vk::PipelineInputAssemblyStateCreateFlags::empty(),
-    //     p_next: ptr::null(),
-    //     primitive_restart_enable: vk::FALSE,
-    //     topology: vk::PrimitiveTopology::TRIANGLE_LIST,
-    // };
 
     let viewports = [vk::Viewport {
         x: 0.0,
@@ -434,22 +464,6 @@ fn create_graphics_pipeline(
         .render_pass(render_pass.handle())
         .build()];
 
-    //  {
-    //     stage_count: shader_stages.len() as u32,
-    //     p_stages: shader_stages.as_ptr(),
-    //     p_viewport_state: &viewport_state_create_info,
-    //     p_rasterization_state: &rasterization_statue_create_info,
-    //     p_multisample_state: &multisample_state_create_info,
-    //     p_depth_stencil_state: &depth_state_create_info,
-    //     p_color_blend_state: &color_blend_state,
-    //     layout: pipeline_layout,
-    //     render_pass,
-    //     subpass: 0,
-    //     base_pipeline_handle: vk::Pipeline::null(),
-    //     base_pipeline_index: -1,
-    //     ..Default::default()
-    // };
-
     let graphics_pipelines = unsafe {
         device
             .create_graphics_pipelines(
@@ -493,6 +507,9 @@ fn create_descriptor_set_layout(device: Arc<Device>) -> Arc<DescriptorSetLayout>
         DescriptorSetLayoutBinding::Storage {
             vis: vk::ShaderStageFlags::COMPUTE,
         },
+        DescriptorSetLayoutBinding::Storage {
+            vis: vk::ShaderStageFlags::COMPUTE | vk::ShaderStageFlags::TASK_EXT,
+        },
     ];
 
     Arc::new(DescriptorSetLayout::new(device, bindings))
@@ -502,8 +519,9 @@ fn create_compute_culled_meshes_descriptor_sets(
     device: &Arc<Device>,
     descriptor_pool: &Arc<DescriptorPool>,
     descriptor_set_layout: &Arc<DescriptorSetLayout>,
-    should_draw_buffer: &Arc<impl AsBuffer>,
-    indirect_data: &Arc<impl AsBuffer>,
+    cluster_draw_buffer: &Arc<impl AsBuffer>,
+    indirect_data_buffer: &Arc<impl AsBuffer>,
+    range_buffer: &Arc<impl AsBuffer>,
 
     scene: &Scene,
     mesh_data: &MeshDataBuffers,
@@ -538,7 +556,7 @@ fn create_compute_culled_meshes_descriptor_sets(
                         buf: scene.uniform_transform_buffer.buffer(),
                     },
                     DescriptorWriteData::Buffer {
-                        buf: should_draw_buffer.buffer(),
+                        buf: cluster_draw_buffer.buffer(),
                     },
                     DescriptorWriteData::Buffer {
                         buf: mesh_data.cluster_buffer.buffer(), //
@@ -553,7 +571,10 @@ fn create_compute_culled_meshes_descriptor_sets(
                         buf: mesh_data.vertex_buffer.buffer(), //
                     },
                     DescriptorWriteData::Buffer {
-                        buf: indirect_data.buffer(), //
+                        buf: indirect_data_buffer.buffer(), //
+                    },
+                    DescriptorWriteData::Buffer {
+                        buf: range_buffer.buffer(), //
                     },
                 ],
             )

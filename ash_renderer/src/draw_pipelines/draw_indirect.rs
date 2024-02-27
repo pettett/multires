@@ -63,12 +63,12 @@ impl DrawIndirect {
             ubo_layout.clone(),
         );
 
-        let instance_count = scene.uniform_transform_buffer.item_len();
+        let instance_count = scene.uniform_transform_buffer.len();
 
         let mut draw_indexed_commands = Vec::with_capacity(instance_count);
 
         draw_indexed_commands.push(vk::DrawIndexedIndirectCommand {
-            index_count: mesh_data.index_buffer.item_len() as _,
+            index_count: mesh_data.index_buffer.len() as _,
             instance_count: instance_count as _,
             first_index: 0,
             vertex_offset: 0,

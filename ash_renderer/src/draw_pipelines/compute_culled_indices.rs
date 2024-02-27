@@ -106,15 +106,15 @@ impl ComputeCulledIndices {
             "Result Indices Buffer",
         );
 
-        let instance_count = uniform_transform_buffer.item_len();
+        let instance_count = uniform_transform_buffer.len();
 
         let mut draw_indexed_commands = Vec::with_capacity(instance_count);
 
         for i in 0..instance_count {
             draw_indexed_commands.push(vk::DrawIndexedIndirectCommand {
-                index_count: mesh_data.meshlet_index_buffer.item_len() as _,
+                index_count: mesh_data.meshlet_index_buffer.len() as _,
                 instance_count: 1,
-                first_index: (mesh_data.meshlet_index_buffer.item_len() * i) as _,
+                first_index: (mesh_data.meshlet_index_buffer.len() * i) as _,
                 vertex_offset: 0,
                 first_instance: i as _,
             });
@@ -287,7 +287,7 @@ impl ScreenData {
                     &[],
                 );
 
-                for instance in 0..core_draw.draw_indexed_indirect_buffer.item_len() {
+                for instance in 0..core_draw.draw_indexed_indirect_buffer.len() {
                     device.cmd_bind_pipeline(
                         command_buffer,
                         vk::PipelineBindPoint::COMPUTE,
@@ -299,7 +299,7 @@ impl ScreenData {
                         0,
                         instance as _,
                         0,
-                        core_draw.should_cull_buffer.item_len() as _,
+                        core_draw.should_cull_buffer.len() as _,
                         1,
                         1,
                     );
@@ -318,7 +318,7 @@ impl ScreenData {
                         0,
                         instance as _,
                         0,
-                        core_draw.should_cull_buffer.item_len().div_ceil(16) as _,
+                        core_draw.should_cull_buffer.len().div_ceil(16) as _,
                         1,
                         1,
                     );
@@ -408,7 +408,7 @@ impl ScreenData {
                     command_buffer,
                     core_draw.draw_indexed_indirect_buffer.handle(),
                     0,
-                    core_draw.draw_indexed_indirect_buffer.item_len() as _,
+                    core_draw.draw_indexed_indirect_buffer.len() as _,
                     core_draw.draw_indexed_indirect_buffer.stride() as _,
                 );
                 // device.cmd_draw_indexed(
