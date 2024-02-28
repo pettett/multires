@@ -1,4 +1,5 @@
 pub mod app;
+pub mod benchmarker;
 pub mod draw_systems;
 pub mod fps_limiter;
 pub mod frame_measure;

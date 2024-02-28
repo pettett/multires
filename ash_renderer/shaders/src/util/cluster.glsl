@@ -75,25 +75,25 @@ float get_this_error(uint cluster_index, vec3 local_cam_pos) {
 // 				cluster_index :  // Perfect error, continue doing this
 // 				(error_cutoff < this_error ?
 // 					max(clusters[cluster_index].max_child_index, cluster_index)  : // Error is lower then ours, draw a
-// child if we have one 					clusters[cluster_index].parent1 == -1 ? cluster_index : clusters[cluster_index].parent1  //
-// Error is higher then ours, only need to draw the parent (parent1 > parent0)
+// child if we have one 					clusters[cluster_index].parent1 == -1 ? cluster_index :
+// clusters[cluster_index].parent1  // Error is higher then ours, only need to draw the parent (parent1 > parent0)
 // 				)
 // 			) ;
 
 // }
 
-// // bool can_draw(uint idx, uint idy){
+bool cluster_can_draw(uint cluster_index, uint instance_index, out vec3 local_cam_pos, out bool high_error) {
+	local_cam_pos = (models[instance_index].inv_model * vec4(ubo.camera_pos, 1.0)).xyz;
+	// Calculate if this cluster should be drawn:
+	// draw_error >= min(self.error, self.co-parent.error)
+	// draw_error < min(parent0.error, parent1.error)
+	float parent_error = get_parent_error(cluster_index, local_cam_pos);
+	float this_error = get_this_error(cluster_index, local_cam_pos);
 
-// // 	vec3 local_cam_pos = (models[idy].inv_model * vec4(ubo.camera_pos, 1.0)).xyz ;
-// // 	// Calculate if this cluster should be drawn:
-// // 	// draw_error >= max(self.error, self.co-parent.error)
-// // 	// draw_error < max(parent0.error, parent1.error)
+	float error = ubo.target_error * ubo.target_error * ubo.target_error;
 
-// // 	float this_error = get_this_error(idx, local_cam_pos);
-// // 	float parent_error = get_parent_error(idx, local_cam_pos);
+	high_error = error < this_error;
+	bool draw = error >= this_error && error < parent_error;
 
-// // 	float error = ubo.target_error * ubo.target_error ;
-
-// //     bool draw = error >= this_error && error < parent_error;
-// // 	return draw;
-// // }
+	return draw;
+}

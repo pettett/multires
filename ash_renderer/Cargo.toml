@@ -36,6 +36,7 @@ gpu-allocator = { version = "0.24.0", default-features = false, features = [
 ] }
 egui-winit-ash-integration = { version = "0.6.0" }
 anyhow.workspace = true
+chrono = "0.4"
 
 [build-dependencies]
 shaderc = { version = "0.8", optional = true }

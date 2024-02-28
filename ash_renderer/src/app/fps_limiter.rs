@@ -58,6 +58,10 @@ impl FPSMeasure {
     pub fn delta_time(&self) -> f32 {
         self.delta_time_nanos.last_sample() as f32 / NANOS_PER_SEC // time in second
     }
+
+    pub fn long_delta_time(&self) -> f32 {
+        self.delta_time_nanos.mean() as f32 / NANOS_PER_SEC // time in second
+    }
 }
 
 impl egui::Widget for &FPSMeasure {

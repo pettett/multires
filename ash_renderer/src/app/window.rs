@@ -65,7 +65,7 @@ impl ProgramProc {
                             vulkan_app.renderer().core.device.wait_device_idle();
                             vulkan_app
                                 .world
-                                .get_non_send_resource_mut::<Renderer>()
+                                .get_resource_mut::<Renderer>()
                                 .unwrap()
                                 .resize_framebuffer();
                         }

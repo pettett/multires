@@ -1,13 +1,13 @@
 use crate::{
     app::{
-        draw_systems::{draw_frame, tick_clocks, update_pipeline},
+        benchmarker::benchmark,
+        draw_systems::{draw_frame, draw_gui, start_gui, tick_clocks, update_pipeline},
         mesh_data::MeshDataBuffers,
         renderer::{Fragment, MeshDrawingPipelineType, Renderer},
         scene::{
             process_scene_events, CameraUniformBufferObject, ModelUniformBufferObject, SceneEvent,
         },
     },
-    components::benchmarker::benchmark,
     core::Core,
     draw_pipelines::indirect_tasks::MeshShaderMode,
     gui::allocator_visualiser_window::AllocatorVisualiserWindow,
@@ -62,7 +62,7 @@ pub struct App {
 
 impl App {
     pub fn renderer(&self) -> &Renderer {
-        self.world.get_non_send_resource().as_ref().unwrap()
+        self.world.get_resource().as_ref().unwrap()
     }
     pub fn scene(&self) -> &Scene {
         self.world.get_resource().as_ref().unwrap()
@@ -71,10 +71,9 @@ impl App {
     pub fn input(&mut self, event: &WindowEvent) -> bool {
         if self
             .world
-            .get_non_send_resource_mut::<Renderer>()
+            .get_non_send_resource_mut::<Gui>()
             .as_mut()
             .unwrap()
-            .gui
             .handle_event(event)
         {
             return true;
@@ -227,7 +226,12 @@ impl App {
             update_pipeline,
         ));
         let mut draw_schedule = Schedule::default();
-        draw_schedule.add_systems((tick_clocks, draw_frame));
+        draw_schedule.add_systems((
+            tick_clocks,
+            start_gui,
+            draw_gui.after(start_gui).before(draw_frame),
+            draw_frame,
+        ));
 
         let gui = Gui::new(
             device.clone(),
@@ -245,12 +249,12 @@ impl App {
             uniform_transform_buffer,
             uniform_camera,
             uniform_camera_buffers,
-            target_error: 0.5,
+            target_error: 0.1,
             freeze_pos: false,
             instances: 0,
         });
 
-        world.insert_non_send_resource(Renderer {
+        world.insert_resource(Renderer {
             fragment_colour: ShaderModule::new(
                 device.clone(),
                 include_bytes!("../../shaders/spv/frag_colour.frag"),
@@ -265,7 +269,6 @@ impl App {
             render_pass,
             draw_pipeline: Box::new(mesh_draw),
             descriptor_pool,
-            gui,
             windows: vec![Box::new(AllocatorVisualiserWindow::new(allocator.clone()))],
             mesh_mode: MeshShaderMode::TriangleList,
             allocator,
@@ -275,10 +278,12 @@ impl App {
             current_frame: 0,
             is_framebuffer_resized: false,
             app_info_open: true,
+            render_gui: true, // disable GUI during benchmarks
             core,
             screen,
             fragment: Fragment::Lit,
         });
+        world.insert_non_send_resource(gui);
         world.insert_resource(mesh);
         world.insert_resource(FPSMeasure::new());
 

@@ -9,12 +9,14 @@ pub mod utility;
 pub mod vertex;
 
 pub mod app;
-pub mod components;
 pub mod spiral;
 
 // Constants
 const WINDOW_TITLE: &'static str = "Multires Mesh Renderer";
 const TASK_GROUP_SIZE: u32 = 4;
+const CLEAR_COL: vk::ClearColorValue = vk::ClearColorValue {
+    float32: [0.0, 0.0, 0.0, 0.0],
+};
 
 pub trait VkHandle {
     type VkItem;

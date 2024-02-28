@@ -28,7 +28,7 @@ use crate::{
         ComputePipeline, GraphicsPipeline, ShaderModule,
     },
     vertex::Vertex,
-    VkHandle,
+    VkHandle, CLEAR_COL,
 };
 
 use super::{
@@ -209,9 +209,7 @@ impl ScreenData {
             let clear_values = [
                 vk::ClearValue {
                     // clear value for color buffer
-                    color: vk::ClearColorValue {
-                        float32: [0.0, 0.0, 0.0, 0.0],
-                    },
+                    color: CLEAR_COL,
                 },
                 vk::ClearValue {
                     // clear value for depth buffer

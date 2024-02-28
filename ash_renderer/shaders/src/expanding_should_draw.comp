@@ -6,7 +6,7 @@
 #extension GL_KHR_shader_subgroup_arithmetic : enable
 #extension GL_KHR_shader_subgroup_vote : enable
 #extension GL_EXT_control_flow_attributes : require
-// #extension GL_EXT_debug_printf : enable
+#extension GL_EXT_debug_printf : enable
 
 #include "structs\camera.glsl"
 #include "structs\cluster_data.glsl"
@@ -34,7 +34,7 @@ layout(binding = 2) readonly buffer Clusters {
 };
 
 layout(binding = 1) writeonly buffer ShouldDraw {
-	uint should_draw[];
+	uint draw_list[];
 };
 
 layout(binding = 3) readonly uniform CameraUniformBufferObject {
@@ -56,19 +56,10 @@ const float LARGE_ERROR = 100000000000000000.0;
 
 #include "util\cluster.glsl"
 
-bool can_draw(uint idx, uint idy, out bool high_error) {
-	vec3 local_cam_pos = (models[idy].inv_model * vec4(ubo.camera_pos, 1.0)).xyz;
+#define GROUP_SPHERE // Make culling check agaisnt the bounding sphere for the entire group. Allows early exit /
+					 // instance culling
 
-	float this_error = get_this_error(idx, local_cam_pos);
-	float parent_error = get_parent_error(idx, local_cam_pos);
-
-	float error = ubo.target_error * ubo.target_error;
-
-	high_error = this_error > error;
-	bool draw = error >= this_error && error < parent_error;
-
-	return draw;
-}
+#include "util\culling.glsl"
 
 const uint LOCAL_SIZE_X = 32;
 
@@ -99,8 +90,13 @@ void main() {
 	}
 	uint pos = start;
 
+	// Generate object space clipping planes
+	mat4 MVP = ubo.culling_view_proj * models[instance].model;
+
+	vec4 planes[6] = planes_from_mat(MVP);
+
 	// if (subgroupElect()) {
-	// 	debugPrintfEXT("Starting %d \n", instance);
+	// 	debugPrintfEXT("Starting %v4f \n", planes[0]);
 	// }
 
 	// only evaluate if we are within the bounds of the queue
@@ -117,7 +113,27 @@ void main() {
 			// should_draw[queue_head] = queue_head + 1;
 
 			bool high_error;
-			bool draw = can_draw(i, instance, high_error);
+			vec3 local_cam_pos;
+			bool can_draw = cluster_can_draw(i, instance, local_cam_pos, high_error);
+
+			// bool should_draw = sphere_inside_planes(planes, vec4(clusters[i].center, clusters[i].radius));
+
+			vec4 local_pos = vec4(clusters[i].center, 1);
+
+			// vec4 left_plane = vec4(0);
+			// [[unroll]] for (int i = 0; i < 4; i++) { left_plane[i] = MVP[i][3] + MVP[i][0]; }
+
+			bool should_draw = sphere_inside_planes(planes, vec4(clusters[i].center, clusters[i].radius));
+
+			// vec4 cpos = MVP * vec4(clusters[i].center, 1);
+
+			// bool should_draw = -cpos.w < cpos.x && cpos.x < cpos.w && //
+			// 				   -cpos.w < cpos.y && cpos.y < cpos.w && //
+			// 				   0 < cpos.z && cpos.z < cpos.w;
+
+			// bool should_draw = cluster_should_draw(i, instance, local_cam_pos);
+
+			bool draw = can_draw && should_draw;
 
 			// if (subgroupAll(draw)){
 			// 	// Can just use idx instead of exclusive add for
@@ -134,7 +150,7 @@ void main() {
 
 			if (draw) {
 				pos += subgroupExclusiveAdd(1);
-				should_draw[pos] = i + 1;
+				draw_list[pos] = i + 1;
 				pos += 1;
 			}
 
@@ -200,9 +216,9 @@ void main() {
 	// if (subgroupElect()){ debugPrintfEXT("\n"); }
 
 	if (subgroupElect()) {
-		for (int i = 0; i < TASK_GROUP_SIZE; i++) {
-			should_draw[pos + i] = 0;
-		}
+		// for (int i = 0; i < TASK_GROUP_SIZE; i++) {
+		// 	draw_list[pos + i] = 0;
+		// }
 
 		indirect_draw[instance].group_size_x = ((pos + 3 - start) / TASK_GROUP_SIZE);
 

@@ -8,26 +8,31 @@ use common_renderer::{
 use crate::{
     app::mesh_data::MeshDataBuffers,
     draw_pipelines::{
-        compute_culled_indices::ComputeCulledIndices, compute_culled_mesh::ComputeCulledMesh,
-        draw_indirect::DrawIndirect, expanding_compute_culled_mesh::ExpandingComputeCulledMesh,
-        indirect_tasks::IndirectTasks, stub::Stub, DrawPipeline,
+        compute_culled_indices::ComputeCulledIndices,
+        compute_culled_mesh::ComputeCulledMesh,
+        draw_indirect::DrawIndirect,
+        expanding_compute_culled_mesh::ExpandingComputeCulledMesh,
+        indirect_tasks::{IndirectTasks, MeshShaderMode},
+        stub::Stub,
+        DrawPipeline,
     },
+    gui::gui::Gui,
     utility::constants::MAX_FRAMES_IN_FLIGHT,
 };
 
 use super::{
+    benchmarker::Benchmarker,
     fps_limiter::FPSMeasure,
-    renderer::{MeshDrawingPipelineType, Renderer},
+    renderer::{Fragment, MeshDrawingPipelineType, Renderer},
     scene::{Scene, SceneEvent},
 };
 
 pub fn update_pipeline(
-    mut renderer: NonSendMut<Renderer>,
+    mut renderer: ResMut<Renderer>,
     scene: Res<Scene>,
     mut events: EventReader<MeshDrawingPipelineType>,
     mesh_data: Res<MeshDataBuffers>,
     transforms: Query<&Transform>,
-    mut commands: Commands,
 ) {
     let s = events.read().next();
 
@@ -42,7 +47,7 @@ pub fn update_pipeline(
 
     renderer.draw_pipeline = Box::new(Stub);
 
-    let mut draw_pipeline: Box<dyn DrawPipeline> = match s {
+    let mut draw_pipeline: Box<dyn DrawPipeline + Send + Sync> = match s {
         MeshDrawingPipelineType::IndirectTasks => Box::new(IndirectTasks::new(
             renderer.core.clone(),
             &renderer,
@@ -109,15 +114,143 @@ pub fn tick_clocks(mut time: ResMut<Time>, mut fps: ResMut<FPSMeasure>) {
     fps.tick_frame();
 }
 
+pub fn start_gui(mut gui: NonSendMut<Gui>, renderer: Res<Renderer>) {
+    if renderer.render_gui {
+        gui.start_draw();
+    }
+}
+
+pub fn draw_gui(
+    gui: NonSendMut<Gui>,
+    mut renderer: ResMut<Renderer>,
+    mut scene: ResMut<Scene>,
+    mut scene_events: EventWriter<SceneEvent>,
+    mut draw_events: EventWriter<MeshDrawingPipelineType>,
+    fps: Res<FPSMeasure>,
+    mut commands: Commands,
+) {
+    if !renderer.render_gui {
+        return;
+    }
+
+    let mut add_more = false;
+    let mut app_info_open = renderer.app_info_open;
+
+    let ctx = &gui.draw();
+
+    for w in &mut renderer.windows {
+        w.draw(ctx);
+    }
+
+    egui::Window::new("App Config")
+        .open(&mut app_info_open)
+        .show(ctx, |ui| {
+            {
+                ui.checkbox(&mut scene.freeze_pos, "Freeze");
+                ui.add(egui::Slider::new(&mut scene.target_error, 0.0..=1.0).text("Target Error"));
+            }
+
+            ui.add(fps.as_ref());
+
+            ui.label(format!("Current Pipeline: {:?}", renderer.current_pipeline));
+
+            ui.add_enabled_ui(renderer.core.device.features.mesh_shader, |ui| {
+                if ui.button("Indirect Tasks").clicked() {
+                    draw_events.send(MeshDrawingPipelineType::IndirectTasks)
+                }
+            });
+
+            // if ui.button("Compute Culled Mesh").clicked() {
+            //     draw_events.send(MeshDrawingPipelineType::ComputeCulledMesh)
+            // }
+
+            if ui.button("Expanding Compute Culled Mesh").clicked() {
+                draw_events.send(MeshDrawingPipelineType::ExpandingComputeCulledMesh)
+            }
+
+            if ui.button("Compute Culled Indices").clicked() {
+                draw_events.send(MeshDrawingPipelineType::ComputeCulledIndices)
+            }
+
+            if ui.button("Draw Full Res").clicked() {
+                draw_events.send(MeshDrawingPipelineType::DrawIndirect)
+            }
+
+            if ui.button("Add More Instances").clicked() {
+                add_more = true;
+            }
+
+            egui::ComboBox::from_label("Cluster Tri Encoding")
+                .selected_text(format!("{:?}", renderer.mesh_mode))
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(
+                        &mut renderer.mesh_mode,
+                        MeshShaderMode::TriangleList,
+                        "Triangle List",
+                    );
+                    ui.selectable_value(
+                        &mut renderer.mesh_mode,
+                        MeshShaderMode::TriangleStrip,
+                        "Triangle Strip",
+                    );
+                });
+
+            egui::ComboBox::from_label("Fragment")
+                .selected_text(format!("{:?}", renderer.fragment))
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut renderer.fragment, Fragment::Lit, "Lit");
+                    ui.selectable_value(
+                        &mut renderer.fragment,
+                        Fragment::VertexColour,
+                        "Vertex Colour",
+                    );
+                });
+
+            if ui.checkbox(&mut renderer.query, "Enable Queries").clicked() {
+                draw_events.send(renderer.current_pipeline);
+            }
+
+            if ui.button("Refresh").clicked() {
+                draw_events.send(renderer.current_pipeline);
+            }
+
+            if ui.button("Begin Benchmarking").clicked() {
+                // Refresh render pipeline
+                commands.insert_resource(Benchmarker::new(
+                    glam::Vec3A::Z * 10.0,
+                    glam::Vec3A::Z * 500.0,
+                    5.0,
+                ))
+            }
+
+            if renderer.query {
+                renderer.draw_pipeline.stats_gui(ui, 0);
+            }
+        });
+
+    egui::TopBottomPanel::top("test").show(ctx, |ui| {
+        egui::menu::bar(ui, |ui| {
+            for w in &mut renderer.windows {
+                let (open, name) = w.state();
+                ui.checkbox(open, name);
+            }
+            ui.checkbox(&mut app_info_open, "App Info");
+        });
+    });
+
+    renderer.app_info_open = app_info_open;
+
+    if add_more {
+        scene_events.send(SceneEvent::AddInstances(50));
+    }
+}
+
 pub fn draw_frame(
-    mut renderer: NonSendMut<Renderer>,
+    mut renderer: ResMut<Renderer>,
     mut scene: ResMut<Scene>,
     mut camera: Query<(&mut Camera, &Transform)>,
-    scene_events: EventWriter<SceneEvent>,
-    draw_events: EventWriter<MeshDrawingPipelineType>,
-    fps: Res<FPSMeasure>,
+    mut gui: NonSendMut<Gui>,
     mesh_data: Res<MeshDataBuffers>,
-    mut commands: Commands,
 ) {
     let wait_fences = [renderer.sync_objects.in_flight_fences[renderer.current_frame]];
 
@@ -143,7 +276,7 @@ pub fn draw_frame(
             Ok(image_index) => image_index,
             Err(vk_result) => match vk_result {
                 vk::Result::ERROR_OUT_OF_DATE_KHR => {
-                    renderer.recreate_swapchain(&scene, &mesh_data, &mut cam);
+                    renderer.recreate_swapchain(&scene, &mesh_data, &mut gui, &mut cam);
                     return;
                 }
                 _ => panic!("Failed to acquire Swap Chain Image!"),
@@ -164,17 +297,22 @@ pub fn draw_frame(
     let signal_semaphores =
         [renderer.sync_objects.render_finished_semaphores[renderer.current_frame]];
 
-    let ui_cmd = renderer.draw_gui(
-        &mut scene,
-        image_index as usize,
-        scene_events,
-        draw_events,
-        &fps,
-        commands,
-    );
+    let draw_cmd = renderer.draw_pipeline.draw(image_index as usize);
+
+    let temp1;
+    let temp2;
+
+    let command_buffers = if renderer.render_gui {
+        let ui_cmd = gui.finish_draw(image_index as usize);
+        temp1 = [draw_cmd, ui_cmd];
+        &temp1[..]
+    } else {
+        temp2 = [draw_cmd];
+        &temp2
+    };
 
     let submit_infos = [vk::SubmitInfo::builder()
-        .command_buffers(&[renderer.draw_pipeline.draw(image_index as usize), ui_cmd])
+        .command_buffers(command_buffers)
         .wait_dst_stage_mask(&wait_stages)
         .wait_semaphores(&wait_semaphores)
         .signal_semaphores(&signal_semaphores)
@@ -223,7 +361,7 @@ pub fn draw_frame(
     };
     if is_resized || is_sub_optimal {
         renderer.is_framebuffer_resized = false;
-        renderer.recreate_swapchain(&scene, &mesh_data, &mut cam);
+        renderer.recreate_swapchain(&scene, &mesh_data, &mut gui, &mut cam);
     }
 
     renderer.current_frame = (renderer.current_frame + 1) % MAX_FRAMES_IN_FLIGHT;

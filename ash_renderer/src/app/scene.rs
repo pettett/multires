@@ -84,7 +84,7 @@ impl Scene {
 
 pub fn process_scene_events(
     mut scene: ResMut<Scene>,
-    renderer: NonSend<Renderer>,
+    renderer: Res<Renderer>,
     mut commands: Commands,
     mut event_read: EventReader<SceneEvent>,
     mut draw_write: EventWriter<MeshDrawingPipelineType>,
@@ -113,10 +113,6 @@ pub fn process_scene_events(
                     commands.entity(e).despawn()
                 }
                 scene.instances = 0;
-
-                commands.add(|w: &mut World| {
-                    w.send_event(SceneEvent::AddInstances(50));
-                });
             }
             SceneEvent::UpdateInstanceBuffers => {
                 let mut uniform_transforms = Vec::with_capacity(scene.instances);

@@ -13,12 +13,14 @@ use crate::utility::{
 };
 
 use super::gpu_allocator::GpuAllocator;
+use bevy_ecs::prelude::*;
 
 pub struct Gui {
     device: Arc<Device>,
     window: Arc<winit::window::Window>,
     integration: egui_winit_ash_integration::Integration<GpuAllocator>,
     ui_command_buffers: CommandBufferGroup,
+    in_frame: bool,
 }
 
 impl Gui {
@@ -55,14 +57,26 @@ impl Gui {
             integration,
             window,
             ui_command_buffers,
+            in_frame: false,
         }
     }
 
-    pub fn draw(
-        &mut self,
-        image_index: usize,
-        draw_windows: impl FnOnce(&egui::Context),
-    ) -> vk::CommandBuffer {
+    pub fn start_draw(&mut self) {
+        self.integration.begin_frame(&self.window);
+        self.in_frame = true;
+    }
+
+    pub fn draw(&self) -> egui::Context {
+        assert!(self.in_frame);
+        self.integration.context()
+    }
+
+    pub fn finish_draw(&mut self, image_index: usize) -> vk::CommandBuffer {
+        let output = self.integration.end_frame(&self.window);
+        self.in_frame = false;
+
+        let clipped_meshes = self.integration.context().tessellate(output.shapes);
+
         let cmd = self.ui_command_buffers[image_index];
 
         let command_buffer_begin_info = vk::CommandBufferBeginInfo::builder()
@@ -74,14 +88,6 @@ impl Gui {
                 .expect("Failed to begin recording Command Buffer at beginning!")
         };
 
-        // //FIXME: this can be offloaded to a different thread
-        self.integration.begin_frame(&self.window);
-
-        draw_windows(&self.integration.context());
-
-        let output = self.integration.end_frame(&self.window);
-
-        let clipped_meshes = self.integration.context().tessellate(output.shapes);
         self.integration
             .paint(cmd, image_index, clipped_meshes, output.textures_delta);
 
