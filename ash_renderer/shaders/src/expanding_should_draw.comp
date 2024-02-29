@@ -69,10 +69,13 @@ layout(local_size_x = LOCAL_SIZE_X, local_size_y = 1, local_size_z = 1) in;
 const uint QUEUE_SIZE = 5000;
 
 const uint STARTING = 32;
-
+// Use half sized types due to limited shared storage space
 shared uint16_t[QUEUE_SIZE] queue;
 shared uint16_t[QUEUE_SIZE] to_draw;
 
+// This algorithm works by exploring the bag starting from the root vertices. If a cluster cannot be drawn,
+// its children are appended to the queue and every iteration of the core loop grabs that many items out of the queue
+// for analysis
 void main() {
 	uint idx = gl_GlobalInvocationID.x;
 	uint instance = gl_WorkGroupID.y;

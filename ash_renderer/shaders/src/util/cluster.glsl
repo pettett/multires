@@ -11,6 +11,7 @@ uint max_cluster() {
 #endif
 }
 
+// Calculate the error of a single cluster based on the local camera position.
 float cluster_error(uint idx, vec3 local_cam_pos) {
 	bool out_of_range = idx >= max_cluster();
 	if (out_of_range) {
@@ -23,16 +24,16 @@ float cluster_error(uint idx, vec3 local_cam_pos) {
 		// float radius = length((models[idy].model * vec4(normalize(vec3(1)) * clusters[idx].radius, 0.0)).xyz);
 		float error = clusters[idx].error;
 
-		// vec3 vec = center - local_cam_pos;
-		float inv_center_distance = distance(center, local_cam_pos); // (dot(vec, vec));
+		vec3 dist_vec = center - local_cam_pos;
+		float sqr_center_distance = (dot(dist_vec, dist_vec));
 
-		float err_radius = error + radius;
+		float err_radius = error * radius;
 
-		return (err_radius * err_radius) * inversesqrt(inv_center_distance);
+		return (err_radius * err_radius) / sqr_center_distance;
 		// return clusters[idx].error;
 	}
 }
-
+// Generate the parent error by taking the minimum or maximum of the cluster's parent error.
 float get_parent_error(uint cluster_index, vec3 local_cam_pos) {
 	// lots of zeros - clusters at the end are always avaliable to draw
 	float parent_error = LARGE_ERROR;
@@ -49,7 +50,7 @@ float get_parent_error(uint cluster_index, vec3 local_cam_pos) {
 	}
 	return parent_error;
 }
-
+// Generate this error by looking at the cluster error and its co parents error
 float get_this_error(uint cluster_index, vec3 local_cam_pos) {
 	// lots of negative zeros - clusters at the base are always avaliable to draw
 	float this_error = -LARGE_ERROR;
@@ -85,6 +86,9 @@ float get_this_error(uint cluster_index, vec3 local_cam_pos) {
 
 // }
 
+// Test if this cluster can draw based on its own error, and the error of its parent
+// outputs the local camera position for further use and And high error if the reason that this cluster cannot be drawn
+// is because its error is too high.
 bool cluster_can_draw(uint cluster_index, uint instance_index, out vec3 local_cam_pos, out bool high_error) {
 	local_cam_pos = (models[instance_index].inv_model * vec4(ubo.camera_pos, 1.0)).xyz;
 	// Calculate if this cluster should be drawn:

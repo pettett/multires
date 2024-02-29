@@ -1,5 +1,6 @@
 #extension GL_EXT_control_flow_attributes : require
 
+// Calculates the frustum and planes from a projection matrix.
 vec4[6] planes_from_mat(const mat4 mat) {
 	vec4 planes[6];
 
@@ -15,11 +16,11 @@ vec4[6] planes_from_mat(const mat4 mat) {
 
 	return planes;
 }
-
+// Calculate the distance from a plane to a point
 float dist_to_plane(const vec4 plane, const vec3 point) {
 	return dot(plane.xyz, point) + plane.w;
 }
-
+// Is a sphere within a set of six planes Based on the distance to each plane.
 bool sphere_inside_planes(const vec4 planes[6], const vec4 sphere) {
 	bool inside = true;
 	[[unroll]] for (int i = 0; i < 6; i++) { inside = inside && (-sphere.w < dist_to_plane(planes[i], sphere.xyz)); }
