@@ -8,7 +8,7 @@ use crate::{
         extensions::Extensions,
         instance::Instance,
         pooled::command_pool::CommandPool,
-        structures::*,
+        queue_family_indices::*,
     },
     VkHandle, TASK_GROUP_SIZE, WINDOW_TITLE,
 };

@@ -13,9 +13,9 @@ pub mod spiral;
 
 // Constants
 const WINDOW_TITLE: &'static str = "Multires Mesh Renderer";
-const TASK_GROUP_SIZE: u32 = 4;
+const TASK_GROUP_SIZE: u32 = 32;
 const CLEAR_COL: vk::ClearColorValue = vk::ClearColorValue {
-    float32: [0.0, 0.0, 0.0, 0.0],
+    float32: [1.0, 1.0, 1.0, 1.0],
 };
 
 pub trait VkHandle {

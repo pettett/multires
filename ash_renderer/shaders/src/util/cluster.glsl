@@ -23,9 +23,12 @@ float cluster_error(uint idx, vec3 local_cam_pos) {
 		// float radius = length((models[idy].model * vec4(normalize(vec3(1)) * clusters[idx].radius, 0.0)).xyz);
 		float error = clusters[idx].error;
 
-		vec3 vec = center - local_cam_pos;
-		float inv_center_distance = 1 / (dot(vec, vec));
-		return (error * error * radius * radius) * inv_center_distance;
+		// vec3 vec = center - local_cam_pos;
+		float inv_center_distance = distance(center, local_cam_pos); // (dot(vec, vec));
+
+		float err_radius = error + radius;
+
+		return (err_radius * err_radius) * inversesqrt(inv_center_distance);
 		// return clusters[idx].error;
 	}
 }

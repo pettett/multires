@@ -2,6 +2,7 @@ use std::{
     ffi::CString,
     mem,
     sync::{Arc, Mutex},
+    time,
 };
 
 use ash::vk::{self};
@@ -12,7 +13,8 @@ use gpu_allocator::vulkan::Allocator;
 
 use crate::{
     app::{
-        mesh_data::MeshDataBuffers,
+        frame_measure::RollingMeasure,
+        mesh_data::MeshData,
         renderer::Renderer,
         scene::{ModelUniformBufferObject, Scene},
     },
@@ -28,6 +30,7 @@ use crate::{
                 DescriptorPool, DescriptorSet, DescriptorSetLayout, DescriptorSetLayoutBinding,
                 DescriptorWriteData,
             },
+            query_pool::QueryPool,
         },
         render_pass::RenderPass,
         ComputePipeline, GraphicsPipeline, ShaderModule,
@@ -36,9 +39,9 @@ use crate::{
 };
 
 use super::{
-    init_color_blend_attachment_states, init_depth_state_create_info,
-    init_multisample_state_create_info, init_rasterization_statue_create_info, BufferRange,
-    DrawPipeline,
+    indirect_tasks::MeshInvocationsQueryResults, init_color_blend_attachment_states,
+    init_depth_state_create_info, init_multisample_state_create_info,
+    init_rasterization_statue_create_info, BufferRange, DrawPipeline,
 };
 
 pub struct ExpandingComputeCulledMesh {
@@ -51,6 +54,11 @@ pub struct ExpandingComputeCulledMesh {
     cluster_draw_buffer: Arc<TBuffer<u32>>,
     indirect_task_buffer: Arc<TBuffer<vk::DrawMeshTasksIndirectCommandEXT>>,
     range_buffer: Arc<TBuffer<BufferRange>>,
+
+    last_sample: time::Instant,
+    mesh_invocations: RollingMeasure<u32, 60>,
+    query_pool: Arc<QueryPool<MeshInvocationsQueryResults>>,
+    query: bool,
 }
 
 impl ExpandingComputeCulledMesh {
@@ -59,7 +67,7 @@ impl ExpandingComputeCulledMesh {
         renderer: &Renderer,
         screen: &Screen,
         scene: &Scene,
-        mesh_data: &MeshDataBuffers,
+        mesh_data: &MeshData,
         allocator: Arc<Mutex<Allocator>>,
         render_pass: &RenderPass,
         graphics_queue: vk::Queue,
@@ -108,7 +116,7 @@ impl ExpandingComputeCulledMesh {
             "Indirect Task Buffer",
         );
 
-        let task_range_data = vec![BufferRange { start: 0, end: 0 }; scene.instances.max(1)];
+        let task_range_data = vec![BufferRange { start: 0, end: 0 }; scene.instances + 1];
 
         let range_buffer = TBuffer::new_filled(
             &core,
@@ -132,6 +140,8 @@ impl ExpandingComputeCulledMesh {
             screen.swapchain().images.len(),
         );
 
+        let query_pool = QueryPool::new(core.device.clone(), 1);
+
         Self {
             graphics_pipeline,
             descriptor_sets,
@@ -142,6 +152,11 @@ impl ExpandingComputeCulledMesh {
             should_draw_pipeline,
             indirect_task_buffer,
             range_buffer,
+
+            query_pool,
+            query: renderer.query,
+            last_sample: time::Instant::now(),
+            mesh_invocations: Default::default(),
         }
     }
 }
@@ -159,7 +174,20 @@ impl DrawPipeline for ExpandingComputeCulledMesh {
         ));
     }
 
-    fn stats_gui(&mut self, _ui: &mut egui::Ui, _image_index: usize) {}
+    fn stats_gui(&mut self, ui: &mut egui::Ui, image_index: usize) {
+        if image_index == 0 && self.last_sample.elapsed() > time::Duration::from_secs_f32(0.01) {
+            if let Some(results) = self.query_pool.get_results(0) {
+                assert!(results.avail > 0);
+
+                self.mesh_invocations.tick(results.mesh);
+            }
+
+            self.last_sample = time::Instant::now();
+        }
+
+        self.mesh_invocations.gui("Mesh Invocations", ui);
+        //self.task_invocations.gui("Task Invocations", ui);
+    }
 }
 
 struct ScreenData {
@@ -264,7 +292,13 @@ impl ScreenData {
                 //     .get_buffer()
                 //     .fill(command_buffer, 0);
 
-                // core_draw.range_buffer.get_buffer().fill(command_buffer, 0);
+                let q = i as _;
+                let query = core_draw.query && q == 0;
+                if query {
+                    core_draw.query_pool.reset(command_buffer, q);
+                }
+
+                core_draw.range_buffer.get_buffer().fill(command_buffer, 0);
 
                 device.cmd_bind_pipeline(
                     command_buffer,
@@ -332,19 +366,26 @@ impl ScreenData {
                     vk::PipelineBindPoint::GRAPHICS,
                     core_draw.graphics_pipeline.handle(),
                 );
+                {
+                    let _qry = if query {
+                        Some(core_draw.query_pool.begin_query(command_buffer, q))
+                    } else {
+                        None
+                    };
 
-                device.cmd_bind_descriptor_sets(
-                    command_buffer,
-                    vk::PipelineBindPoint::GRAPHICS,
-                    core_draw.graphics_pipeline.layout(),
-                    0,
-                    &descriptor_sets_to_bind,
-                    &[],
-                );
+                    device.cmd_bind_descriptor_sets(
+                        command_buffer,
+                        vk::PipelineBindPoint::GRAPHICS,
+                        core_draw.graphics_pipeline.layout(),
+                        0,
+                        &descriptor_sets_to_bind,
+                        &[],
+                    );
 
-                core_draw
-                    .indirect_task_buffer
-                    .draw_tasks_indirect(command_buffer);
+                    core_draw
+                        .indirect_task_buffer
+                        .draw_tasks_indirect(command_buffer);
+                }
 
                 device.cmd_end_render_pass(command_buffer);
 
@@ -522,7 +563,7 @@ fn create_compute_culled_meshes_descriptor_sets(
     range_buffer: &Arc<impl AsBuffer>,
 
     scene: &Scene,
-    mesh_data: &MeshDataBuffers,
+    mesh_data: &MeshData,
     swapchain_images_size: usize,
 ) -> Vec<DescriptorSet> {
     let mut layouts: Vec<vk::DescriptorSetLayout> = vec![];

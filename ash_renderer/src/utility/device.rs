@@ -2,13 +2,12 @@ use std::{ffi, sync::Arc};
 
 use ash::vk;
 
-
 use crate::VkHandle;
 
 use super::{
     instance::Instance,
     physical_device::{DeviceFeatureSet, PhysicalDevice},
-    structures::QueueFamilyIndices,
+    queue_family_indices::QueueFamilyIndices,
     surface::Surface,
 };
 

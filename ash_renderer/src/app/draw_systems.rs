@@ -6,7 +6,7 @@ use common_renderer::{
 };
 
 use crate::{
-    app::mesh_data::MeshDataBuffers,
+    app::mesh_data::MeshData,
     draw_pipelines::{
         compute_culled_indices::ComputeCulledIndices,
         compute_culled_mesh::ComputeCulledMesh,
@@ -31,7 +31,7 @@ pub fn update_pipeline(
     mut renderer: ResMut<Renderer>,
     scene: Res<Scene>,
     mut events: EventReader<MeshDrawingPipelineType>,
-    mesh_data: Res<MeshDataBuffers>,
+    mesh_data: Res<MeshData>,
     transforms: Query<&Transform>,
 ) {
     let s = events.read().next();
@@ -124,6 +124,7 @@ pub fn draw_gui(
     gui: NonSendMut<Gui>,
     mut renderer: ResMut<Renderer>,
     mut scene: ResMut<Scene>,
+    mut camera: Query<(&Camera, &mut Transform)>,
     mut scene_events: EventWriter<SceneEvent>,
     mut draw_events: EventWriter<MeshDrawingPipelineType>,
     fps: Res<FPSMeasure>,
@@ -133,7 +134,6 @@ pub fn draw_gui(
         return;
     }
 
-    let mut add_more = false;
     let mut app_info_open = renderer.app_info_open;
 
     let ctx = &gui.draw();
@@ -142,12 +142,15 @@ pub fn draw_gui(
         w.draw(ctx);
     }
 
+    let bench_end_pos = glam::Vec3A::Z * 500.0;
+
     egui::Window::new("App Config")
         .open(&mut app_info_open)
         .show(ctx, |ui| {
             {
                 ui.checkbox(&mut scene.freeze_pos, "Freeze");
-                ui.add(egui::Slider::new(&mut scene.target_error, 0.0..=1.0).text("Target Error"));
+                ui.add(egui::Slider::new(&mut scene.target_error, 0.0..=2.0).text("Target Error"));
+                ui.add(egui::Slider::new(&mut scene.dist_pow, 0.001..=3.0).text("Distance Power"));
             }
 
             ui.add(fps.as_ref());
@@ -176,8 +179,20 @@ pub fn draw_gui(
                 draw_events.send(MeshDrawingPipelineType::DrawIndirect)
             }
 
-            if ui.button("Add More Instances").clicked() {
-                add_more = true;
+            if ui.button("Add 50 More Instances").clicked() {
+                scene_events.send(SceneEvent::AddInstances(50));
+            }
+            if ui.button("Add 200 More Instances").clicked() {
+                scene_events.send(SceneEvent::AddInstances(200));
+            }
+            if ui.button("Reset Scene").clicked() {
+                scene_events.send(SceneEvent::ResetScene);
+            }
+            if ui.button("Camera to benchmark end").clicked() {
+                let (cam, mut trans) = camera.single_mut();
+
+                trans.set_pos(bench_end_pos);
+                trans.look_at(glam::Vec3A::ZERO);
             }
 
             egui::ComboBox::from_label("Cluster Tri Encoding")
@@ -218,7 +233,7 @@ pub fn draw_gui(
                 // Refresh render pipeline
                 commands.insert_resource(Benchmarker::new(
                     glam::Vec3A::Z * 10.0,
-                    glam::Vec3A::Z * 500.0,
+                    bench_end_pos,
                     5.0,
                 ))
             }
@@ -239,10 +254,6 @@ pub fn draw_gui(
     });
 
     renderer.app_info_open = app_info_open;
-
-    if add_more {
-        scene_events.send(SceneEvent::AddInstances(50));
-    }
 }
 
 pub fn draw_frame(
@@ -250,7 +261,7 @@ pub fn draw_frame(
     mut scene: ResMut<Scene>,
     mut camera: Query<(&mut Camera, &Transform)>,
     mut gui: NonSendMut<Gui>,
-    mesh_data: Res<MeshDataBuffers>,
+    mesh_data: Res<MeshData>,
 ) {
     let wait_fences = [renderer.sync_objects.in_flight_fences[renderer.current_frame]];
 

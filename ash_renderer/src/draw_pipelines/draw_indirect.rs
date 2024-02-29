@@ -11,7 +11,7 @@ use gpu_allocator::vulkan::Allocator;
 
 use crate::{
     app::{
-        mesh_data::MeshDataBuffers,
+        mesh_data::MeshData,
         renderer::Renderer,
         scene::{ModelUniformBufferObject, Scene},
     },
@@ -53,7 +53,7 @@ pub struct DrawIndirect {
 }
 
 impl DrawIndirect {
-    pub fn new(renderer: &Renderer, mesh_data: &MeshDataBuffers, scene: &Scene) -> Self {
+    pub fn new(renderer: &Renderer, mesh_data: &MeshData, scene: &Scene) -> Self {
         let ubo_layout = create_descriptor_set_layout(renderer.core.device.clone());
 
         let graphics_pipeline = create_graphics_pipeline(

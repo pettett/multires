@@ -6,7 +6,7 @@ use crate::VkHandle;
 
 use super::{
     device::Device, macros::vk_handle_wrapper, physical_device::PhysicalDevice,
-    structures::QueueFamilyIndices, surface::Surface,
+    queue_family_indices::QueueFamilyIndices, surface::Surface,
 };
 pub struct SwapChainSupportDetail {
     pub capabilities: vk::SurfaceCapabilitiesKHR,

@@ -13,7 +13,7 @@ use gpu_allocator::vulkan::Allocator;
 
 use crate::{
     app::{
-        frame_measure::RollingMeasure, mesh_data::MeshDataBuffers, renderer::Renderer,
+        frame_measure::RollingMeasure, mesh_data::MeshData, renderer::Renderer,
         scene::ModelUniformBufferObject,
     },
     core::Core,
@@ -28,7 +28,7 @@ use crate::{
                 DescriptorPool, DescriptorSet, DescriptorSetLayout, DescriptorSetLayoutBinding,
                 DescriptorWriteData,
             },
-            query_pool::QueryPool,
+            query_pool::{QueryPool, QueryResult},
         },
         render_pass::RenderPass,
         GraphicsPipeline, ShaderModule,
@@ -41,10 +41,15 @@ use super::{
     init_multisample_state_create_info, init_rasterization_statue_create_info, DrawPipeline,
 };
 #[derive(bytemuck::Zeroable, Copy, Clone)]
-pub struct IndirectTasksQueryResults {
-    task: u32,
-    mesh: u32,
-    avail: u32,
+pub struct MeshInvocationsQueryResults {
+    pub mesh: u32,
+    pub avail: u32,
+}
+
+impl QueryResult for MeshInvocationsQueryResults {
+    fn flags() -> vk::QueryPipelineStatisticFlags {
+        vk::QueryPipelineStatisticFlags::MESH_SHADER_INVOCATIONS_EXT
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -64,8 +69,8 @@ pub struct IndirectTasks {
     // Evaluation data
     last_sample: time::Instant,
     mesh_invocations: RollingMeasure<u32, 60>,
-    task_invocations: RollingMeasure<u32, 60>,
-    query_pool: Arc<QueryPool<IndirectTasksQueryResults>>,
+    //task_invocations: RollingMeasure<u32, 60>,
+    query_pool: Arc<QueryPool<MeshInvocationsQueryResults>>,
     query: bool,
 }
 
@@ -75,7 +80,7 @@ impl IndirectTasks {
         renderer: &Renderer,
         screen: &Screen,
         transforms: Query<&Transform>,
-        mesh_data: &MeshDataBuffers,
+        mesh_data: &MeshData,
         uniform_transform_buffer: Arc<TBuffer<ModelUniformBufferObject>>,
         uniform_camera_buffers: &[Arc<impl AsBuffer>],
     ) -> Self {
@@ -138,7 +143,7 @@ impl IndirectTasks {
             core,
             last_sample: time::Instant::now(),
             mesh_invocations: Default::default(),
-            task_invocations: Default::default(),
+            //task_invocations: Default::default(),
         }
     }
 }
@@ -163,14 +168,13 @@ impl DrawPipeline for IndirectTasks {
                 assert!(results.avail > 0);
 
                 self.mesh_invocations.tick(results.mesh);
-                self.task_invocations.tick(results.task);
             }
 
             self.last_sample = time::Instant::now();
         }
 
         self.mesh_invocations.gui("Mesh Invocations", ui);
-        self.task_invocations.gui("Task Invocations", ui);
+        //self.task_invocations.gui("Task Invocations", ui);
     }
 }
 
@@ -232,6 +236,7 @@ impl ScreenData {
                 if query {
                     core_draw.query_pool.reset(command_buffer, q);
                 }
+
                 device.cmd_begin_render_pass(
                     command_buffer,
                     &render_pass_begin_info,
@@ -260,38 +265,35 @@ impl ScreenData {
                 );
 
                 // ---------- Pipeline bound, use queries
-                if query {
-                    device.cmd_begin_query(
+                {
+                    let _qry = if query {
+                        Some(core_draw.query_pool.begin_query(command_buffer, q))
+                    } else {
+                        None
+                    };
+
+                    device.cmd_bind_pipeline(
                         command_buffer,
-                        core_draw.query_pool.handle(),
-                        q,
-                        vk::QueryControlFlags::empty(),
+                        vk::PipelineBindPoint::GRAPHICS,
+                        core_draw.graphics_pipeline.handle(),
                     );
+
+                    let descriptor_sets_to_bind = [core_draw.descriptor_sets[i].handle()];
+
+                    device.cmd_bind_descriptor_sets(
+                        command_buffer,
+                        vk::PipelineBindPoint::GRAPHICS,
+                        core_draw.graphics_pipeline.layout(),
+                        0,
+                        &descriptor_sets_to_bind,
+                        &[],
+                    );
+
+                    core_draw
+                        .indirect_task_buffer
+                        .draw_tasks_indirect(command_buffer);
                 }
-                device.cmd_bind_pipeline(
-                    command_buffer,
-                    vk::PipelineBindPoint::GRAPHICS,
-                    core_draw.graphics_pipeline.handle(),
-                );
 
-                let descriptor_sets_to_bind = [core_draw.descriptor_sets[i].handle()];
-
-                device.cmd_bind_descriptor_sets(
-                    command_buffer,
-                    vk::PipelineBindPoint::GRAPHICS,
-                    core_draw.graphics_pipeline.layout(),
-                    0,
-                    &descriptor_sets_to_bind,
-                    &[],
-                );
-
-                core_draw
-                    .indirect_task_buffer
-                    .draw_tasks_indirect(command_buffer);
-
-                if query {
-                    device.cmd_end_query(command_buffer, core_draw.query_pool.handle(), q);
-                }
                 device.cmd_end_render_pass(command_buffer);
 
                 device

@@ -16,8 +16,8 @@ use crate::{
 };
 
 use super::{
-    extensions::Extensions, physical_device::PhysicalDevice, structures::QueueFamilyIndices,
-    surface::Surface, swapchain::SwapChainSupportDetail,
+    extensions::Extensions, physical_device::PhysicalDevice,
+    queue_family_indices::QueueFamilyIndices, surface::Surface, swapchain::SwapChainSupportDetail,
 };
 
 pub struct Instance {

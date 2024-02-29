@@ -7,6 +7,7 @@
 #extension GL_KHR_shader_subgroup_vote : enable
 #extension GL_EXT_control_flow_attributes : require
 #extension GL_EXT_debug_printf : enable
+#extension GL_EXT_shader_explicit_arithmetic_types_int16 : enable
 
 #include "structs\camera.glsl"
 #include "structs\cluster_data.glsl"
@@ -65,35 +66,37 @@ const uint LOCAL_SIZE_X = 32;
 
 layout(local_size_x = LOCAL_SIZE_X, local_size_y = 1, local_size_z = 1) in;
 
-const uint QUEUE_SIZE = 3000;
-const uint STARTING = 8;
+const uint QUEUE_SIZE = 5000;
 
-shared uint[QUEUE_SIZE] queue;
+const uint STARTING = 32;
+
+shared uint16_t[QUEUE_SIZE] queue;
+shared uint16_t[QUEUE_SIZE] to_draw;
 
 void main() {
 	uint idx = gl_GlobalInvocationID.x;
 	uint instance = gl_WorkGroupID.y;
 
-	[[unroll]] for (int i = 0; i < STARTING; i++) { queue[i] = i; }
+	[[unroll]] for (int i = 0; i < STARTING; i++) { queue[i] = uint16_t(i); }
 
 	uint queue_tail = STARTING;
 	uint queue_head = 0;
 
+	if (clusters.length() / 2 > QUEUE_SIZE) {
+		while (true) {
+		}
+	}
+
 	// leave some room for the number of clusters produced by the previous to increase
-	uint start = instance == 0 ? 0 : ranges[instance - 1].end + 100;
+	// uint start = instance == 0 ? 0 : ranges[instance - 1].end + 100;
 
 	// offset by the maximum cluster count in a mesh
 	// uint start = instance * clusters.length() / 2;
 
-	if (subgroupElect()) {
-		ranges[instance].start = start;
-	}
-	uint pos = start;
-
-	// Generate object space clipping planes
-	mat4 MVP = ubo.culling_view_proj * models[instance].model;
-
-	vec4 planes[6] = planes_from_mat(MVP);
+	// if (subgroupElect()) {
+	// 	ranges[instance].start = start;
+	// }
+	uint pos = 0;
 
 	// if (subgroupElect()) {
 	// 	debugPrintfEXT("Starting %v4f \n", planes[0]);
@@ -120,20 +123,15 @@ void main() {
 
 			vec4 local_pos = vec4(clusters[i].center, 1);
 
-			// vec4 left_plane = vec4(0);
-			// [[unroll]] for (int i = 0; i < 4; i++) { left_plane[i] = MVP[i][3] + MVP[i][0]; }
+			// Generate object space clipping planes
+			mat4 MVP = ubo.culling_view_proj * models[instance].model;
 
-			bool should_draw = sphere_inside_planes(planes, vec4(clusters[i].center, clusters[i].radius));
+			vec4 planes[6] = planes_from_mat(MVP);
 
-			// vec4 cpos = MVP * vec4(clusters[i].center, 1);
-
-			// bool should_draw = -cpos.w < cpos.x && cpos.x < cpos.w && //
-			// 				   -cpos.w < cpos.y && cpos.y < cpos.w && //
-			// 				   0 < cpos.z && cpos.z < cpos.w;
+			bool should_draw_group = sphere_inside_planes(planes, vec4(clusters[i].center, clusters[i].radius));
+			bool should_draw_cluster = sphere_inside_planes(planes, clusters[i].tight_sphere);
 
 			// bool should_draw = cluster_should_draw(i, instance, local_cam_pos);
-
-			bool draw = can_draw && should_draw;
 
 			// if (subgroupAll(draw)){
 			// 	// Can just use idx instead of exclusive add for
@@ -148,9 +146,9 @@ void main() {
 			// 	pos += subgroupExclusiveAdd(1);
 			// }
 
-			if (draw) {
+			if (can_draw && should_draw_cluster) {
 				pos += subgroupExclusiveAdd(1);
-				draw_list[pos] = i + 1;
+				to_draw[pos] = uint16_t(i);
 				pos += 1;
 			}
 
@@ -161,7 +159,7 @@ void main() {
 			// add children to queue if we dont draw this and we have a
 			// too high error
 
-			if (i < clusters[i].co_parent && can_queue_children && !draw && high_error) {
+			if (i < clusters[i].co_parent && can_queue_children && should_draw_group && high_error) {
 				// debugPrintfEXT("Min child index %d\n",
 				// clusters[i].min_child_index); if
 				// (clusters[i].min_child_index < i){ 	while
@@ -194,7 +192,7 @@ void main() {
 					// 	queue_tail += block;
 					// }
 
-					queue[queue_tail % QUEUE_SIZE] = c;
+					queue[queue_tail % QUEUE_SIZE] = uint16_t(c);
 					queue_tail += 1;
 				}
 
@@ -220,8 +218,21 @@ void main() {
 		// 	draw_list[pos + i] = 0;
 		// }
 
-		indirect_draw[instance].group_size_x = ((pos + 3 - start) / TASK_GROUP_SIZE);
+		memoryBarrierBuffer();
 
-		ranges[instance].end = pos;
+		uint start = atomicAdd(ranges[0].end, pos + TASK_GROUP_SIZE);
+
+		indirect_draw[instance].group_size_x = ((pos + (TASK_GROUP_SIZE - 1)) / TASK_GROUP_SIZE);
+
+		ranges[instance + 1].start = start;
+		ranges[instance + 1].end = start + pos;
+	}
+
+	subgroupMemoryBarrierBuffer();
+
+	uint start = ranges[instance + 1].start;
+
+	for (uint i = idx; i < pos; i += LOCAL_SIZE_X) {
+		draw_list[start + i] = to_draw[i] + 1;
 	}
 }

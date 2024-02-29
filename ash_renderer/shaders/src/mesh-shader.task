@@ -63,8 +63,8 @@ void main() {
 
 	if (cluster_index >= max_cluster()) {
 		// this is a uint, DO NOT ASSIGN -1
-		payload.meshlet_start[local_index] = 0;
-		payload.meshlet_count[local_index] = 0;
+		// payload.meshlet_start[local_index] = 0;
+		// payload.meshlet_count[local_index] = 0;
 		return;
 	}
 
@@ -102,10 +102,10 @@ void main() {
 
 	bool in_clip = sphere_inside_planes(planes, clusters[cluster_index].tight_sphere);
 
-	if (dot(normalize(local_cam_pos - clusters[cluster_index].tight_sphere.xyz),
-			clusters[cluster_index].tight_cone.xyz) < clusters[cluster_index].tight_cone.w) {
-		in_clip = false;
-	}
+	// if (dot(normalize(local_cam_pos - clusters[cluster_index].tight_sphere.xyz),
+	// 		clusters[cluster_index].tight_cone.xyz) < clusters[cluster_index].tight_cone.w) {
+	// 	in_clip = false;
+	// }
 
 	// in_clip = cluster_should_draw(cluster_index, instance_index, local_cam_pos);
 
@@ -123,8 +123,8 @@ void main() {
 
 	// bool in_clip = clamp(norm_clip_pos, vec3(0), vec3(CLIP_BOUND)) == norm_clip_pos;
 
-	payload.meshlet_start[local_index] = draw && in_clip ? clusters[cluster_index].meshlet_start : 0;
-	payload.meshlet_count[local_index] = draw && in_clip ? clusters[cluster_index].meshlet_count : 0;
+	uint meshlet_start = draw && in_clip ? clusters[cluster_index].meshlet_start : 0;
+	uint meshlet_count = min(MAX_CHILDREN, draw && in_clip ? clusters[cluster_index].meshlet_count : 0);
 	payload.instance = instance_index;
 
 	// uint min_needed_index = (draw ?
@@ -146,7 +146,12 @@ void main() {
 	//	atomicMax(max_count, max(payload.meshlet_count[local_index], payload.meshlet_count[local_index+1]) );
 	// }
 
-	uint max_count = subgroupMax(payload.meshlet_count[local_index]);
+	uint count = subgroupAdd(meshlet_count);
+	uint off = subgroupExclusiveAdd(meshlet_count);
+
+	for (uint i = 0; i < meshlet_count; i++) {
+		payload.meshlet[off + i] = meshlet_start + i;
+	}
 
 	uint subroup_max_needed_workgroups = subgroupMax(max_needed_workgroups);
 	// uint subroup_min_needed_index = subgroupMax(min_needed_index);
@@ -154,6 +159,6 @@ void main() {
 	if (subgroupElect()) {
 		atomicMax(indirect_draw.data[instance_index].group_size_x, subroup_max_needed_workgroups);
 		// atomicMin(indirect_draw.data[instance_index].offset, subroup_min_needed_index);
-		EmitMeshTasksEXT(max_count, TASK_GROUP_SIZE, 1);
+		EmitMeshTasksEXT(count, 1, 1);
 	}
 }

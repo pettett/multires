@@ -6,7 +6,10 @@ use common_renderer::components::{camera::Camera, transform::Transform};
 
 use crate::{spiral::Spiral, utility::buffer::TBuffer};
 
-use super::renderer::{MeshDrawingPipelineType, Renderer};
+use super::{
+    mesh_data::MeshData,
+    renderer::{MeshDrawingPipelineType, Renderer},
+};
 #[derive(Debug, Clone, Copy, Event)]
 pub enum SceneEvent {
     AddInstances(usize),
@@ -29,6 +32,10 @@ pub struct CameraUniformBufferObject {
     culling_view_proj: glam::Mat4,
     pub cam_pos: glam::Vec3,
     pub target_error: f32,
+    pub dist_pow: f32,
+    pub _0: u32,
+    pub _1: u32,
+    pub _2: u32,
 }
 
 #[derive(Resource)]
@@ -37,6 +44,7 @@ pub struct Scene {
     pub uniform_transform_buffer: Arc<TBuffer<ModelUniformBufferObject>>,
     pub uniform_camera: CameraUniformBufferObject,
     pub target_error: f32,
+    pub dist_pow: f32,
     pub uniform_camera_buffers: Vec<Arc<TBuffer<CameraUniformBufferObject>>>,
     pub freeze_pos: bool,
     pub instances: usize,
@@ -51,6 +59,10 @@ impl CameraUniformBufferObject {
             culling_view_proj: view_proj,
             cam_pos,
             target_error,
+            dist_pow: 1.0,
+            _0: 0,
+            _1: 0,
+            _2: 0,
         }
     }
     pub fn update_view_proj(&mut self, view_proj: glam::Mat4, frozen: bool) {
@@ -77,6 +89,7 @@ impl Scene {
         }
 
         self.uniform_camera.target_error = self.target_error;
+        self.uniform_camera.dist_pow = self.dist_pow;
 
         self.uniform_camera_buffers[current_image].update_uniform_buffer(self.uniform_camera);
     }
@@ -85,6 +98,7 @@ impl Scene {
 pub fn process_scene_events(
     mut scene: ResMut<Scene>,
     renderer: Res<Renderer>,
+    mesh_data: Res<MeshData>,
     mut commands: Commands,
     mut event_read: EventReader<SceneEvent>,
     mut draw_write: EventWriter<MeshDrawingPipelineType>,
@@ -96,7 +110,9 @@ pub fn process_scene_events(
                 for (i, j) in Spiral::default().skip(scene.instances).take(*count) {
                     let p = glam::Vec3A::X * i as f32 * 20.0 + glam::Vec3A::Y * j as f32 * 20.0;
 
-                    let transform = Transform::new_pos(p);
+                    let mut transform = Transform::new_pos(p);
+
+                    *transform.scale_mut() = glam::Vec3A::ONE * 30.0 / mesh_data.size;
 
                     commands.spawn((transform, Mesh));
                 }

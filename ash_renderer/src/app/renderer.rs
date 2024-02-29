@@ -18,7 +18,7 @@ use crate::{
 
 use super::{
     fps_limiter::FPSMeasure,
-    mesh_data::MeshDataBuffers,
+    mesh_data::MeshData,
     scene::{Scene, SceneEvent},
 };
 #[derive(Debug, Clone, Copy, Event)]
@@ -68,7 +68,7 @@ impl Renderer {
     pub fn recreate_swapchain(
         &mut self,
         scene: &Scene,
-        mesh_data: &MeshDataBuffers,
+        mesh_data: &MeshData,
         gui: &mut Gui,
         cam: &mut Camera,
     ) {

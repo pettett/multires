@@ -14,19 +14,26 @@ pub struct QueryPool<R> {
     _p: PhantomData<R>,
 }
 
+pub struct Query<'a, R> {
+    pool: &'a QueryPool<R>,
+    cmd: vk::CommandBuffer,
+    query: u32,
+}
+
+pub trait QueryResult {
+    fn flags() -> vk::QueryPipelineStatisticFlags;
+}
+
 vk_handle_wrapper_g!(QueryPool);
 
 impl<R> QueryPool<R>
 where
-    R: bytemuck::Zeroable + Copy,
+    R: bytemuck::Zeroable + Copy + QueryResult,
 {
     pub fn new(device: Arc<Device>, query_count: u32) -> Arc<Self> {
         let create_info = vk::QueryPoolCreateInfo::builder()
             .query_type(vk::QueryType::PIPELINE_STATISTICS)
-            .pipeline_statistics(
-                vk::QueryPipelineStatisticFlags::MESH_SHADER_INVOCATIONS_EXT
-                    | vk::QueryPipelineStatisticFlags::TASK_SHADER_INVOCATIONS_EXT, //| vk::QueryPipelineStatisticFlags::FRAGMENT_SHADER_INVOCATIONS,
-            )
+            .pipeline_statistics(R::flags())
             .query_count(query_count)
             .build();
 
@@ -64,6 +71,33 @@ where
                 .ok()
                 .map(|()| results[0])
         }
+    }
+    pub fn begin_query(&self, cmd: vk::CommandBuffer, query: u32) -> Query<R> {
+        unsafe {
+            self.device
+                .cmd_begin_query(cmd, self.handle(), query, vk::QueryControlFlags::empty())
+        }
+
+        Query {
+            pool: self,
+            cmd,
+            query,
+        }
+    }
+}
+
+impl<'a, R> Query<'a, R> {
+    fn end_query(&self) {
+        unsafe {
+            self.pool
+                .device
+                .cmd_end_query(self.cmd, self.pool.handle(), self.query)
+        }
+    }
+}
+impl<'a, R> Drop for Query<'a, R> {
+    fn drop(&mut self) {
+        self.end_query()
     }
 }
 

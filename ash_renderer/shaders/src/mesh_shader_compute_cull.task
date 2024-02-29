@@ -5,7 +5,6 @@
 #extension GL_GOOGLE_include_directive : enable
 #extension GL_ARB_shader_draw_parameters : require
 #extension GL_KHR_shader_subgroup_arithmetic : enable
-// #extension GL_EXT_shader_16bit_storage : enable
 #extension GL_EXT_debug_printf : enable
 
 #include "structs\cluster_data.glsl"
@@ -40,7 +39,7 @@ void main() {
 	uint local_index = gl_LocalInvocationID.x;
 	uint instance_index = gl_DrawID;
 
-	uint draw_idx = gl_GlobalInvocationID.x + ranges[instance_index].start;
+	uint draw_idx = gl_GlobalInvocationID.x + ranges[instance_index + 1].start;
 
 	// if (draw_idx - local_index > ranges[instance_index].end) {
 	// 	// somehow everything in this workgroup is out of range. Should not be possible, but emit 0 anyway
@@ -48,7 +47,7 @@ void main() {
 	// 	return;
 	// }
 
-	bool in_range = draw_idx <= ranges[instance_index].end;
+	bool in_range = draw_idx <= ranges[instance_index + 1].end;
 
 	// debugPrintfEXT("%d - %d %d\n", instance_index, ranges[instance_index].start, ranges[instance_index].end);
 
@@ -58,13 +57,24 @@ void main() {
 	// draw = true;
 	// cluster_index = gl_GlobalInvocationID.x;
 
-	payload.meshlet_start[local_index] = draw ? clusters[cluster_index].meshlet_start : 0;
-	payload.meshlet_count[local_index] = draw ? clusters[cluster_index].meshlet_count : 0;
+	uint meshlet_start = draw ? clusters[cluster_index].meshlet_start : 0;
+	uint meshlet_count = min(MAX_CHILDREN, draw ? clusters[cluster_index].meshlet_count : 0);
 	payload.instance = instance_index;
 
-	uint max_count = subgroupMax(payload.meshlet_count[local_index]);
+	uint max_count = subgroupMax(meshlet_count);
+
+	// if (subgroupElect()) {
+	// 	EmitMeshTasksEXT(max_count, TASK_GROUP_SIZE, 1);
+	// }
+
+	uint count = subgroupAdd(meshlet_count);
+	uint off = subgroupExclusiveAdd(meshlet_count);
+
+	for (uint i = 0; i < meshlet_count; i++) {
+		payload.meshlet[off + i] = meshlet_start + i;
+	}
 
 	if (subgroupElect()) {
-		EmitMeshTasksEXT(max_count, TASK_GROUP_SIZE, 1);
+		EmitMeshTasksEXT(count, 1, 1);
 	}
 }

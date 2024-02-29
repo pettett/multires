@@ -4,6 +4,7 @@
 #extension GL_GOOGLE_include_directive : enable
 #extension GL_EXT_control_flow_attributes : require
 #extension GL_ARB_separate_shader_objects : enable
+#extension GL_KHR_shader_subgroup_vote : enable
 
 #include "structs\camera.glsl" // CameraUniformObject
 #include "structs\mesh_frag_payload.glsl"
@@ -45,31 +46,26 @@ vec3 integer_to_rgb(float integer) {
 	return vec3(red, green, blue);
 }
 
-int calc_cluster_id(inout uint thread_id) {
+// int calc_cluster_id(inout uint thread_id) {
 
-	[[unroll]] for (int i = 0; i < TASK_GROUP_SIZE; i++) {
+// 	[[unroll]] for (int i = 0; i < TASK_GROUP_SIZE; i++) {
 
-		if (thread_id < payload.meshlet_count[i]) {
-			return i;
-		} else {
-			thread_id -= payload.meshlet_count[i];
-		}
-	}
+// 		if (thread_id < payload.meshlet_count[i]) {
+// 			return i;
+// 		} else {
+// 			thread_id -= payload.meshlet_count[i];
+// 		}
+// 	}
 
-	return -1;
-}
+// 	return -1;
+// }
 
 void main() {
-	uint meshlet_id = gl_WorkGroupID.x;
+	// uint meshlet_id = gl_WorkGroupID.x;
 	uint local_id = gl_LocalInvocationID.x;
-	uint cluster_id = gl_GlobalInvocationID.y;
+	uint meshlet_id = gl_WorkGroupID.x;
 
-	if (meshlet_id >= payload.meshlet_count[cluster_id]) {
-		SetMeshOutputsEXT(0, 0);
-		return;
-	}
-
-	uint meshlet_index = payload.meshlet_start[cluster_id] + meshlet_id;
+	uint meshlet_index = payload.meshlet[meshlet_id];
 
 	vec3 colour = integer_to_rgb(meshlet_index);
 
@@ -94,11 +90,9 @@ void main() {
 	}
 
 	[[unroll]] for (uint i = local_id; i < primitive_count; i += GROUP_SIZE) {
-		uint tri = meshlets[meshlet_index].indices[i];
-
-		uint a = (tri >> 0) & 255;
-		uint b = (tri >> 8) & 255;
-		uint c = (tri >> 16) & 255;
+		uint a = uint(meshlets[meshlet_index].indices[4 * i + 0]);
+		uint b = uint(meshlets[meshlet_index].indices[4 * i + 1]);
+		uint c = uint(meshlets[meshlet_index].indices[4 * i + 2]);
 
 		gl_PrimitiveTriangleIndicesEXT[i] = uvec3(a, b, c);
 	}

@@ -8,7 +8,7 @@ use raw_window_handle::HasRawDisplayHandle;
 use crate::utility::{
     device::Device,
     pooled::{command_buffer_group::CommandBufferGroup, command_pool::CommandPool},
-    structures::QueueFamilyIndices,
+    queue_family_indices::QueueFamilyIndices,
     swapchain::Swapchain,
 };
 

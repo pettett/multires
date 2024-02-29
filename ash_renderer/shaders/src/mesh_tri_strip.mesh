@@ -46,16 +46,10 @@ vec3 integer_to_rgb(float integer) {
 }
 
 void main() {
-	uint thread_id = gl_WorkGroupID.x;
 	uint local_id = gl_LocalInvocationID.x;
-	uint cluster_id = gl_GlobalInvocationID.y;
+	uint meshlet_id = gl_WorkGroupID.x;
 
-	if (thread_id >= payload.meshlet_count[cluster_id]) {
-		SetMeshOutputsEXT(0, 0);
-		return;
-	}
-
-	uint meshlet_index = payload.meshlet_start[cluster_id] + thread_id;
+	uint meshlet_index = payload.meshlet[meshlet_id];
 
 	vec3 colour = integer_to_rgb(meshlet_index);
 
@@ -84,23 +78,20 @@ void main() {
 
 	[[unroll]] for (uint i = local_id; i < meshlets[meshlet_index].tri_count; i += GROUP_SIZE) {
 
-		uint tri = meshlets[meshlet_index].indices[i];
-
-		uint a = (tri >> 0) & 255;
-		uint b = (tri >> 8) & 255;
+		uint a = uint(meshlets[meshlet_index].indices[4 * i + 0]);
+		uint b = uint(meshlets[meshlet_index].indices[4 * i + 1]);
 
 		if (i > 0) {
-			uint prev_tri = meshlets[meshlet_index].indices[i - 1];
 
-			uint prev_c = (prev_tri >> (8 * 2)) & 255;
-			uint prev_d = (prev_tri >> (8 * 3)) & 255;
+			uint prev_c = uint(meshlets[meshlet_index].indices[4 * (i - 1) + 2]);
+			uint prev_d = uint(meshlets[meshlet_index].indices[4 * (i - 1) + 3]);
 
 			gl_PrimitiveTriangleIndicesEXT[i * 4 - 1] = uvec3(prev_c, prev_d, a);
 			gl_PrimitiveTriangleIndicesEXT[i * 4 - 2] = uvec3(prev_d, b, a);
 		}
 
-		uint c = (tri >> (8 * 2)) & 255;
-		uint d = (tri >> (8 * 3)) & 255;
+		uint c = uint(meshlets[meshlet_index].indices[4 * i + 2]);
+		uint d = uint(meshlets[meshlet_index].indices[4 * i + 3]);
 
 		// gl_PrimitiveTriangleIndicesEXT has triangles sourced from indexes:
 		// 00 1111 2222 etc

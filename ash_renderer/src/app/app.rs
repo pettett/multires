@@ -2,7 +2,7 @@ use crate::{
     app::{
         benchmarker::benchmark,
         draw_systems::{draw_frame, draw_gui, start_gui, tick_clocks, update_pipeline},
-        mesh_data::MeshDataBuffers,
+        mesh_data::MeshData,
         renderer::{Fragment, MeshDrawingPipelineType, Renderer},
         scene::{
             process_scene_events, CameraUniformBufferObject, ModelUniformBufferObject, SceneEvent,
@@ -17,8 +17,8 @@ use crate::{
         // the mod define some fixed functions that have been learned before.
         constants::*,
         pooled::descriptor_pool::DescriptorPool,
+        queue_family_indices::*,
         render_pass::RenderPass,
-        structures::*,
         swapchain::SwapChainSupportDetail,
         sync::SyncObjects,
         ShaderModule,
@@ -243,13 +243,14 @@ impl App {
             graphics_queue,
             screen.swapchain(),
         );
-        let mesh = MeshDataBuffers::new(&core, &allocator, graphics_queue);
+        let mesh = MeshData::new(&core, &allocator, graphics_queue);
 
         world.insert_resource(Scene {
             uniform_transform_buffer,
             uniform_camera,
             uniform_camera_buffers,
-            target_error: 0.1,
+            target_error: 0.9,
+            dist_pow: 0.5,
             freeze_pos: false,
             instances: 0,
         });

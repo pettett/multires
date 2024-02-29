@@ -13,8 +13,9 @@ use crate::{
 };
 
 #[derive(Resource)]
-pub struct MeshDataBuffers {
+pub struct MeshData {
     pub cluster_count: u32,
+    pub size: f32,
     pub vertex_buffer: Arc<TBuffer<MeshVert>>,
     pub meshlet_buffer: Arc<TBuffer<GpuMeshlet>>,
     pub stripped_meshlet_buffer: Arc<TBuffer<GpuMeshlet>>,
@@ -23,12 +24,14 @@ pub struct MeshDataBuffers {
     pub index_buffer: Arc<TBuffer<u32>>,
 }
 
-impl MeshDataBuffers {
+impl MeshData {
     pub fn new(core: &Core, allocator: &Arc<Mutex<Allocator>>, graphics_queue: vk::Queue) -> Self {
-        let data = MultiResMesh::load("assets/torrin_main.glb.bin").unwrap();
+        let data = MultiResMesh::load("assets/dragon_high.glb.bin").unwrap();
 
         let (cluster_order, cluster_groups) = data.order_clusters();
         let mut cluster_data = data.generate_cluster_data(&cluster_order, &cluster_groups);
+
+        let size = cluster_data[0].radius;
 
         let (clusters, meshlets, stripped_meshlets) = multires::generate_meshlets(&cluster_order);
 
@@ -100,6 +103,7 @@ impl MeshDataBuffers {
         );
         Self {
             vertex_buffer,
+            size,
             meshlet_buffer,
             stripped_meshlet_buffer,
             cluster_buffer,

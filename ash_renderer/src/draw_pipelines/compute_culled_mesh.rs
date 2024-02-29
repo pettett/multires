@@ -10,7 +10,7 @@ use common::MeshVert;
 use gpu_allocator::vulkan::Allocator;
 
 use crate::{
-    app::{mesh_data::MeshDataBuffers, renderer::Renderer, scene::ModelUniformBufferObject},
+    app::{mesh_data::MeshData, renderer::Renderer, scene::ModelUniformBufferObject},
     core::Core,
     screen::Screen,
     utility::{
@@ -51,7 +51,7 @@ impl ComputeCulledMesh {
         renderer: &Renderer,
         screen: &Screen,
 
-        mesh_data: &MeshDataBuffers,
+        mesh_data: &MeshData,
         allocator: Arc<Mutex<Allocator>>,
         render_pass: &RenderPass,
         graphics_queue: vk::Queue,
