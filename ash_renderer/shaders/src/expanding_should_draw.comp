@@ -182,11 +182,11 @@ void main() {
 
 				// queue_tail += idx;
 
-				uint children = clusters[i].max_child_index - min_child_index + 1;
+				uint children = min(MAX_CHILDREN, clusters[i].max_child_index - min_child_index + 1);
 
 				queue_tail += subgroupExclusiveAdd(children);
 
-				for (uint c = min_child_index; c <= clusters[i].max_child_index; c++) {
+				[[unroll]] for (uint c = 0; c <= children; c++) {
 					// if ((queue_tail - queue_head) < QUEUE_SIZE) {
 					// 	uint off = subgroupExclusiveAdd(1);
 					// 	uint block = subgroupAdd(1);
@@ -195,7 +195,7 @@ void main() {
 					// 	queue_tail += block;
 					// }
 
-					queue[queue_tail % QUEUE_SIZE] = uint16_t(c);
+					queue[queue_tail % QUEUE_SIZE] = uint16_t(min_child_index + c);
 					queue_tail += 1;
 				}
 

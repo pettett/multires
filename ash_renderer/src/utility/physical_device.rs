@@ -30,6 +30,7 @@ pub struct PhysicalRelevantFeatureSupport {
     mesh_shader: vk::PhysicalDeviceMeshShaderFeaturesEXT,
     shader_draw_param: vk::PhysicalDeviceShaderDrawParametersFeatures,
     sync2: vk::PhysicalDeviceSynchronization2Features,
+    storage8bit: vk::PhysicalDevice8BitStorageFeatures,
 }
 
 #[derive(Debug)]
@@ -67,6 +68,7 @@ impl PhysicalRelevantFeatureSupport {
             .push_next(&mut relevant_features.maintenance4)
             .push_next(&mut relevant_features.sync2)
             .push_next(&mut relevant_features.shader_draw_param)
+            .push_next(&mut relevant_features.storage8bit)
             .build();
         relevant_features
     }
@@ -126,36 +128,37 @@ impl PhysicalDevice {
     }
 
     pub fn get_features(&self) -> Box<PhysicalRelevantFeatureSupport> {
-        let mut all_features = PhysicalRelevantFeatureSupport::init();
+        let mut all_f = PhysicalRelevantFeatureSupport::init();
 
         unsafe {
             self.instance
-                .get_physical_device_features2(self.handle, &mut all_features.device)
+                .get_physical_device_features2(self.handle, &mut all_f.device)
         };
 
         // Disable everything we don't need
 
-        let mut relevant_features = PhysicalRelevantFeatureSupport::init();
+        let mut f = PhysicalRelevantFeatureSupport::init();
 
-        relevant_features.mesh_shader.mesh_shader = all_features.mesh_shader.mesh_shader;
-        relevant_features.mesh_shader.task_shader = all_features.mesh_shader.task_shader;
-        relevant_features.mesh_shader.mesh_shader_queries =
-            all_features.mesh_shader.mesh_shader_queries;
+        f.mesh_shader.mesh_shader = all_f.mesh_shader.mesh_shader;
+        f.mesh_shader.task_shader = all_f.mesh_shader.task_shader;
+        f.mesh_shader.mesh_shader_queries = all_f.mesh_shader.mesh_shader_queries;
 
-        relevant_features.sync2.synchronization2 = all_features.sync2.synchronization2;
-        relevant_features
-            .buffer_device_address
-            .buffer_device_address = all_features.buffer_device_address.buffer_device_address;
-        relevant_features.maintenance4.maintenance4 = all_features.maintenance4.maintenance4;
-        relevant_features.shader_draw_param.shader_draw_parameters =
-            all_features.shader_draw_param.shader_draw_parameters;
+        f.sync2.synchronization2 = all_f.sync2.synchronization2;
+        f.buffer_device_address.buffer_device_address =
+            all_f.buffer_device_address.buffer_device_address;
 
-        relevant_features.device.features.multi_draw_indirect =
-            all_features.device.features.multi_draw_indirect;
+        f.maintenance4.maintenance4 = all_f.maintenance4.maintenance4;
+        f.shader_draw_param.shader_draw_parameters = all_f.shader_draw_param.shader_draw_parameters;
 
-        relevant_features.device.features.pipeline_statistics_query =
-            all_features.device.features.pipeline_statistics_query;
+        f.storage8bit.storage_buffer8_bit_access = all_f.storage8bit.storage_buffer8_bit_access;
 
-        relevant_features
+        f.device.features.multi_draw_indirect = all_f.device.features.multi_draw_indirect;
+
+        f.device.features.pipeline_statistics_query =
+            all_f.device.features.pipeline_statistics_query;
+
+        f.device.features.shader_int16 = all_f.device.features.shader_int16;
+
+        f
     }
 }

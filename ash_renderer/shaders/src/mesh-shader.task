@@ -124,7 +124,7 @@ void main() {
 	// bool in_clip = clamp(norm_clip_pos, vec3(0), vec3(CLIP_BOUND)) == norm_clip_pos;
 
 	uint meshlet_start = draw && in_clip ? clusters[cluster_index].meshlet_start : 0;
-	uint meshlet_count = min(MAX_CHILDREN, draw && in_clip ? clusters[cluster_index].meshlet_count : 0);
+	uint meshlet_count = min(MAX_MESHLETS, draw && in_clip ? clusters[cluster_index].meshlet_count : 0);
 	payload.instance = instance_index;
 
 	// uint min_needed_index = (draw ?

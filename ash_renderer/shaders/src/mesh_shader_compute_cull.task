@@ -58,7 +58,7 @@ void main() {
 	// cluster_index = gl_GlobalInvocationID.x;
 
 	uint meshlet_start = draw ? clusters[cluster_index].meshlet_start : 0;
-	uint meshlet_count = min(MAX_CHILDREN, draw ? clusters[cluster_index].meshlet_count : 0);
+	uint meshlet_count = min(MAX_MESHLETS, draw ? clusters[cluster_index].meshlet_count : 0);
 	payload.instance = instance_index;
 
 	uint max_count = subgroupMax(meshlet_count);

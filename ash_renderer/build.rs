@@ -21,6 +21,7 @@ fn main() {
     let mut options = shaderc::CompileOptions::new().unwrap();
     options.set_target_spirv(shaderc::SpirvVersion::V1_6);
     options.add_macro_definition("EP", Some("main"));
+    options.set_generate_debug_info();
     options.set_include_callback(
         |requested_source, type_, requesting_source, include_depth| {
             if include_depth > 8 {

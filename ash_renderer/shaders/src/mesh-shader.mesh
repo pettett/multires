@@ -74,15 +74,16 @@ void main() {
 
 	SetMeshOutputsEXT(vertex_count, primitive_count);
 
+	mat4 model = models[payload.instance].model;
+
 	// pub const RECT_TEX_COORD_INDICES_DATA: [u32; 12] = [0, 1, 2, 2, 3, 0, 4, 5, 6, 6, 7, 4];
 	[[unroll]] for (uint i = local_id; i < vertex_count; i += GROUP_SIZE) {
 
 		uint vert_idx = meshlets[meshlet_index].vertices[i];
 
-		gl_MeshVerticesEXT[i].gl_Position =
-			ubo.view_proj * models[payload.instance].model * vec4(verts[vert_idx].pos.xyz, 1);
+		gl_MeshVerticesEXT[i].gl_Position = ubo.view_proj * model * vec4(verts[vert_idx].pos.xyz, 1);
 
-		OUT[i].world_normal = (models[payload.instance].model * vec4(verts[vert_idx].normal.xyz, 0)).xyz;
+		OUT[i].world_normal = (model * vec4(verts[vert_idx].normal.xyz, 0)).xyz;
 
 		OUT[i].fragColor = colour;
 

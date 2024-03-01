@@ -2,10 +2,10 @@
 
 const uint TASK_GROUP_SIZE = 32;
 
-const uint MAX_CHILDREN = 8;
+const uint MAX_MESHLETS = 8;
 
 struct MeshTaskPayload {
 	uint instance;
-	uint meshlet[TASK_GROUP_SIZE * MAX_CHILDREN];
+	uint meshlet[TASK_GROUP_SIZE * MAX_MESHLETS];
 	// uint meshlet_count[TASK_GROUP_SIZE];
 };

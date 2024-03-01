@@ -1,4 +1,4 @@
-
+const uint MAX_CHILDREN = 5;
 
 // Define INVOKE_PER_CLUSTER to say that workgroup count corresponds to maximum cluster being evaluated
 // #define INVOKE_PER_CLUSTER
