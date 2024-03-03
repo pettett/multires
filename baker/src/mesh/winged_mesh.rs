@@ -1,5 +1,5 @@
 use anyhow::Context;
-use common::tri_mesh::TriMesh;
+use common::TriMesh;
 use glam::{Vec3, Vec4};
 
 use std::{collections::HashSet, fs};

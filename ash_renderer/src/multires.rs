@@ -80,7 +80,7 @@ pub fn generate_meshlets(
             {
                 let mut stripped_m = GpuMeshlet::zeroed();
 
-                for (tri_idx, indices) in meshlet.strip_indices().chunks(4).enumerate() {
+                for (tri_idx, indices) in meshlet.local_strip_indices().chunks(4).enumerate() {
                     for i in 0..indices.len() {
                         assert!(indices[i] < meshlet.vert_count() as _);
 
@@ -92,7 +92,7 @@ pub fn generate_meshlets(
                     stripped_m.vertices[i] = vert;
                 }
 
-                stripped_m.tri_count = (meshlet.strip_indices().len().div_ceil(4)) as _;
+                stripped_m.tri_count = (meshlet.local_strip_indices().len().div_ceil(4)) as _;
                 stripped_m.vertex_count = meshlet.verts().len() as _;
                 strip_meshlets.push(stripped_m);
             }

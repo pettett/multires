@@ -5,7 +5,7 @@ use baker::{
     simplify_lod_chain,
 };
 use clap::{Parser, ValueEnum};
-use common::asset::Asset;
+use common::Asset;
 
 // Castle
 // https://sketchfab.com/3d-models/upnor-castle-a08280d12911401aa6022c1a58f2b49a

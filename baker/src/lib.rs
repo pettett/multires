@@ -4,7 +4,7 @@ pub mod pidge;
 
 use std::mem;
 
-use common::{graph, tri_mesh::TriMesh, MeshCluster, MeshLevel, MeshVert, Meshlet, MultiResMesh};
+use common::{graph, MeshCluster, MeshVert, Meshlet, MultiResMesh, TriMesh};
 
 use glam::Vec4;
 use indicatif::{ParallelProgressIterator, ProgressIterator};
@@ -27,13 +27,13 @@ const COLOUR_CLUSTER_SIZE: usize = 55;
 //TODO: Curb random sized groups and the like to bring this number to more reasonable amounts
 //const MAX_TRIS_PER_CLUSTER: usize = 126 * 3;
 
-pub fn to_mesh_layer(mesh: &WingedMesh) -> MeshLevel {
-    MeshLevel {
-        partition_indices: mesh.get_partition(),
-        group_indices: mesh.get_group(),
-        indices: grab_indices(mesh),
-    }
-}
+// pub fn to_mesh_layer(mesh: &WingedMesh) -> MeshLevel {
+//     MeshLevel {
+//         partition_indices: mesh.get_partition(),
+//         group_indices: mesh.get_group(),
+//         indices: grab_indices(mesh),
+//     }
+// }
 
 pub fn group_and_partition_and_simplify(
     mut mesh: WingedMesh,
@@ -108,7 +108,7 @@ pub fn group_and_partition_and_simplify(
             })
             .collect(),
         // layer_1_indices: indices.clone(),
-        lods: Vec::new(),
+        //lods: Vec::new(),
         clusters: Vec::new(),
         group_count: 0,
     };
@@ -117,7 +117,7 @@ pub fn group_and_partition_and_simplify(
     multi_res.group_count += &mesh.groups.len();
     let mut upper_group_range = multi_res.group_count;
 
-    multi_res.lods.push(to_mesh_layer(&mesh));
+    //multi_res.lods.push(to_mesh_layer(&mesh));
 
     multi_res
         .clusters
@@ -208,7 +208,7 @@ pub fn group_and_partition_and_simplify(
 
         println!("{group_count} Groups from partitions");
 
-        multi_res.lods.push(to_mesh_layer(&mesh));
+        //multi_res.lods.push(to_mesh_layer(&mesh));
 
         multi_res.clusters.extend_from_slice(&generate_clusters(
             &mesh,
@@ -291,7 +291,7 @@ pub fn simplify_lod_chain(
             })
             .collect(),
         // layer_1_indices: indices.clone(),
-        lods: Vec::new(),
+        //lods: Vec::new(),
         clusters: Vec::new(),
         group_count: 0,
     };
@@ -300,7 +300,7 @@ pub fn simplify_lod_chain(
     multi_res.group_count += &mesh.groups.len();
     let mut upper_group_range = multi_res.group_count;
 
-    multi_res.lods.push(to_mesh_layer(&mesh));
+    //multi_res.lods.push(to_mesh_layer(&mesh));
 
     multi_res
         .clusters
@@ -377,7 +377,7 @@ pub fn simplify_lod_chain(
 
         println!("1 Groups from partitions");
 
-        multi_res.lods.push(to_mesh_layer(&mesh));
+        //multi_res.lods.push(to_mesh_layer(&mesh));
 
         multi_res.clusters.extend_from_slice(&generate_clusters(
             &mesh,
@@ -427,7 +427,7 @@ pub fn meshopt_simplify_lod_chain(tri_mesh: TriMesh, name: String) -> anyhow::Re
             })
             .collect(),
         // layer_1_indices: indices.clone(),
-        lods: Vec::new(),
+        //lods: Vec::new(),
         clusters: Vec::new(),
         group_count: 0,
     };

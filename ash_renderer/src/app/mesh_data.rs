@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use ash::vk;
 use bevy_ecs::system::Resource;
-use common::{asset::Asset, MeshVert, MultiResMesh};
+use common::{Asset, MeshVert, MultiResMesh};
 use common_renderer::components::gpu_mesh_util::{ClusterData, MultiResData};
 use gpu_allocator::vulkan::Allocator;
 

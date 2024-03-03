@@ -239,7 +239,7 @@ mod tests {
 
     use std::collections::VecDeque;
 
-    use common::{asset::Asset, MultiResMesh};
+    use common::{Asset, MultiResMesh};
 
     use super::MultiResData;
 

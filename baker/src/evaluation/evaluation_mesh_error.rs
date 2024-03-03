@@ -4,7 +4,7 @@ use std::{
     path::{self, PathBuf},
 };
 
-use common::{asset::Asset, MeshVert, MultiResMesh};
+use common::{Asset, MeshVert, MultiResMesh};
 use glam::Vec3A;
 use kdtree::KdTree;
 use rand::{
