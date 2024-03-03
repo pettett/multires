@@ -1,7 +1,13 @@
 use anyhow::Context;
 use core::fmt;
 use petgraph::dot;
-use std::{fs, ops::Range, path, process, vec};
+use serde::de::DeserializeOwned;
+use std::{
+    fs,
+    io::{Read, Write},
+    ops::Range,
+    path, process, vec,
+};
 
 /// Generate a graph corresponding to the dual mesh of a mesh generated from triangulating a grid
 ///
@@ -71,6 +77,41 @@ pub fn generate_triangle_plane_weighted<const N: usize, const M: usize, E>(
 pub fn generate_triangle_plane<const N: usize, const M: usize>(
 ) -> petgraph::Graph<(), (), petgraph::Undirected> {
     generate_triangle_plane_weighted::<N, M, _>(|_, _| ())
+}
+
+pub fn save_directed_graph<V: serde::Serialize, E: serde::Serialize>(
+    graph: &petgraph::Graph<V, E>,
+) {
+    let mut file = fs::File::create("error.dirpetgraph").unwrap();
+
+    file.write(&serde_binary::to_vec(graph, serde_binary::binary_stream::Endian::Big).unwrap())
+        .unwrap();
+}
+
+pub fn load_directed_graph<V: DeserializeOwned, E: DeserializeOwned>() -> petgraph::Graph<V, E> {
+    let mut file = fs::File::open("error.dirpetgraph").unwrap();
+    let mut buf = Vec::new();
+    file.read_to_end(&mut buf).unwrap();
+
+    serde_binary::from_vec(buf, serde_binary::binary_stream::Endian::Big).unwrap()
+}
+
+pub fn save_undirected_graph<V: serde::Serialize, E: serde::Serialize>(
+    graph: &petgraph::Graph<V, E, petgraph::Undirected>,
+) {
+    let mut file = fs::File::create("error.undirpetgraph").unwrap();
+
+    file.write(&serde_binary::to_vec(graph, serde_binary::binary_stream::Endian::Big).unwrap())
+        .unwrap();
+}
+
+pub fn load_undirected_graph<V: DeserializeOwned, E: DeserializeOwned>(
+) -> petgraph::Graph<V, E, petgraph::Undirected> {
+    let mut file = fs::File::open("error.undirpetgraph").unwrap();
+    let mut buf = Vec::new();
+    file.read_to_end(&mut buf).unwrap();
+
+    serde_binary::from_vec(buf, serde_binary::binary_stream::Endian::Big).unwrap()
 }
 
 #[derive(Default)]

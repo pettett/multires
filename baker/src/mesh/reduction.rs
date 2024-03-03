@@ -1,6 +1,6 @@
 use std::cmp;
 
-#[cfg(feature = "progress")]
+//#[cfg(feature = "progress")]
 use indicatif::ProgressStyle;
 
 use rayon::prelude::*;
@@ -105,15 +105,17 @@ impl WingedMesh {
         // let tris = self.face_count();
         // // Need to remove half the triangles - each reduction removes 2
         // let required_reductions = (tris / 4);
-        #[cfg(feature = "progress")]
+        ////#[cfg(feature = "progress")]
         let bar = indicatif::ProgressBar::new(grouped_faces.len() as _);
-        #[cfg(feature = "progress")]
+        ////#[cfg(feature = "progress")]
         bar.set_style(ProgressStyle::with_template("{wide_bar} {pos}/{len} ({per_sec})").unwrap());
 
-        let mut collapses = Vec::new();
+        let mut collapses = Vec::with_capacity(colours[0].len());
 
         for colour_group in colours {
             // Calculate collapsing queues in parallel for this batch
+
+            //bar.println("Generating queues");
 
             colour_group
                 .par_iter()
@@ -121,6 +123,8 @@ impl WingedMesh {
                     self.initialise_collapse_queue(verts, quadrics, &grouped_faces[group_index])
                 })
                 .collect_into_vec(&mut collapses);
+
+            //bar.println("Finished queues");
 
             for (collapses, group_index) in collapses.iter_mut().zip(colour_group.into_iter()) {
                 let requirement = collapse_requirements[group_index];
@@ -140,7 +144,7 @@ impl WingedMesh {
                 //    }
                 //}
 
-                //#[cfg(feature = "progress")]
+                ////#[cfg(feature = "progress")]
                 //bar.set_message(format!("{err:.3e}"));
 
                 //let mut collapses =
@@ -153,11 +157,11 @@ impl WingedMesh {
                             Some(err) => err,
                             None => {
                                 // FIXME: how to handle early exits
-                                #[cfg(feature = "progress")]
+                                ////#[cfg(feature = "progress")]
                                 bar.println(format!(
-                                "Out of valid edges - Exiting early from de-meshing with {} to go",
-                                requirement - i - 1
-                            ));
+									"Out of valid edges - Exiting early from de-meshing with {} to go",
+									requirement - i - 1
+								));
                                 break 'outer;
                             }
                         };
@@ -222,12 +226,12 @@ impl WingedMesh {
                     }
                 }
 
-                #[cfg(feature = "progress")]
+                //#[cfg(feature = "progress")]
                 bar.inc(1);
             }
         }
 
-        #[cfg(feature = "progress")]
+        //#[cfg(feature = "progress")]
         bar.finish();
         // Get mut to save a single lock
         Ok(new_error)

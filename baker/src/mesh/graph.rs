@@ -102,7 +102,7 @@ impl WingedMesh {
     /// Generates a graph of all partitions and their neighbours.
     /// A partition neighbours another one iff there is some triangle in each that share an edge.
     /// We add an edge for each linking triangle, to record 'weights' for partitioning.
-    pub fn generate_guided_cluster_graph(&self) -> petgraph::graph::UnGraph<i32, i32> {
+    pub fn generate_guided_cluster_graph(&self) -> petgraph::graph::UnGraph<i32, ()> {
         //TODO: Give lower weight to grouping partitions that have not been recently grouped, to ensure we are
         // constantly overwriting old borders with remeshes
 
@@ -114,6 +114,7 @@ impl WingedMesh {
 
         for p in 0..self.cluster_count() {
             // Each node should directly correspond to a partition
+
             assert_eq!(p, graph.add_node(0).index());
         }
 
@@ -145,13 +146,13 @@ impl WingedMesh {
                         if self.clusters[other_face.cluster_idx].group_index
                             == self.clusters[face.cluster_idx].group_index
                         {
-                            graph.update_edge(n0, n1, 0);
+                            graph.update_edge(n0, n1, ());
                             // Increase by a small proportion of the edges
                             if _fid.0 % 16 == 0 {
-                                graph.add_edge(n0, n1, 0);
+                                graph.add_edge(n0, n1, ());
                             }
                         } else {
-                            graph.add_edge(n0, n1, 0);
+                            graph.add_edge(n0, n1, ());
                         }
                     }
                 }
@@ -216,6 +217,15 @@ impl WingedMesh {
         //     }
         // }
 
+        // Remove empty clusters
+        // for p in (0..self.cluster_count()).rev() {
+        //     // Each node should directly correspond to a partition
+
+        //     if self.clusters[p].num_tris == 0 {
+        //         graph.remove_node(petgraph::graph::node_index(p));
+        //     }
+        // }
+
         graph
     }
 
@@ -268,6 +278,7 @@ pub fn colour_graph<Ty: petgraph::EdgeType>(
     let mut colour_graph = graph.map(|n, m| None, |e, i| ());
 
     let mut colours = Vec::new();
+    let mut total_banned_colours = vec![false];
     let mut banned_colours = vec![false];
 
     //init list to neighbour counts
@@ -291,13 +302,18 @@ pub fn colour_graph<Ty: petgraph::EdgeType>(
         if col == colours.len() {
             colours.push(Vec::new());
             banned_colours.push(false);
+            total_banned_colours.push(false);
         }
 
         *colour_graph.node_weight_mut(node).unwrap() = Some(col);
         colours[col].push(node.index());
+        if colours[col].len() > 10 {
+            // maximum items per colour to stop memory spillage + this is the max parallel amount
+            total_banned_colours[col] = true;
+        }
 
         for n in graph.neighbors(node) {
-            // Update this one's priority
+            // Update this one's neighbours priority
             if colour_graph.node_weight(n).unwrap().is_none() {
                 neighbours.push(
                     n,
@@ -311,7 +327,7 @@ pub fn colour_graph<Ty: petgraph::EdgeType>(
             }
         }
 
-        banned_colours.fill(false);
+        banned_colours = total_banned_colours.clone();
     }
 
     colours

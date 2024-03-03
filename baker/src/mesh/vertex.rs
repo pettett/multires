@@ -85,6 +85,7 @@ impl Vertex {
         {
             assert!(!self.outgoing_edges.contains(&e));
         }
+        assert!(self.outgoing_edges.len() < 1000);
 
         self.outgoing_edges.push(e);
     }
@@ -93,6 +94,7 @@ impl Vertex {
         {
             assert!(!self.incoming_edges.contains(&e));
         }
+        assert!(self.incoming_edges.len() < 1000);
 
         self.incoming_edges.push(e);
     }
@@ -163,9 +165,16 @@ impl VertID {
 
         //let mut last_e_part = None;
 
-        loop {
+        for i in 0..(vert.outgoing_edges().len() * 2) {
             // attempt to move around the fan, by moving to our twin edge and going clockwise
-            let Some(twin) = mesh.get_edge(eid).twin else {
+            let e = mesh.get_edge(eid);
+
+            assert_eq!(
+                e.vert_origin, self,
+                "Iteration around vertex escaped vertex"
+            );
+
+            let Some(twin) = e.twin else {
                 return false;
             };
 
@@ -190,6 +199,12 @@ impl VertID {
                 return true;
             }
         }
+
+        println!(
+            "ERROR: manifold vertex looped too many times, but only {} outgoing",
+            vert.outgoing_edges.len()
+        );
+        return false;
     }
 
     pub fn is_group_embedded(self, mesh: &WingedMesh) -> bool {

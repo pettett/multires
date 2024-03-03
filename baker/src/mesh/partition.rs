@@ -1,13 +1,16 @@
 //use crate::MAX_TRIS_PER_CLUSTER;
 
+use std::{mem, sync::Mutex};
+
 use crate::mesh::{cluster_info::ClusterInfo, group_info::GroupInfo};
 
 use super::winged_mesh::WingedMesh;
 use common::{
-    graph::{assert_graph_contiguous, petgraph_to_svg},
+    graph::{assert_graph_contiguous, petgraph_to_svg, save_directed_graph},
     BoundingSphere,
 };
 use glam::Vec4Swizzles;
+use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 
 impl WingedMesh {
     pub fn partition_contiguous(&mut self) -> Vec<usize> {
@@ -100,7 +103,11 @@ impl WingedMesh {
             //    }
         }
 
-        let cluster_indexes = config.partition_from_graph(partitions, &mesh_dual)?;
+        let mut cluster_indexes = config.partition_from_graph(partitions, &mesh_dual)?;
+
+        println!("Got metis result");
+
+        metis::pack_partitioning(&mut cluster_indexes);
 
         assert_eq!(cluster_indexes.len(), self.face_count());
 
@@ -165,7 +172,12 @@ impl WingedMesh {
             //std::mem::swap(&mut self.groups, &mut new_groups);
 
             let (cluster_partitioning, group_count) = if EXACT_CLUSTERING {
-                config.exact_partition_onto_graph(4, &cluster_graph)?
+                config
+                    .exact_partition_onto_graph(4, &cluster_graph)
+                    .map_err(|e| {
+                        common::graph::save_undirected_graph(&cluster_graph);
+                        e
+                    })?
             } else {
                 let group_count = (cluster_graph.node_count() - 1).div_ceil(4) as _;
 
@@ -217,10 +229,10 @@ impl WingedMesh {
 
             // Tell each partition what group they now belong to.
             if group_count != 1 {
-                for (part, &group) in cluster_partitioning.node_weights().enumerate() {
+                for (cluster_idx, &group) in cluster_partitioning.node_weights().enumerate() {
                     // Offset for previous groups, to ensure references such as child group
                     // are correct across groupings
-                    self.clusters[part].group_index = group as usize;
+                    self.clusters[cluster_idx].group_index = group as usize;
                 }
             } else {
                 for p in &mut self.clusters {
@@ -316,47 +328,59 @@ impl WingedMesh {
         println!("Partitioning {} groups into sub-partitions", graphs.len());
 
         // Ungrouped partitions but with a dependence on an old group
+
+        let parts = graphs
+            .par_iter()
+            .enumerate()
+            .map(|(group_idx, graph)| {
+                // TODO: fine tune so we get 64/126 meshlets
+
+                if graph.node_count() == 0 {
+                    return Ok((Vec::new(), 0));
+                }
+
+                let parts = if let Some(parts_per_group) = parts_per_group {
+                    parts_per_group
+                } else {
+                    (graph.node_count() as u32).div_ceil(tris_per_cluster.unwrap())
+                };
+
+                assert_graph_contiguous(graph);
+
+                let part = match config.partition_from_graph(parts, graph) {
+                    Ok(part) => part,
+                    e => {
+                        petgraph_to_svg(
+                            graph,
+                            "error_partition_within_group.svg",
+                            &|_, _| String::new(),
+                            common::graph::GraphSVGRender::Undirected {
+                                edge_label: common::graph::Label::None,
+                                positions: false,
+                            },
+                        )
+                        .unwrap();
+                        e?
+                    }
+                };
+
+                Ok((part, parts))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
         let mut new_clusters = Vec::new();
 
-        for (group_idx, graph) in graphs.iter().enumerate() {
-            // TODO: fine tune so we get 64/126 meshlets
-
-            if graph.node_count() == 0 {
+        for ((group_idx, graph), (part, parts)) in graphs.iter().enumerate().zip(parts) {
+            if parts == 0 {
                 println!("WARNING: Group {group_idx} face graph has no nodes!");
                 continue;
             }
-
-            let parts = if let Some(parts_per_group) = parts_per_group {
-                parts_per_group
-            } else {
-                (graph.node_count() as u32).div_ceil(tris_per_cluster.unwrap())
-            };
-
-            assert_graph_contiguous(graph);
-
-            let part = match config.partition_from_graph(parts, graph) {
-                Ok(part) => part,
-                e => {
-                    petgraph_to_svg(
-                        graph,
-                        "error_partition_within_group.svg",
-                        &|_, _| String::new(),
-                        common::graph::GraphSVGRender::Undirected {
-                            edge_label: common::graph::Label::None,
-                            positions: false,
-                        },
-                    )
-                    .unwrap();
-                    e?
-                }
-            };
 
             // Each new part needs to register its dependence on the group we were a part of before
             let child_group = self.clusters[self
                 .get_face(graph[petgraph::graph::node_index(0)])
                 .cluster_idx]
                 .group_index;
-
             assert_eq!(group_idx, child_group);
 
             // Update partitions of the actual triangles
@@ -371,11 +395,11 @@ impl WingedMesh {
                 Some(group_idx)
             };
 
-            let mut occupancies = vec![0; parts as usize];
+            // let mut occupancies = vec![0; parts as usize];
 
-            for p in part {
-                occupancies[p as usize] += 1;
-            }
+            // for p in part {
+            //     occupancies[p as usize] += 1;
+            // }
 
             for _ in 0..parts {
                 //    self.groups[group].partitions.push(new_partitions.len());

@@ -1,5 +1,3 @@
-use std::collections::HashSet;
-
 use bincode::{BorrowDecode, Decode, Encode};
 
 use crate::asset;
@@ -15,6 +13,7 @@ impl Into<Vec3> for glam::Vec3 {
         Vec3(self)
     }
 }
+
 impl Into<glam::Vec3> for Vec3 {
     fn into(self) -> glam::Vec3 {
         self.0
@@ -70,9 +69,9 @@ pub struct OriginCone {
 
 #[derive(Debug, Clone, Decode, Encode, Default)]
 pub struct Meshlet {
-    indices: Vec<u32>,
-    local_indices: Vec<u32>,
-    local_strip_indices: Vec<u32>,
+    //indices: Vec<u32>,
+    local_indices: Vec<u8>,
+    local_strip_indices: Vec<u8>,
     verts: Vec<u32>,
 }
 
@@ -122,35 +121,29 @@ impl asset::Asset for MultiResMesh {}
 
 impl Meshlet {
     //TODO: Generate  local, strip, verts, etc.
-    pub fn from_indices(indices: Vec<u32>) -> Self {
-        let mut m = Self {
-            local_indices: Vec::with_capacity(indices.len()),
-            verts: Vec::with_capacity(indices.len() / 2),
-            local_strip_indices: Vec::with_capacity(indices.len() / 2),
-            indices,
-        };
+    // pub fn from_indices(indices: Vec<u32>) -> Self {
+    //     let mut m = Self {
+    //         local_indices: Vec::with_capacity(indices.len()),
+    //         verts: Vec::with_capacity(indices.len() / 2),
+    //         local_strip_indices: Vec::with_capacity(indices.len() / 2),
+    //         //indices,
+    //     };
 
-        for i in 0..m.indices.len() {
-            let id = m.global_to_local_vert_index(m.indices[i] as _);
-            m.local_indices.push(id);
-        }
+    //     for i in indices {
+    //         let id = m.global_to_local_vert_index(i);
+    //         m.local_indices.push(id);
+    //     }
 
-        m
-    }
+    //     m
+    // }
 
-    pub fn from_local_indices(indices: Vec<u32>, verts: Vec<u32>) -> Self {
-        let mut m = Self {
-            local_strip_indices: Vec::with_capacity(indices.len() / 2),
-            indices: Vec::with_capacity(indices.len()),
-            local_indices: indices,
+    pub fn from_local_indices(local_indices: Vec<u8>, verts: Vec<u32>) -> Self {
+        Self {
+            local_strip_indices: Vec::new(),
+            //indices: Vec::new(),
+            local_indices,
             verts,
-        };
-
-        for i in 0..m.local_indices.len() {
-            m.indices.push(m.verts[m.local_indices[i] as usize]);
         }
-
-        m
     }
 
     pub fn vert_count(&self) -> usize {
@@ -161,50 +154,48 @@ impl Meshlet {
         self.verts[local_vert as usize]
     }
 
-    pub fn global_to_local_vert_index(&mut self, mesh_vert: u32) -> u32 {
-        (match self.verts.iter().position(|&x| x == mesh_vert) {
-            Some(idx) => idx,
-            None => {
-                self.verts.push(mesh_vert);
+    // pub fn global_to_local_vert_index(&mut self, mesh_vert: u32) -> u8 {
+    //     (match self.verts.iter().position(|&x| x == mesh_vert) {
+    //         Some(idx) => idx,
+    //         None => {
+    //             self.verts.push(mesh_vert);
 
-                self.verts.len() - 1
-            }
-        }) as _
-    }
+    //             self.verts.len() - 1
+    //         }
+    //     }) as _
+    // }
 
-    pub fn push_tri(&mut self, tri: [usize; 3]) {
-        for v in tri {
-            let id = self.global_to_local_vert_index(v as _);
-            self.local_indices.push(id);
-            self.indices.push(v as _);
-        }
+    // pub fn push_tri(&mut self, tri: [usize; 3]) {
+    //     for v in tri {
+    //         let id = self.global_to_local_vert_index(v as _);
+    //         self.local_indices.push(id);
+    //         //self.indices.push(v as _);
+    //     }
 
-        assert!(self.indices.len() <= MAX_INDICES_PER_COLOUR);
-    }
+    //     assert!(self.local_indices.len() <= MAX_INDICES_PER_COLOUR);
+    // }
 
-    pub fn push_temp_tri(&mut self, tri: [usize; 3]) {
-        for v in tri {
-            self.indices.push(v as _);
-        }
-    }
-
-    pub fn local_indices(&self) -> &[u32] {
+    pub fn local_indices(&self) -> &[u8] {
         self.local_indices.as_ref()
     }
 
-    pub fn local_indices_mut(&mut self) -> &mut Vec<u32> {
+    pub fn local_indices_mut(&mut self) -> &mut Vec<u8> {
         self.local_indices.as_mut()
     }
 
-    pub fn indices(&self) -> &[u32] {
-        self.indices.as_ref()
+    pub fn calc_indices(&self) -> Vec<u32> {
+        let mut indices = Vec::with_capacity(self.local_indices.len());
+        for &l in &self.local_indices {
+            indices.push(self.verts[l as usize]);
+        }
+        indices
     }
 
-    pub fn strip_indices(&self) -> &[u32] {
+    pub fn strip_indices(&self) -> &[u8] {
         self.local_strip_indices.as_ref()
     }
 
-    pub fn strip_indices_mut(&mut self) -> &mut Vec<u32> {
+    pub fn strip_indices_mut(&mut self) -> &mut Vec<u8> {
         &mut self.local_strip_indices
     }
 
@@ -237,18 +228,18 @@ impl MeshCluster {
         }
     }
 
-    pub fn new_raw_temp(indices: Vec<u32>, lod: usize) -> Self {
-        Self {
-            meshlets: vec![Meshlet::from_indices(indices); 1],
-            tight_bound: Default::default(),
-            tight_cone: Default::default(),
-            saturated_bound: Default::default(),
-            error: 0.0,
-            lod,
-            group_index: 0,
-            child_group_index: None,
-        }
-    }
+    // pub fn new_raw_temp(indices: Vec<u32>, lod: usize) -> Self {
+    //     Self {
+    //         meshlets: Vec::new(),
+    //         tight_bound: Default::default(),
+    //         tight_cone: Default::default(),
+    //         saturated_bound: Default::default(),
+    //         error: 0.0,
+    //         lod,
+    //         group_index: 0,
+    //         child_group_index: None,
+    //     }
+    // }
 
     pub fn reset_meshlets(&mut self) {
         self.meshlets.clear()
@@ -275,7 +266,7 @@ impl MeshCluster {
     }
 
     pub fn index_count(&self) -> usize {
-        self.meshlets.iter().map(|x| x.indices.len()).sum()
+        self.meshlets.iter().map(|x| x.local_indices.len()).sum()
     }
 
     pub fn stripped_index_count(&self) -> usize {
@@ -438,16 +429,16 @@ pub mod test {
         println!("{s0:?}")
     }
 
-    #[test]
-    fn test_meshlet_creation() {
-        let mut meshlet = Meshlet::default();
+    // #[test]
+    // fn test_meshlet_creation() {
+    //     let mut meshlet = Meshlet::default();
 
-        meshlet.push_temp_tri([5, 3, 7]);
+    //     meshlet.push_temp_tri([5, 3, 7]);
 
-        assert_eq!(meshlet.local_indices(), [0, 1, 2]);
+    //     assert_eq!(meshlet.local_indices(), [0, 1, 2]);
 
-        meshlet.push_temp_tri([5, 3, 8]);
+    //     meshlet.push_temp_tri([5, 3, 8]);
 
-        assert_eq!(meshlet.local_indices(), [0, 1, 2, 0, 1, 3]);
-    }
+    //     assert_eq!(meshlet.local_indices(), [0, 1, 2, 0, 1, 3]);
+    // }
 }

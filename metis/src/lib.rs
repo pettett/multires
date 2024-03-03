@@ -219,6 +219,66 @@ pub mod test {
     }
 
     #[test]
+    fn test_huge_exact() {
+        // let graph = graph::generate_triangle_plane::<1000, 10000>();
+        let N: usize = 1000;
+        let M: usize = 1000;
+        let mut graph = petgraph::Graph::with_capacity(N * M, N * M * 3);
+        // Add nodes
+        let mut nodes = vec![vec![petgraph::graph::node_index(0); N]; M];
+        for m in 0..M {
+            for n in 0..N {
+                nodes[m][n] = graph.add_node(());
+            }
+        }
+
+        // Add edges
+        for m in 0..M {
+            for n in 0..N {
+                let a = nodes[m][n];
+                for i in 0..100 {
+                    if n < N - 1 {
+                        graph.update_edge(a, nodes[m][n + 1], ());
+
+                        if m < M - 1 && n % 2 == 0 {
+                            graph.update_edge(a, nodes[m + 1][n + 1], ());
+                        }
+                    }
+
+                    if n > 0 {
+                        graph.update_edge(a, nodes[m][n - 1], ());
+
+                        if m > 0 && n % 2 == 1 {
+                            graph.update_edge(a, nodes[m - 1][n - 1], ());
+                        }
+                    }
+                }
+            }
+        }
+
+        // Demonstrates that we can use weighting (that works, weights array breaks the contiguous graphs) by adding extra edges connecting nodes
+        // We use this principle in generating the group graph
+
+        let test_config = &PartitioningConfig {
+            method: PartitioningMethod::MultilevelKWay,
+            force_contiguous_partitions: Some(true),
+            // u_factor: Some(100),
+            //minimize_subgraph_degree: Some(true),
+            ..Default::default()
+        };
+
+        let parts = 4;
+
+        let (p, _all_parts) = test_config
+            .exact_partition_onto_graph(parts, &graph)
+            .unwrap();
+
+        for g in graph::filter_nodes_by_weight(&p, 0..(parts as _)) {
+            assert!(graph::graph_contiguous(&g));
+        }
+    }
+
+    #[test]
     fn test_2_node_graph() {
         let mut g = petgraph::Graph::new_undirected();
 
@@ -238,5 +298,14 @@ pub mod test {
         let p = test_config.partition_from_graph(2, &g).unwrap();
 
         assert_ne!(p[0], p[1]);
+    }
+
+    #[test]
+    fn test_pack_partitions() {
+        let mut p = vec![1, 1, 2, 2, 4, 4, 4, 4, 1, 1];
+
+        pack_partitioning(&mut p);
+
+        println!("{:?}", p);
     }
 }

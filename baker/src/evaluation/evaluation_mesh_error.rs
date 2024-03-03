@@ -28,7 +28,11 @@ trait MeshErrorEval {
         lod: usize,
     ) -> f32;
     /// Return one vector of points for each level of detail stored inside this mesh
-    fn sample_points(&self, verts: &[MeshVert], samples: SampleMode) -> Vec<(usize, Vec<glam::Vec3A>)>;
+    fn sample_points(
+        &self,
+        verts: &[MeshVert],
+        samples: SampleMode,
+    ) -> Vec<(usize, Vec<glam::Vec3A>)>;
 }
 
 impl MeshErrorEval for MultiResMesh {
@@ -38,7 +42,7 @@ impl MeshErrorEval for MultiResMesh {
         verts: &[MeshVert],
         lod: usize,
     ) -> f32 {
-        #[cfg(feature = "progress")]
+        //#[cfg(feature = "progress")]
         let bar = indicatif::ProgressBar::new(points.len() as u64);
 
         let dimensions = 3;
@@ -54,10 +58,10 @@ impl MeshErrorEval for MultiResMesh {
             }
 
             for m in cluster.meshlets() {
-                for i in m.indices().chunks(3) {
-                    let a = glam::Vec3A::from_slice(&verts[i[0] as usize].pos);
-                    let b = glam::Vec3A::from_slice(&verts[i[1] as usize].pos);
-                    let c = glam::Vec3A::from_slice(&verts[i[2] as usize].pos);
+                for i in m.local_indices().chunks(3) {
+                    let a = glam::Vec3A::from_slice(&verts[m.verts()[i[0] as usize] as usize].pos);
+                    let b = glam::Vec3A::from_slice(&verts[m.verts()[i[1] as usize] as usize].pos);
+                    let c = glam::Vec3A::from_slice(&verts[m.verts()[i[2] as usize] as usize].pos);
 
                     let p: Vec3A = (a + b + c) / 3.0;
 
@@ -100,21 +104,25 @@ impl MeshErrorEval for MultiResMesh {
                 min_dists[i] = min_dists[i].min(tri.square_dist_from_point(p));
             }
 
-            #[cfg(feature = "progress")]
+            //#[cfg(feature = "progress")]
             bar.inc(1);
         }
 
-        #[cfg(feature = "progress")]
+        //#[cfg(feature = "progress")]
         bar.finish_and_clear();
 
         min_dists.iter().sum()
     }
 
-    fn sample_points(&self, verts: &[MeshVert], samples: SampleMode) -> Vec<(usize, Vec<glam::Vec3A>)> {
+    fn sample_points(
+        &self,
+        verts: &[MeshVert],
+        samples: SampleMode,
+    ) -> Vec<(usize, Vec<glam::Vec3A>)> {
         let mut triangles = Vec::new();
         let mut weights = Vec::new();
 
-        #[cfg(feature = "progress")]
+        //#[cfg(feature = "progress")]
         let bar = indicatif::ProgressBar::new(self.clusters.len() as u64);
 
         for cluster in &self.clusters {
@@ -125,10 +133,10 @@ impl MeshErrorEval for MultiResMesh {
             }
 
             for m in cluster.meshlets() {
-                for i in m.indices().chunks(3) {
-                    let a = i[0] as usize;
-                    let b = i[1] as usize;
-                    let c = i[2] as usize;
+                for i in m.local_indices().chunks(3) {
+                    let a = m.verts()[i[0] as usize] as usize;
+                    let b = m.verts()[i[1] as usize] as usize;
+                    let c = m.verts()[i[2] as usize] as usize;
 
                     triangles[cluster.lod].push([a, b, c]);
 
@@ -142,11 +150,11 @@ impl MeshErrorEval for MultiResMesh {
                 }
             }
 
-            #[cfg(feature = "progress")]
+            //#[cfg(feature = "progress")]
             bar.inc(1);
         }
 
-        #[cfg(feature = "progress")]
+        //#[cfg(feature = "progress")]
         bar.finish();
 
         let mut rng = thread_rng();
@@ -159,7 +167,9 @@ impl MeshErrorEval for MultiResMesh {
             let mut layer_samples = Vec::new();
 
             let sample_count = match samples {
-                SampleMode::PointsPerTri(points_per_tri) => (tris.len() as f32 * points_per_tri) as usize,
+                SampleMode::PointsPerTri(points_per_tri) => {
+                    (tris.len() as f32 * points_per_tri) as usize
+                }
                 SampleMode::Points(sample_count) => sample_count,
             };
 
@@ -175,7 +185,7 @@ impl MeshErrorEval for MultiResMesh {
                 layer_samples.push(tri.sample_random_point(&mut rng))
             }
 
-            sample_points.push((tris.len(),layer_samples))
+            sample_points.push((tris.len(), layer_samples))
         }
 
         sample_points
@@ -210,7 +220,7 @@ pub fn sample_multires_error(mesh_name: &(impl AsRef<path::Path> + std::fmt::Deb
 
         let error = norm * (error_i_to_0 + error_0_to_i);
 
-        println!("({}, {error}),",layer_total);
+        println!("({}, {error}),", layer_total);
 
         file.write_fmt(format_args!("{}, {error}\n", layer_total))
             .expect("Failed to write");
@@ -237,7 +247,7 @@ pub mod tests {
         let samples = multires.sample_points(&multires.verts, SampleMode::Points(2000));
 
         println!("Testing points");
-        for (i, (_,points)) in samples.into_iter().enumerate() {
+        for (i, (_, points)) in samples.into_iter().enumerate() {
             let d = multires.sum_of_square_distance_to_points(&points, &multires.verts, i);
             assert!(d <= f32::EPSILON);
             println!("{i}: {d}")

@@ -6,10 +6,11 @@ edition.workspace = true
 
 [dependencies]
 bincode = "2.0.0-rc.3"
-serde = { version = "1.0", features = ["derive"] }
+serde = { version = "1" }
 glam.workspace = true
 bytemuck.workspace = true
 gltf.workspace = true
-petgraph.workspace = true
+petgraph = { version = "0.6", features = ["serde-1"] }
+serde-binary = "0.5"
 anyhow.workspace = true
 open = "5.0"

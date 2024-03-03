@@ -257,7 +257,7 @@ impl WingedMesh {
         let face_count = tri_mesh.indices.len() / 3;
         let mut mesh = WingedMesh::new(face_count, tri_mesh.verts.len());
 
-        #[cfg(feature = "progress")]
+        //#[cfg(feature = "progress")]
         let bar = indicatif::ProgressBar::new(face_count as u64);
 
         let mut current = FaceID(0);
@@ -274,10 +274,10 @@ impl WingedMesh {
                 current.0 += 1;
             }
 
-            #[cfg(feature = "progress")]
+            //#[cfg(feature = "progress")]
             bar.inc(1);
         }
-        #[cfg(feature = "progress")]
+        //#[cfg(feature = "progress")]
         bar.finish();
 
         mesh
@@ -410,7 +410,9 @@ impl WingedMesh {
 
             let (_, neighbour) = outgoing.src_dst(self).unwrap();
 
-            assert!(self.find_edge(neighbour, src).is_none());
+            if self.find_edge(neighbour, src).is_some() {
+                println!("ERROR: inconsistency in outgoing/incoming edges - edge exists back but no twin assigned")
+            }
 
             if self.find_edge(neighbour, dst).is_some() || self.find_edge(dst, neighbour).is_some()
             {

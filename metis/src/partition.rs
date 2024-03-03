@@ -19,85 +19,87 @@ use crate::{
     moptions_et_METIS_OPTION_OBJTYPE, mptype_et_METIS_PTYPE_KWAY, mptype_et_METIS_PTYPE_RB,
 };
 use common::graph::filter_nodes_by_weight;
+use indicatif::ProgressIterator;
 use petgraph::visit::EdgeRef;
-use std::{fs, io::Write, ptr::null_mut};
+use rayon::prelude::*;
+use std::{collections::HashSet, fs, io::Write, ptr::null_mut, sync::mpsc, thread};
 use thiserror::Error;
 
 /// Specifies the used algorithm.
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
-#[repr(i32)]
+#[repr(C)]
 pub enum PartitioningMethod {
     /// Multilevel k-way partitioning
     /// `METIS_PartGraphKway`
-    MultilevelKWay = mptype_et_METIS_PTYPE_KWAY,
+    MultilevelKWay = mptype_et_METIS_PTYPE_KWAY as _,
     /// Multilevel recursive bisection
     /// `METIS_PartGraphRecursive`
-    MultilevelRecursiveBisection = mptype_et_METIS_PTYPE_RB,
+    MultilevelRecursiveBisection = mptype_et_METIS_PTYPE_RB as _,
 }
 
 /// Specifies the matching scheme to be used during coarsening
 /// `METIS_OPTION_CTYPE`
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
-#[repr(i32)]
+#[repr(C)]
 pub enum CoarseningScheme {
     /// Random matching
     /// `METIS_CTYPE_RM`
-    RandomMatching = mctype_et_METIS_CTYPE_RM,
+    RandomMatching = mctype_et_METIS_CTYPE_RM as _,
     /// Sorted heavy-edge matching
     /// `METIS_CTYPE_SHEM`
-    SortedHeavyEdgeMatching = mctype_et_METIS_CTYPE_SHEM,
+    SortedHeavyEdgeMatching = mctype_et_METIS_CTYPE_SHEM as _,
 }
 
 /// Specifies the algorithm used during initial partitioning
 /// `METIS_OPTION_IPTYPE`
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
-#[repr(i32)]
+#[repr(C)]
 pub enum InitialPartitioningAlgorithm {
     /// Grows a bisection using a greedy strategy
     /// `METIS_IPTYPE_GROW`
-    GreedyGrow = miptype_et_METIS_IPTYPE_GROW,
+    GreedyGrow = miptype_et_METIS_IPTYPE_GROW as _,
     /// Computes a bisection at random followed by a refinement
     /// `METIS_IPTYPE_RANDOM`
-    RandomRefined = miptype_et_METIS_IPTYPE_RANDOM,
+    RandomRefined = miptype_et_METIS_IPTYPE_RANDOM as _,
     /// Derives a separator from an edge cut
     /// `METIS_IPTYPE_EDGE`
-    EdgeSeparator = miptype_et_METIS_IPTYPE_EDGE,
+    EdgeSeparator = miptype_et_METIS_IPTYPE_EDGE as _,
     /// Grow a bisection using a greedy node-based strategy
     /// `METIS_IPTYPE_NODE`
-    GreedyNode = miptype_et_METIS_IPTYPE_NODE,
-    RB = miptype_et_METIS_IPTYPE_METISRB,
+    GreedyNode = miptype_et_METIS_IPTYPE_NODE as _,
+    RB = miptype_et_METIS_IPTYPE_METISRB as _,
 }
 
 /// Specifies the algorithm used for refinement
 /// `METIS_OPTION_RTYPE`
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
-#[repr(i32)]
+#[repr(C)]
 pub enum RefinementAlgorithm {
     /// FM-based cut refinement
     /// `METIS_RTYPE_FM`
-    Fm = mrtype_et_METIS_RTYPE_FM,
+    Fm = mrtype_et_METIS_RTYPE_FM as _,
     /// Greedy-based cut and volume refinement
     /// `METIS_RTYPE_GREEDY`
-    Greedy = mrtype_et_METIS_RTYPE_GREEDY,
+    Greedy = mrtype_et_METIS_RTYPE_GREEDY as _,
     /// Two-sided node FM refinement
     /// `METIS_RTYPE_SEP2SIDED`
-    TwoSidedFm = mrtype_et_METIS_RTYPE_SEP2SIDED,
+    TwoSidedFm = mrtype_et_METIS_RTYPE_SEP2SIDED as _,
     /// One-sided node FM refinement
     /// `METIS_RTYPE_SEP1SIDED`
-    OneSidedFm = mrtype_et_METIS_RTYPE_SEP1SIDED,
+    OneSidedFm = mrtype_et_METIS_RTYPE_SEP1SIDED as _,
 }
 
 /// `METIS_OPTION_OBJTYPE`
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
-#[repr(i32)]
+#[repr(C)]
 pub enum ObjectiveType {
     /// Edge-cut minimization
     /// `METIS_OBJTYPE_CUT`
-    EdgeCut = mobjtype_et_METIS_OBJTYPE_CUT,
+    EdgeCut = mobjtype_et_METIS_OBJTYPE_CUT as _,
     /// Total communication volume minimization.
     /// Can result in more accurate partitioning, but a more complex optimisation function will make this method slower.
     /// `METIS_OBJTYPE_VOL`
-    Volume = mobjtype_et_METIS_OBJTYPE_VOL,
+    Volume = mobjtype_et_METIS_OBJTYPE_VOL as _,
 }
 
 /// Configuration for METIS graph partitioning, with only valid options for K-way partitioning.
@@ -176,6 +178,7 @@ impl Into<PartitioningConfig> for MultilevelKWayPartitioningConfig {
 /// Configuration for METIS graph partitioning.
 /// Used to select an algorithm and configure METIS options.
 /// [`None`] values correspond to the default METIS option.
+#[derive(Clone, Copy)]
 pub struct PartitioningConfig {
     /// Specifies the used algorithm.
     pub method: PartitioningMethod,
@@ -274,6 +277,26 @@ impl Default for MultilevelKWayPartitioningConfig {
     }
 }
 
+pub fn pack_partitioning(parts: &mut [u32]) {
+    let part_set: HashSet<u32> = parts.iter().map(|x| *x).collect();
+    let max_part = *part_set.iter().max().unwrap();
+
+    let mut remap = vec![0; max_part as usize + 1];
+
+    let mut p = 0;
+
+    for i in (0..max_part + 1).progress() {
+        remap[i as usize] = p;
+        if part_set.contains(&i) {
+            p += 1;
+        }
+    }
+
+    for p in parts.iter_mut() {
+        *p = remap[*p as usize];
+    }
+}
+
 impl PartitioningConfig {
     fn apply(&self, options: &mut [idx_t]) {
         assert_eq!(options.len(), METIS_NOPTIONS as usize);
@@ -340,21 +363,40 @@ impl PartitioningConfig {
         //options[moptions_et_METIS_OPTION_DBGLVL as usize] = mdbglvl_et_METIS_DBG_INFO;
     }
 
-    pub fn exact_partition_onto_graph<V, E>(
+    pub fn exact_partition_onto_graph<V>(
         &self,
         partition_size: usize,
-        graph: &petgraph::graph::UnGraph<V, E>,
-    ) -> Result<(petgraph::graph::UnGraph<u32, E>, u32), PartitioningError>
+        graph: &petgraph::graph::UnGraph<V, ()>,
+    ) -> Result<(petgraph::graph::UnGraph<u32, ()>, u32), PartitioningError>
     where
-        E: Copy,
+        V: Send + Sync + 'static,
+    {
+        // Spawn threads to stop stack overflow for lucy + parallelism
+        // let (sx, rx) = mpsc::channel();
+
+        let bar = indicatif::ProgressBar::new((graph.node_count() / partition_size) as _);
+
+        self.exact_partition_onto_graph_inner(partition_size, graph, 0, bar)
+    }
+
+    fn exact_partition_onto_graph_inner<V>(
+        self,
+        partition_size: usize,
+        graph: &petgraph::graph::UnGraph<V, ()>,
+        depth: usize,
+        bar: indicatif::ProgressBar,
+    ) -> Result<(petgraph::graph::UnGraph<u32, ()>, u32), PartitioningError>
+    where
+        V: Send + Sync + 'static,
     {
         if graph.node_count() <= partition_size + 1 {
+            bar.inc(1);
             return Ok((graph.map(|_, _| 0u32, |_, e| e.clone()), 1));
         }
 
         const SPLIT_FACTOR: u32 = 2;
 
-        let partitions = if graph.node_count() > partition_size * (SPLIT_FACTOR as usize) * 2 + 1 {
+        let partitions = if graph.node_count() > partition_size * (SPLIT_FACTOR as usize) * 3 + 1 {
             SPLIT_FACTOR
         } else {
             let count = graph.node_count().saturating_sub(1);
@@ -362,17 +404,100 @@ impl PartitioningConfig {
             count.div_ceil(partition_size) as _
         };
 
-        let mut partitioned_graph = self.partition_onto_graph(partitions, graph)?;
+        let mut cur_partitions = partitions;
 
-        let graphs = filter_nodes_by_weight(&partitioned_graph, 0..partitions);
+        let (mut partitioned_graph, graphs) = loop {
+            if cur_partitions > graph.node_count() as u32 * 3 / 4 {
+                //fallback to unweighted grouping
+                println!("Failling back to unweighted");
 
-        assert_eq!(graphs.len(), partitions as usize);
+                let mut g: petgraph::prelude::Graph<(), (), _> =
+                    graph.filter_map(|_, _| Some(()), |_, _| None);
 
+                for e in graph.edge_indices() {
+                    let ed = graph.edge_endpoints(e).unwrap();
+                    g.update_edge(ed.0, ed.1, ());
+                }
+
+                let partitioned_graph = self.partition_onto_graph(partitions, &g).unwrap();
+
+                let graphs = filter_nodes_by_weight(&partitioned_graph, 0..partitions);
+                let mut c = 0;
+                for g in &graphs {
+                    c += g.node_count().min(1);
+                }
+
+                assert!(c > 1);
+
+                break (partitioned_graph, graphs);
+            }
+
+            let partitioned_graph = self.partition_onto_graph(cur_partitions, graph)?;
+
+            let graphs = filter_nodes_by_weight(&partitioned_graph, 0..cur_partitions);
+
+            assert_eq!(graphs.len(), cur_partitions as usize);
+
+            let mut c = 0;
+
+            for g in &graphs {
+                c += g.node_count().min(1);
+            }
+
+            if c > 1 {
+                break (partitioned_graph, graphs);
+            } else {
+                cur_partitions += 1;
+            }
+        };
         let mut total_parts: u32 = 0;
 
+        // println!(
+        //     "{partitions}, {}",
+        //     backtrace::Backtrace::new_unresolved().frames().len()
+        // );
+
+        // Spawn threads to stop stack overflow for lucy + parallelism
+        let (sx, rx) = crossbeam::channel::unbounded();
+
+        let mut handles = Vec::new();
+
         for g in graphs {
-            let (exact_graph, total_sub_parts) =
-                self.exact_partition_onto_graph(partition_size, &g)?;
+            if depth > 10 {
+                let sxx = sx.clone();
+                let bar = bar.clone();
+                handles.push(thread::spawn(move || {
+                    sxx.send((
+                        self.exact_partition_onto_graph_inner(partition_size, &g, 0, bar),
+                        g,
+                    ))
+                    .unwrap();
+                }))
+            } else {
+                sx.send((
+                    self.exact_partition_onto_graph_inner(
+                        partition_size,
+                        &g,
+                        depth + 1,
+                        bar.clone(),
+                    ),
+                    g,
+                ))
+                .unwrap();
+            }
+        }
+
+        for handle in handles {
+            handle.join().unwrap();
+        }
+        // let results: Vec<_> = graphs
+        //     .par_iter()
+        //     .map(|g| )
+        //     .collect();
+
+        for i in 0..partitions {
+            let (handle, g) = rx.recv().unwrap();
+            let (exact_graph, total_sub_parts) = handle?;
 
             for n in g.node_indices() {
                 let original_index = g.node_weight(n).unwrap();
@@ -382,8 +507,13 @@ impl PartitioningConfig {
                     .node_weight_mut(petgraph::graph::node_index(*original_index))
                     .unwrap() = new_part;
             }
+
             total_parts += total_sub_parts;
         }
+
+        // if depth < 10 {
+        //     println!("Completed depth {depth}")
+        // }
 
         Ok((partitioned_graph, total_parts))
     }
@@ -408,6 +538,9 @@ impl PartitioningConfig {
     ) -> Result<Vec<u32>, PartitioningError> {
         if partitions == 1 {
             return Ok(vec![0; graph.node_count()]);
+        }
+        if partitions as usize > graph.node_count() {
+            return Err(PartitioningError::TooManyPartitions);
         }
 
         let mut adjacency = Vec::with_capacity(graph.edge_count());
@@ -704,6 +837,8 @@ pub enum PartitioningError {
     Input,
     #[error("Insufficient memory")]
     Memory,
+    #[error("Too many partitions for graph")]
+    TooManyPartitions,
     #[error("Other error")]
     Other,
 }

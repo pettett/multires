@@ -4,8 +4,8 @@ version.workspace = true
 edition.workspace = true
 
 [features]
-default = ["progress"]
-progress = ["dep:indicatif"]
+# default = ["progress"]
+# progress = ["dep:indicatif"]
 debug = []
 
 [dependencies]
@@ -20,8 +20,8 @@ priority-queue = "1.3"
 anyhow = "1.0"
 thiserror = "1.0"
 rayon = "1.8"
-indicatif = { version = "0.17", features = ["rayon"], optional = true }
+indicatif = { version = "0.17", features = ["rayon"] }
 clap.workspace = true
 glob = "0.3"
 meshopt = "0.2.0"
-kdtree = "0.7.0" # Used for evaluation
+kdtree = "0.7.0"                                       # Used for evaluation

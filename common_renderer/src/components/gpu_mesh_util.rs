@@ -211,7 +211,7 @@ impl MultiResData for MultiResMesh {
         for cluster in cluster_order {
             // Map index buffer to global vertex range
 
-            let index_count = cluster.index_count() as u32;
+            let index_count = cluster.index_count();
 
             for _ in 0..(index_count / 3) {
                 partitions.push(cluster_idx as i32);
@@ -222,7 +222,7 @@ impl MultiResData for MultiResMesh {
 
             // Push to indices *after* recording the offset above
             for i in 0..cluster.colour_count() {
-                indices.extend_from_slice(&cluster.meshlet_for_colour(i).indices());
+                indices.extend_from_slice(&cluster.meshlet_for_colour(i).calc_indices());
             }
         }
 

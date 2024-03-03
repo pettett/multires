@@ -44,9 +44,12 @@ baker = { path = "baker" }
 metis = { path = "metis" }
 
 
-[profile.release]
+# [profile.release]
+# opt-level = 3
+
+[profile.release-with-debug]
+inherits = "release"
 debug = true
-opt-level = 3
 
 [profile.dev.package."*"]
 debug = false

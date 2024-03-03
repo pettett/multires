@@ -9,7 +9,12 @@ log = "0.4"
 cxx = "1.0"
 thiserror.workspace = true
 petgraph.workspace = true
+rayon = "1.9"
+crossbeam = "0.8"
+backtrace = "*"
 common = { path = "../common" }
+indicatif = { version = "0.17", features = ["rayon"] }
+
 
 [build-dependencies]
 bindgen = "0.69"

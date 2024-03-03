@@ -7,8 +7,13 @@ use std::mem;
 use common::{graph, tri_mesh::TriMesh, MeshCluster, MeshLevel, MeshVert, Meshlet, MultiResMesh};
 
 use glam::Vec4;
+use indicatif::ParallelProgressIterator;
 use mesh::winged_mesh::WingedMesh;
 use meshopt::SimplifyOptions;
+use rayon::iter::{
+    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
+    IntoParallelRefMutIterator, ParallelIterator,
+};
 
 // use meshopt::VertexDataAdapter;
 
@@ -81,7 +86,11 @@ pub fn group_and_partition_and_simplify(
         &tri_mesh.verts,
     )?;
 
+    println!("Beginning first grouping");
+
     mesh.group(grouping_config).unwrap();
+
+    println!("Finished first grouping");
 
     let mut multi_res = MultiResMesh {
         name,
@@ -109,10 +118,10 @@ pub fn group_and_partition_and_simplify(
 
     multi_res
         .clusters
-        .extend_from_slice(&generate_clusters(&mesh, 0, &tri_mesh.verts, 0, 0));
+        .extend_from_slice(&generate_clusters(&mesh, 0, &multi_res.verts, 0, 0));
 
-    // Generate more meshes
-    for i in 1..10 {
+    // Generate layers, with a fallback exit
+    for i in 1..20 {
         // i = index of previous mesh layer
         //working_mesh = reduce_mesh(working_mesh);
 
@@ -201,7 +210,7 @@ pub fn group_and_partition_and_simplify(
         multi_res.clusters.extend_from_slice(&generate_clusters(
             &mesh,
             i,
-            &tri_mesh.verts,
+            &multi_res.verts,
             lower_group_range,
             upper_group_range,
         ));
@@ -224,7 +233,7 @@ pub fn group_and_partition_and_simplify(
         }
     }
 
-    opt_multires(&mut multi_res);
+    stat_readout(&mut multi_res);
 
     Ok(multi_res)
 }
@@ -292,7 +301,7 @@ pub fn simplify_lod_chain(
 
     multi_res
         .clusters
-        .extend_from_slice(&generate_clusters(&mesh, 0, &tri_mesh.verts, 0, 0));
+        .extend_from_slice(&generate_clusters(&mesh, 0, &multi_res.verts, 0, 0));
 
     // Generate more meshes
     for i in 1..10 {
@@ -370,7 +379,7 @@ pub fn simplify_lod_chain(
         multi_res.clusters.extend_from_slice(&generate_clusters(
             &mesh,
             i,
-            &tri_mesh.verts,
+            &multi_res.verts,
             lower_group_range,
             upper_group_range,
         ));
@@ -387,7 +396,7 @@ pub fn simplify_lod_chain(
     //     }
     // }
 
-    opt_multires(&mut multi_res);
+    stat_readout(&mut multi_res);
 
     Ok(multi_res)
 }
@@ -428,9 +437,11 @@ pub fn meshopt_simplify_lod_chain(tri_mesh: TriMesh, name: String) -> anyhow::Re
 
         println!("Simplified to {} indices", indices.len());
 
-        multi_res
-            .clusters
-            .push(MeshCluster::new_raw_temp(prev_indices, i));
+        todo!("Fix giant clusters")
+
+        // multi_res
+        //     .clusters
+        //     .push(MeshCluster::new_raw_temp(prev_indices, i));
     }
 
     //opt_multires(&mut multi_res);
@@ -438,15 +449,7 @@ pub fn meshopt_simplify_lod_chain(tri_mesh: TriMesh, name: String) -> anyhow::Re
     Ok(multi_res)
 }
 
-fn opt_multires(multi_res: &mut MultiResMesh) {
-    println!("Optimising and generating strips");
-
-    meshify_clusters(&mut multi_res.clusters, &multi_res.verts);
-
-    optimise_clusters(&mut multi_res.clusters);
-
-    compress_clusters(&mut multi_res.clusters);
-
+fn stat_readout(multi_res: &mut MultiResMesh) {
     let mut min_tris = 10000;
     let mut max_tris = 0;
     let mut max_colours = 0;
@@ -488,60 +491,12 @@ pub fn grab_indices(mesh: &WingedMesh) -> Vec<u32> {
     indices
 }
 
-pub fn meshify_clusters(clusters: &mut Vec<MeshCluster>, verts: &[MeshVert]) {
-    let verts = meshopt::VertexDataAdapter::new(
-        bytemuck::cast_slice(&verts),
-        mem::size_of::<MeshVert>(),
-        0,
-    )
-    .unwrap();
-    for cluster in clusters {
-        let i = cluster.meshlet_for_colour(0).indices();
-
-        let meshlets = meshopt::build_meshlets(i, &verts, 64, 124, 0.1);
-
-        cluster.reset_meshlets();
-
-        for m in meshlets.iter() {
-            cluster.add_meshlet(Meshlet::from_local_indices(
-                m.triangles.iter().map(|&x| x as _).collect(),
-                m.vertices.to_vec(),
-            ));
-        }
-    }
-}
-
-pub fn optimise_clusters(clusters: &mut Vec<MeshCluster>) {
-    for cluster in clusters {
-        for c in 0..cluster.colour_count() {
-            let meshlet = cluster.meshlet_for_colour_mut(c);
-            let vertex_count = meshlet.vert_count();
-            let indices = meshlet.local_indices_mut();
-
-            *indices = meshopt::optimize_vertex_cache(indices, vertex_count);
-        }
-    }
-}
-
-/// Compressed a previously optimised cluster array to triangle strips
-pub fn compress_clusters(clusters: &mut Vec<MeshCluster>) {
-    for cluster in clusters {
-        for c in 0..cluster.colour_count() {
-            let meshlet = cluster.meshlet_for_colour_mut(c);
-            let vertex_count = meshlet.vert_count();
-
-            *meshlet.strip_indices_mut() =
-                meshopt::stripify(meshlet.local_indices(), vertex_count, 0).unwrap();
-        }
-    }
-}
-
 /// Generate clusters, splitting too large meshlets by colour
 /// Also fix group indexing to be global scope, both in our own data and the global group array
 pub fn generate_clusters(
     mesh: &WingedMesh,
     lod: usize,
-    _verts: &[Vec4],
+    verts: &[MeshVert],
     child_group_offset: usize,
     group_offset: usize,
 ) -> Vec<MeshCluster> {
@@ -552,7 +507,7 @@ pub fn generate_clusters(
     // Precondition: partition indexes completely span in some range 0..N
     let mut clusters: Vec<_> = mesh
         .clusters
-        .iter()
+        .par_iter()
         .enumerate()
         .map(|(_i, cluster)| {
             let gi = cluster.group_index;
@@ -572,21 +527,65 @@ pub fn generate_clusters(
         })
         .collect();
 
+    let mut cluster_indices = vec![Vec::with_capacity(STARTING_CLUSTER_SIZE / 4); clusters.len()];
+
     for (_fid, face) in mesh.iter_faces() {
         let verts = mesh.triangle_from_face(face);
 
-        let m = clusters.get_mut(face.cluster_idx).unwrap();
-
-        m.meshlet_for_colour_mut(0).push_temp_tri(verts);
-
-        m.error += inds;
-    }
-
-    for cluster in &mut clusters {
-        for i in 0..cluster.colour_count() {
-            assert!(cluster.meshlet_for_colour(i).vert_count() <= 64);
+        for v in verts {
+            cluster_indices[face.cluster_idx].push(v as u32);
         }
+
+        // let m = clusters.get_mut(face.cluster_idx).unwrap();
+        // m.error += inds;
     }
+
+    let vert_adapter = meshopt::VertexDataAdapter::new(
+        bytemuck::cast_slice(&verts),
+        mem::size_of::<MeshVert>(),
+        0,
+    )
+    .unwrap();
+
+    println!("Optimising clusters");
+
+    clusters
+        .par_iter_mut()
+        .zip(cluster_indices.into_par_iter())
+        .progress()
+        .for_each(|(cluster, indices)| {
+            let indices = meshopt::optimize_vertex_cache(&indices, verts.len());
+
+            let meshlets = meshopt::build_meshlets(&indices, &vert_adapter, 64, 124, 0.1);
+
+            cluster.error += inds * indices.len() as f32;
+
+            for m in meshlets.iter() {
+                cluster.add_meshlet(Meshlet::from_local_indices(
+                    m.triangles.to_vec(),
+                    m.vertices.to_vec(),
+                ));
+            }
+
+            // optimise_clusters
+            // for c in 0..cluster.colour_count() {
+            //     let meshlet = cluster.meshlet_for_colour_mut(c);
+            //     let vertex_count = meshlet.vert_count();
+            //     let indices = meshlet.local_indices_mut();
+
+            //     //*indices = meshopt::optimize_vertex_cache(indices, vertex_count);
+
+            //     // Compressed a previously optimised cluster array to triangle strips
+
+            //     //*meshlet.strip_indices_mut() =
+            //     //    meshopt::stripify(meshlet.local_indices(), vertex_count, 0).unwrap();
+            // }
+        });
+    // for cluster in &mut clusters {
+    //     for i in 0..cluster.colour_count() {
+    //         assert!(cluster.meshlet_for_colour(i).vert_count() <= 64);
+    //     }
+    // }
 
     // let data = VertexDataAdapter::new(bytemuck::cast_slice(&verts), std::mem::size_of::<Vec4>(), 0)
     //     .unwrap();
