@@ -1,5 +1,6 @@
 use std::cmp;
 
+use idmap::IntegerId;
 //#[cfg(feature = "progress")]
 use indicatif::ProgressStyle;
 
@@ -37,7 +38,7 @@ impl WingedMesh {
         quadrics
             .par_iter_mut()
             .enumerate()
-            .for_each(|(i, q)| *q = VertID(i).generate_error_matrix(&self, verts));
+            .for_each(|(i, q)| *q = VertID::new(i).generate_error_matrix(&self, verts));
 
         quadrics
     }
@@ -191,7 +192,7 @@ impl WingedMesh {
                     //    assert!(orig.is_group_embedded(&self));
                     //}
 
-                    quadrics[dest.0].0 += quadrics[orig.0].0;
+                    quadrics[dest.id() as usize].0 += quadrics[orig.id() as usize].0;
 
                     #[allow(unreachable_patterns)]
                     match self.collapse_edge(eid) {
@@ -270,7 +271,7 @@ mod tests {
             );
 
             for v in mesh.triangle_from_face(&f) {
-                let v_dist = plane_distance(&plane, tri_mesh.verts[v].into()).abs();
+                let v_dist = plane_distance(&plane, tri_mesh.verts[v as usize].into()).abs();
                 assert!(
                     v_dist < e,
                     "Plane invalid at index {v}, tri {i}, value {v_dist}",
@@ -306,7 +307,7 @@ mod tests {
             }
 
             for v in mesh.triangle_from_face(&f) {
-                let v = tri_mesh.verts[v];
+                let v = tri_mesh.verts[v as usize];
                 // v^t * K_p * v
                 let q_error = mat.quadric_error(v.into());
                 assert!(
@@ -348,7 +349,7 @@ mod tests {
                 }
             }
 
-            let v = tri_mesh.verts[vid.0];
+            let v = tri_mesh.verts[vid.id() as usize];
             // v^t * K_p * v
             let q_error = q.quadric_error(v.into());
             assert!(

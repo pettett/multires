@@ -1,5 +1,3 @@
-
-
 use super::{
     face::FaceID,
     plane::Plane,
@@ -13,7 +11,7 @@ use idmap::IntegerId;
 
 #[derive(Default, Hash, Debug, Clone, Copy, PartialEq, PartialOrd, Ord, Eq)]
 #[repr(transparent)]
-pub struct EdgeID(pub usize);
+pub struct EdgeID(u32);
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct HalfEdge {
     pub vert_origin: VertID,
@@ -32,7 +30,7 @@ pub struct HalfEdge {
 
 impl IntegerId for EdgeID {
     fn from_id(id: u64) -> Self {
-        EdgeID(id as usize)
+        EdgeID(id as _)
     }
 
     fn id(&self) -> u64 {
@@ -46,12 +44,17 @@ impl IntegerId for EdgeID {
 
 impl Into<usize> for EdgeID {
     fn into(self) -> usize {
-        self.0
+        self.0 as _
     }
 }
-impl From<usize> for EdgeID {
-    fn from(value: usize) -> Self {
-        EdgeID(value)
+impl Into<EdgeID> for usize {
+    fn into(self) -> EdgeID {
+        EdgeID(self as _)
+    }
+}
+impl Into<EdgeID> for u32 {
+    fn into(self) -> EdgeID {
+        EdgeID(self)
     }
 }
 
@@ -126,8 +129,8 @@ impl EdgeID {
     /// Get a vector A-B for the source and destinations from [`EdgeID::src_dst`]
     pub fn edge_vec(&self, mesh: &WingedMesh, verts: &[glam::Vec4]) -> Result<glam::Vec3A> {
         let (src, dst) = self.src_dst(mesh)?;
-        let vd: glam::Vec3A = verts[dst.0].into();
-        let vs: glam::Vec3A = verts[src.0].into();
+        let vd: glam::Vec3A = verts[dst.id() as usize].into();
+        let vs: glam::Vec3A = verts[src.id() as usize].into();
         Ok(vd - vs)
     }
 
@@ -189,14 +192,14 @@ impl EdgeID {
             let [a, b, c] = mesh.triangle_from_face(&mesh.get_face(f));
 
             let (v_a, v_b, v_c, new_corner) = (
-                verts[a].into(),
-                verts[b].into(),
-                verts[c].into(),
-                verts[dest.0].into(),
+                verts[a as usize].into(),
+                verts[b as usize].into(),
+                verts[c as usize].into(),
+                verts[dest.id() as usize].into(),
             );
             let starting_plane = Plane::from_three_points(v_a, v_b, v_c);
 
-            let end_plane = match orig.0 {
+            let end_plane = match orig.id() {
                 i if i == a => Plane::from_three_points(new_corner, v_b, v_c),
                 i if i == b => Plane::from_three_points(v_a, new_corner, v_c),
                 i if i == c => Plane::from_three_points(v_a, v_b, new_corner),
@@ -222,9 +225,9 @@ impl EdgeID {
         let (orig, dest) = self.src_dst(mesh)?;
 
         // Collapsing this edge would move the origin to the destination, so we find the error of the origin at the merged point.
-        let q = (&quadric_errors[orig.0]) + (&quadric_errors[dest.0]);
+        let q = (&quadric_errors[orig.id() as usize]) + (&quadric_errors[dest.id() as usize]);
 
-        let error = q.quadric_error(verts[orig.0].into());
+        let error = q.quadric_error(verts[orig.id() as usize].into());
 
         assert!(
             !error.is_nan(),

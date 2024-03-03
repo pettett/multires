@@ -166,7 +166,7 @@ impl WingedMesh {
             .enumerate()
             .filter_map(|(i, x)| {
                 if x.is_some() {
-                    Some((VertID(i), x.unwrap()))
+                    Some((i.into(), x.unwrap()))
                 } else {
                     None
                 }
@@ -179,7 +179,7 @@ impl WingedMesh {
             .enumerate()
             .filter_map(|(i, x)| {
                 if x.is_some() {
-                    Some((EdgeID(i), x.unwrap()))
+                    Some((i.into(), x.unwrap()))
                 } else {
                     None
                 }
@@ -192,7 +192,7 @@ impl WingedMesh {
             .enumerate()
             .filter_map(|(i, x)| {
                 if x.is_some() {
-                    Some((FaceID(i), x.unwrap()))
+                    Some((i.into(), x.unwrap()))
                 } else {
                     None
                 }
@@ -204,7 +204,7 @@ impl WingedMesh {
             .iter_mut_with_empty()
             .enumerate()
             .filter_map(|(i, x)| match x {
-                Some(x) => Some((FaceID(i), x)),
+                Some(x) => Some((i.into(), x)),
                 None => None,
             })
     }
@@ -214,7 +214,7 @@ impl WingedMesh {
             .iter_mut_with_empty()
             .enumerate()
             .filter_map(|(i, x)| match x {
-                Some(x) => Some((EdgeID(i), x)),
+                Some(x) => Some((i.into(), x)),
                 None => None,
             })
     }
@@ -223,23 +223,27 @@ impl WingedMesh {
             .iter_mut_with_empty()
             .enumerate()
             .filter_map(|(i, x)| match x {
-                Some(x) => Some((VertID(i), x)),
+                Some(x) => Some((i.into(), x)),
                 None => None,
             })
     }
 
     pub fn edge_sqr_length(&self, edge: EdgeID, verts: &[Vec3]) -> f32 {
         let e = &self.get_edge(edge);
-        return verts[e.vert_origin.0]
-            .distance_squared(verts[self.get_edge(e.edge_left_cw).vert_origin.0]);
+        return verts[e.vert_origin.id() as usize]
+            .distance_squared(verts[self.get_edge(e.edge_left_cw).vert_origin.id() as usize]);
     }
 
-    pub fn triangle_from_face(&self, face: &Face) -> [usize; 3] {
+    pub fn triangle_from_face(&self, face: &Face) -> [u32; 3] {
         let e1 = self.get_edge(face.edge);
         let e0 = self.get_edge(e1.edge_left_ccw);
         let e2 = self.get_edge(e1.edge_left_cw);
 
-        [e0.vert_origin.0, e1.vert_origin.0, e2.vert_origin.0]
+        [
+            e0.vert_origin.into(),
+            e1.vert_origin.into(),
+            e2.vert_origin.into(),
+        ]
     }
 
     /// Wrapper around [TriMesh::from_gltf] and [WingedMesh::from_tris]
@@ -270,7 +274,7 @@ impl WingedMesh {
             if a == b || b == c || a == c {
                 println!("Discarding 0 area triangle");
             } else {
-                mesh.add_tri(current, VertID(a), VertID(b), VertID(c));
+                mesh.add_tri(current, a.into(), b.into(), c.into());
                 current.0 += 1;
             }
 
@@ -328,9 +332,9 @@ impl WingedMesh {
     }
 
     pub fn add_tri(&mut self, f: FaceID, a: VertID, b: VertID, c: VertID) {
-        let iea = EdgeID(f.0 * 3 + 0);
-        let ieb = EdgeID(f.0 * 3 + 1);
-        let iec = EdgeID(f.0 * 3 + 2);
+        let iea = (f.0 * 3 + 0).into();
+        let ieb = (f.0 * 3 + 1).into();
+        let iec = (f.0 * 3 + 2).into();
 
         self.add_half_edge(a, b, f, iea, ieb, iec);
         self.add_half_edge(b, c, f, ieb, iec, iea);
@@ -1032,12 +1036,13 @@ pub mod test {
         let mut embed_prop = 0.0;
 
         for vid in 0..mesh.verts.len() {
-            embed_prop +=
-                if mesh.try_get_vert(VertID(vid)).is_ok() && VertID(vid).is_group_embedded(&mesh) {
-                    1.0
-                } else {
-                    0.0
-                };
+            embed_prop += if mesh.try_get_vert(VertID::new(vid as _)).is_ok()
+                && VertID::new(vid as _).is_group_embedded(&mesh)
+            {
+                1.0
+            } else {
+                0.0
+            };
         }
         embed_prop /= mesh.verts.len() as f32;
         println!("Embedded Proportion: {embed_prop}");

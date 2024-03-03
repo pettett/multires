@@ -178,7 +178,9 @@ pub fn draw_gui(
             if ui.button("Draw Full Res").clicked() {
                 draw_events.send(MeshDrawingPipelineType::DrawIndirect)
             }
-
+            if ui.button("Add 1 More Instance").clicked() {
+                scene_events.send(SceneEvent::AddInstances(1));
+            }
             if ui.button("Add 50 More Instances").clicked() {
                 scene_events.send(SceneEvent::AddInstances(50));
             }

@@ -433,7 +433,7 @@ impl WingedMesh {
         for (_fid, f) in self.iter_faces() {
             let cluster = &mut clusters[f.cluster_idx];
 
-            let point = verts[self.get_edge(f.edge).vert_origin.0].xyz();
+            let point = verts[Into::<usize>::into(self.get_edge(f.edge).vert_origin)].xyz();
 
             if cluster.num_tris == 0 {
                 // Start the bounding sphere at this vertex

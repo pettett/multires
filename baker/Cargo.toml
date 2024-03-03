@@ -24,4 +24,5 @@ indicatif = { version = "0.17", features = ["rayon"] }
 clap.workspace = true
 glob = "0.3"
 meshopt = "0.2.0"
-kdtree = "0.7.0"                                       # Used for evaluation
+kdtree = "0.7.0"
+mimalloc = { version = "*", default-features = false }

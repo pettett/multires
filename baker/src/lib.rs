@@ -7,14 +7,17 @@ use std::mem;
 use common::{graph, tri_mesh::TriMesh, MeshCluster, MeshLevel, MeshVert, Meshlet, MultiResMesh};
 
 use glam::Vec4;
-use indicatif::ParallelProgressIterator;
+use indicatif::{ParallelProgressIterator, ProgressIterator};
 use mesh::winged_mesh::WingedMesh;
 use meshopt::SimplifyOptions;
+use mimalloc::MiMalloc;
 use rayon::iter::{
     IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
     IntoParallelRefMutIterator, ParallelIterator,
 };
 
+#[global_allocator]
+static GLOBAL: MiMalloc = MiMalloc;
 // use meshopt::VertexDataAdapter;
 
 const CLUSTERS_PER_SIMPLIFIED_GROUP: usize = 2;
@@ -527,60 +530,93 @@ pub fn generate_clusters(
         })
         .collect();
 
-    let mut cluster_indices = vec![Vec::with_capacity(STARTING_CLUSTER_SIZE / 4); clusters.len()];
+    // Split into large blocks to save allocating massive amounts of memory
+    let step = 1000;
+    let mut cluster_indices =
+        vec![Vec::with_capacity(STARTING_CLUSTER_SIZE / 4); (mesh.clusters.len()).min(step)];
 
-    for (_fid, face) in mesh.iter_faces() {
-        let verts = mesh.triangle_from_face(face);
+    for i in (0..mesh.clusters.len()).step_by(step).progress() {
+        let cluster_count = (mesh.clusters.len() - i).min(step);
+        let cluster_range = i..i + cluster_count;
 
-        for v in verts {
-            cluster_indices[face.cluster_idx].push(v as u32);
-        }
+        for (_fid, face) in mesh.iter_faces() {
+            if cluster_range.contains(&face.cluster_idx) {
+                let verts = mesh.triangle_from_face(face);
 
-        // let m = clusters.get_mut(face.cluster_idx).unwrap();
-        // m.error += inds;
-    }
-
-    let vert_adapter = meshopt::VertexDataAdapter::new(
-        bytemuck::cast_slice(&verts),
-        mem::size_of::<MeshVert>(),
-        0,
-    )
-    .unwrap();
-
-    println!("Optimising clusters");
-
-    clusters
-        .par_iter_mut()
-        .zip(cluster_indices.into_par_iter())
-        .progress()
-        .for_each(|(cluster, indices)| {
-            let indices = meshopt::optimize_vertex_cache(&indices, verts.len());
-
-            let meshlets = meshopt::build_meshlets(&indices, &vert_adapter, 64, 124, 0.1);
-
-            cluster.error += inds * indices.len() as f32;
-
-            for m in meshlets.iter() {
-                cluster.add_meshlet(Meshlet::from_local_indices(
-                    m.triangles.to_vec(),
-                    m.vertices.to_vec(),
-                ));
+                cluster_indices[face.cluster_idx - i].extend_from_slice(&verts);
             }
 
-            // optimise_clusters
-            // for c in 0..cluster.colour_count() {
-            //     let meshlet = cluster.meshlet_for_colour_mut(c);
-            //     let vertex_count = meshlet.vert_count();
-            //     let indices = meshlet.local_indices_mut();
+            // let m = clusters.get_mut(face.cluster_idx).unwrap();
+            // m.error += inds;
+        }
 
-            //     //*indices = meshopt::optimize_vertex_cache(indices, vertex_count);
+        clusters[cluster_range]
+            .par_iter_mut()
+            .zip(cluster_indices.par_iter_mut())
+            .for_each(|(cluster, cluster_indices)| {
+                //condense cluster indices down to local lookup
 
-            //     // Compressed a previously optimised cluster array to triangle strips
+                let mut local_verts = Vec::new();
+                let mut local_vert_positions = Vec::new();
+                let mut local_indices = Vec::new();
 
-            //     //*meshlet.strip_indices_mut() =
-            //     //    meshopt::stripify(meshlet.local_indices(), vertex_count, 0).unwrap();
-            // }
-        });
+                for &mesh_vert in cluster_indices.iter() {
+                    let i = (match local_verts.iter().position(|&x| x == mesh_vert) {
+                        Some(idx) => idx,
+                        None => {
+                            local_vert_positions.push(verts[mesh_vert as usize].pos);
+                            local_verts.push(mesh_vert);
+
+                            local_verts.len() - 1
+                        }
+                    }) as u32;
+
+                    local_indices.push(i)
+                }
+
+                let local_vert_adapter = meshopt::VertexDataAdapter::new(
+                    bytemuck::cast_slice(&local_vert_positions),
+                    mem::size_of_val(&local_vert_positions[0]),
+                    0,
+                )
+                .unwrap();
+
+                let indices = meshopt::optimize_vertex_cache(&local_indices, local_verts.len());
+                cluster_indices.clear();
+
+                let meshlets = meshopt::build_meshlets(&indices, &local_vert_adapter, 64, 124, 0.1);
+
+                cluster.error += inds * indices.len() as f32;
+
+                for m in meshlets.iter() {
+                    //remap the meshlet-local to mesh local verts
+
+                    let mut verts = Vec::with_capacity(m.vertices.len());
+                    for &v in m.vertices {
+                        verts.push(local_verts[v as usize]);
+                    }
+
+                    cluster.add_meshlet(Meshlet::from_local_indices(m.triangles.to_vec(), verts));
+                }
+
+                // large upper bound
+                assert!(cluster.meshlets().len() < 16);
+
+                // optimise_clusters
+                // for c in 0..cluster.colour_count() {
+                //     let meshlet = cluster.meshlet_for_colour_mut(c);
+                //     let vertex_count = meshlet.vert_count();
+                //     let indices = meshlet.local_indices_mut();
+
+                //     //*indices = meshopt::optimize_vertex_cache(indices, vertex_count);
+
+                //     // Compressed a previously optimised cluster array to triangle strips
+
+                //     //*meshlet.strip_indices_mut() =
+                //     //    meshopt::stripify(meshlet.local_indices(), vertex_count, 0).unwrap();
+                // }
+            });
+    }
     // for cluster in &mut clusters {
     //     for i in 0..cluster.colour_count() {
     //         assert!(cluster.meshlet_for_colour(i).vert_count() <= 64);

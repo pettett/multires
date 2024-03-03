@@ -9,7 +9,7 @@ pub struct Face {
 }
 #[derive(Default, Hash, Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(transparent)]
-pub struct FaceID(pub usize);
+pub struct FaceID(pub u32);
 
 impl Into<usize> for FaceID {
     fn into(self) -> usize {
@@ -19,13 +19,13 @@ impl Into<usize> for FaceID {
 
 impl From<usize> for FaceID {
     fn from(value: usize) -> Self {
-        FaceID(value)
+        FaceID(value as _)
     }
 }
 
 impl IntegerId for FaceID {
     fn from_id(id: u64) -> Self {
-        FaceID(id as usize)
+        FaceID(id as _)
     }
 
     fn id(&self) -> u64 {
@@ -42,7 +42,11 @@ impl Face {
     pub fn plane(&self, mesh: &WingedMesh, verts: &[glam::Vec4]) -> Plane {
         let [a, b, c] = mesh.triangle_from_face(self);
 
-        Plane::from_three_points(verts[a].into(), verts[b].into(), verts[c].into())
+        Plane::from_three_points(
+            verts[a as usize].into(),
+            verts[b as usize].into(),
+            verts[c as usize].into(),
+        )
     }
 }
 
@@ -50,7 +54,7 @@ impl FaceID {
     pub fn center(self, mesh: &WingedMesh, verts: &[glam::Vec4]) -> glam::Vec4 {
         let [a, b, c] = mesh.triangle_from_face(&mesh.get_face(self));
 
-        (verts[a] + verts[b] + verts[c]) / 3.0
+        (verts[a as usize] + verts[b as usize] + verts[c as usize]) / 3.0
     }
 
     /// Generate plane from the 3 points a,b,c on this face.
