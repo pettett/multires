@@ -26,8 +26,8 @@ pub struct MeshData {
 
 impl MeshData {
     pub fn new(core: &Core, allocator: &Arc<Mutex<Allocator>>, graphics_queue: vk::Queue) -> Self {
-        // let data = MultiResMesh::load("assets/dragon_high.glb.bin").unwrap();
-        let data = MultiResMesh::load("assets/lucy.glb.bin").unwrap();
+        let data = MultiResMesh::load("assets/dragon_high.glb.bin").unwrap();
+        // let data = MultiResMesh::load("assets/lucy.glb.bin").unwrap();
 
         let (cluster_order, cluster_groups) = data.order_clusters();
         let mut cluster_data = data.generate_cluster_data(&cluster_order, &cluster_groups);

@@ -98,12 +98,13 @@ impl VertID {
         };
 
         let outgoings = &vert.outgoing_edges;
-        let group_index =
-            mesh.clusters[mesh.get_face(mesh.get_edge(outgoings[0]).face).cluster_idx].group_index;
+        let group_index = mesh.clusters
+            [mesh.get_face(mesh.get_edge(outgoings[0]).face).cluster_idx]
+            .group_index();
 
         for &eid in &outgoings[1..] {
             if group_index
-                != mesh.clusters[mesh.get_face(mesh.get_edge(eid).face).cluster_idx].group_index
+                != mesh.clusters[mesh.get_face(mesh.get_edge(eid).face).cluster_idx].group_index()
             {
                 return false;
             }
@@ -113,7 +114,7 @@ impl VertID {
         for &eid in &vert.incoming_edges {
             assert_eq!(
                 group_index,
-                mesh.clusters[mesh.get_face(mesh.get_edge(eid).face).cluster_idx].group_index
+                mesh.clusters[mesh.get_face(mesh.get_edge(eid).face).cluster_idx].group_index()
             );
         }
 
@@ -122,7 +123,7 @@ impl VertID {
 
     /// Generate error matrix Q, the sum of Kp for all planes p around this vertex.
     /// TODO: Eventually we can also add a high penality plane if this is a vertex on a boundary, but manually checking may be easier
-    pub fn generate_error_matrix(self, mesh: &WingedMesh, verts: &[glam::Vec4]) -> Quadric {
+    pub fn generate_error_matrix(self, mesh: &WingedMesh, verts: &[glam::Vec3A]) -> Quadric {
         mesh.get_vert(self).generate_error_matrix(mesh, verts)
     }
 }
@@ -203,7 +204,7 @@ impl Vertex {
 
     /// Generate error matrix Q, the sum of Kp for all planes p around this vertex.
     /// TODO: Eventually we can also add a high penality plane if this is a vertex on a boundary, but manually checking may be easier
-    pub fn generate_error_matrix(&self, mesh: &WingedMesh, verts: &[glam::Vec4]) -> Quadric {
+    pub fn generate_error_matrix(&self, mesh: &WingedMesh, verts: &[glam::Vec3A]) -> Quadric {
         let mut q = Quadric::default();
 
         for &eid in self.outgoing_edges() {

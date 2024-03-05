@@ -28,7 +28,7 @@ pub fn tri_area(a: glam::Vec3A, b: glam::Vec3A, c: glam::Vec3A) -> f32 {
 }
 
 impl WingedMesh {
-    pub fn create_quadrics(&self, verts: &[glam::Vec4]) -> Vec<Quadric> {
+    pub fn create_quadrics(&self, verts: &[glam::Vec3A]) -> Vec<Quadric> {
         let mut quadrics = Vec::with_capacity(verts.len());
         //The combination of this and the next step is completely safe, as we initialise everything.
         unsafe {
@@ -47,14 +47,14 @@ impl WingedMesh {
         let mut groups = vec![Vec::new(); self.groups.len()];
 
         for (fid, face) in self.iter_faces() {
-            groups[self.clusters[face.cluster_idx].group_index].push(fid);
+            groups[self.clusters[face.cluster_idx].group_index()].push(fid);
         }
         groups
     }
 
     fn initialise_collapse_queue(
         &self,
-        verts: &[glam::Vec4],
+        verts: &[glam::Vec3A],
         quadrics: &[Quadric],
         faces: &[FaceID],
     ) -> CollapseQueue {
@@ -79,7 +79,7 @@ impl WingedMesh {
     /// Returns estimate of error introduced by halving the number of triangles
     pub fn reduce_within_groups(
         &mut self,
-        verts: &[glam::Vec4],
+        verts: &[glam::Vec3A],
         quadrics: &mut [Quadric],
         collapse_requirements: &[usize],
     ) -> Result<f64> {
@@ -215,7 +215,7 @@ impl WingedMesh {
                     // Update priority queue with new errors
                     for &eid in effected_edges {
                         if let Ok(edge) = self.try_get_edge(eid) {
-                            if self.clusters[self.get_face(edge.face).cluster_idx].group_index
+                            if self.clusters[self.get_face(edge.face).cluster_idx].group_index()
                                 == group_index
                             {
                                 let error =

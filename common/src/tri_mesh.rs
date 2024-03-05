@@ -1,9 +1,9 @@
-use glam::Vec4;
+use glam::Vec3A;
 use gltf::mesh::util::ReadIndices;
 
 pub struct TriMesh {
-    pub verts: Box<[Vec4]>,
-    pub normals: Box<[Vec4]>,
+    pub verts: Box<[Vec3A]>,
+    pub normals: Box<[Vec3A]>,
     pub indices: Box<[u32]>,
 }
 impl TriMesh {
@@ -26,8 +26,8 @@ impl TriMesh {
         let norm_iter = reader.read_normals().expect("Mesh must contain normals");
 
         Ok(TriMesh {
-            verts: vert_iter.map(|[x, y, z]| Vec4::new(x, y, z, 1.0)).collect(),
-            normals: norm_iter.map(|[x, y, z]| Vec4::new(x, y, z, 1.0)).collect(),
+            verts: vert_iter.map(|[x, y, z]| Vec3A::new(x, y, z)).collect(),
+            normals: norm_iter.map(|[x, y, z]| Vec3A::new(x, y, z)).collect(),
             indices: match reader.read_indices() {
                 Some(ReadIndices::U16(iter)) => iter.map(|i| i as _).collect(),
                 Some(ReadIndices::U32(iter)) => iter.collect(),

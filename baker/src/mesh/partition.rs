@@ -72,13 +72,7 @@ impl WingedMesh {
 
     /// Partition the mesh into a single cluster
     pub fn cluster_unity(&mut self, child_group_index: Option<usize>) {
-        self.clusters = vec![ClusterInfo {
-            child_group_index,
-            group_index: 0,
-            tight_bound: Default::default(),
-            tight_cone: Default::default(),
-            num_tris: self.face_count(),
-        }];
+        self.clusters = vec![ClusterInfo::new(0, self.face_count())];
 
         for (fid, f) in self.iter_faces_mut() {
             f.cluster_idx = 0;
@@ -90,7 +84,7 @@ impl WingedMesh {
         &mut self,
         config: &metis::PartitioningConfig,
         partitions: u32,
-        verts: &[glam::Vec4],
+        verts: &[glam::Vec3A],
     ) -> Result<(), metis::PartitioningError> {
         println!("Partitioning into {partitions} partitions");
 
@@ -139,16 +133,7 @@ impl WingedMesh {
             occupancies.iter().max().unwrap()
         );
 
-        let mut new_clusters = vec![
-            ClusterInfo {
-                child_group_index: None,
-                group_index: usize::MAX,
-                tight_bound: Default::default(),
-                tight_cone: Default::default(),
-                num_tris: 0,
-            };
-            cluster_count
-        ];
+        let mut new_clusters = vec![ClusterInfo::default(); cluster_count];
 
         self.construct_tight_cluster_bounds(&mut new_clusters, verts);
 
@@ -232,11 +217,11 @@ impl WingedMesh {
                 for (cluster_idx, &group) in cluster_partitioning.node_weights().enumerate() {
                     // Offset for previous groups, to ensure references such as child group
                     // are correct across groupings
-                    self.clusters[cluster_idx].group_index = group as usize;
+                    self.clusters[cluster_idx].set_group_index_once(group as usize);
                 }
             } else {
                 for p in &mut self.clusters {
-                    p.group_index = 0;
+                    p.set_group_index_once(0);
                 }
             };
 
@@ -249,18 +234,11 @@ impl WingedMesh {
         );
 
         // create new array of groups, and remember the old groups
-        let mut new_groups = vec![
-            GroupInfo {
-                saturated_bound: Default::default(),
-                clusters: Vec::new(),
-                //group_neighbours: BTreeSet::new(),
-            };
-            group_count
-        ];
+        let mut new_groups = vec![GroupInfo::default(); group_count];
 
         // Record the partitions that each of these groups come from, and build a monotonic bounding sphere
         for (cluster_idx, cluster) in self.clusters.iter().enumerate() {
-            let cluster_group = &mut new_groups[cluster.group_index];
+            let cluster_group = &mut new_groups[cluster.group_index()];
 
             if cluster_group.clusters.len() == 0 {
                 //initialise the bounds
@@ -271,6 +249,10 @@ impl WingedMesh {
                     .saturated_bound
                     .include_sphere(&cluster.tight_bound);
             }
+
+            cluster_group.saturated_error = cluster_group
+                .saturated_error
+                .max(cluster.average_edge_length + f32::EPSILON);
 
             cluster_group.clusters.push(cluster_idx);
         }
@@ -284,12 +266,16 @@ impl WingedMesh {
             // Each group also must envelop all the groups it is descended from,
             // as our partitions must do the same, as we base them off group info
 
-            for cluster in &g.clusters {
-                if let Some(child_group_index) = self.clusters[*cluster].child_group_index {
+            for &cluster in &g.clusters {
+                if let Some(child_group_index) = self.clusters[cluster].child_group_index {
                     let child_group = &self.groups[child_group_index];
                     // combine groups radius
                     g.saturated_bound
                         .include_sphere(&child_group.saturated_bound);
+
+                    g.saturated_error = g
+                        .saturated_error
+                        .max(child_group.saturated_error + f32::EPSILON);
                 }
             }
         }
@@ -316,10 +302,10 @@ impl WingedMesh {
     /// Ensures the data structure is seamless with changing seams! Yippee!
     /// Will update the partitions list, but groups list will still refer to old partitions. To find out what group these should be in, before regrouping,
     /// look at `child_group_index`
-    pub fn partition_within_groups(
+    pub fn cluster_within_groups(
         &mut self,
         config: &metis::PartitioningConfig,
-        verts: &[glam::Vec4],
+        verts: &[glam::Vec3A],
         parts_per_group: Option<u32>,
         tris_per_cluster: Option<u32>,
     ) -> Result<usize, metis::PartitioningError> {
@@ -380,7 +366,7 @@ impl WingedMesh {
             let child_group = self.clusters[self
                 .get_face(graph[petgraph::graph::node_index(0)])
                 .cluster_idx]
-                .group_index;
+                .group_index();
             assert_eq!(group_idx, child_group);
 
             // Update partitions of the actual triangles
@@ -389,10 +375,10 @@ impl WingedMesh {
                     new_clusters.len() + part[x.index()] as usize;
             }
             // If we have not been grouped yet,
-            let child_group_index = if self.groups.len() == 0 {
-                None
+            let cluster_template = if self.groups.len() == 0 {
+                ClusterInfo::default()
             } else {
-                Some(group_idx)
+                ClusterInfo::inherit(group_idx)
             };
 
             // let mut occupancies = vec![0; parts as usize];
@@ -402,15 +388,7 @@ impl WingedMesh {
             // }
 
             for _ in 0..parts {
-                //    self.groups[group].partitions.push(new_partitions.len());
-
-                new_clusters.push(ClusterInfo {
-                    child_group_index,
-                    group_index: usize::MAX,
-                    tight_bound: Default::default(),
-                    tight_cone: Default::default(),
-                    num_tris: 0,
-                })
+                new_clusters.push(cluster_template.clone())
             }
 
             //let max = *occupancies.iter().max().unwrap();
@@ -429,23 +407,30 @@ impl WingedMesh {
     }
 
     /// Construct a tight bounding cone for each cluster based on vertices in the mesh
-    fn construct_tight_cluster_bounds(&self, clusters: &mut [ClusterInfo], verts: &[glam::Vec4]) {
+    fn construct_tight_cluster_bounds(&self, clusters: &mut [ClusterInfo], verts: &[glam::Vec3A]) {
         for (_fid, f) in self.iter_faces() {
             let cluster = &mut clusters[f.cluster_idx];
 
-            let point = verts[Into::<usize>::into(self.get_edge(f.edge).vert_origin)].xyz();
+            let tri = self.triangle_from_face(f);
 
-            if cluster.num_tris == 0 {
-                // Start the bounding sphere at this vertex
-                cluster.tight_bound = BoundingSphere::new(point, 0.0);
-            } else {
-                // Expand the bounding sphere
-                cluster.tight_bound.include_point(point);
+            for i in 0..3 {
+                let point = verts[tri[i] as usize];
+                let next_point = verts[tri[(i + 1) % 3] as usize];
+
+                if cluster.num_tris == 0 {
+                    // Start the bounding sphere at this vertex
+                    cluster.tight_bound = BoundingSphere::new(point.into(), 0.0);
+                } else {
+                    // Expand the bounding sphere
+                    cluster.tight_bound.include_point(point.into());
+                }
+
+                let face_plane = f.plane(self, verts);
+
+                cluster.tight_cone.add_axis(face_plane.normal().into());
+
+                cluster.average_edge_length += point.distance(next_point);
             }
-
-            let face_plane = f.plane(self, verts);
-
-            cluster.tight_cone.add_axis(face_plane.normal().into());
 
             cluster.num_tris += 1;
         }
@@ -454,6 +439,8 @@ impl WingedMesh {
 
         // We just need to normalise the axis, and force each cone to include every face plane (min(dot(face, axis) - 1)).
         for cluster in clusters.iter_mut() {
+            cluster.average_edge_length /= cluster.num_tris as f32;
+
             cluster.tight_cone.normalise_axis();
         }
 
@@ -543,12 +530,12 @@ pub mod tests {
 
             for &out in vert.outgoing_edges() {
                 groups.insert(
-                    mesh.clusters[mesh.get_face(mesh.get_edge(out).face).cluster_idx].group_index,
+                    mesh.clusters[mesh.get_face(mesh.get_edge(out).face).cluster_idx].group_index(),
                 );
             }
             for &out in vert.incoming_edges() {
                 groups.insert(
-                    mesh.clusters[mesh.get_face(mesh.get_edge(out).face).cluster_idx].group_index,
+                    mesh.clusters[mesh.get_face(mesh.get_edge(out).face).cluster_idx].group_index(),
                 );
             }
 

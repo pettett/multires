@@ -127,10 +127,10 @@ impl EdgeID {
     }
 
     /// Get a vector A-B for the source and destinations from [`EdgeID::src_dst`]
-    pub fn edge_vec(&self, mesh: &WingedMesh, verts: &[glam::Vec4]) -> Result<glam::Vec3A> {
+    pub fn edge_vec(&self, mesh: &WingedMesh, verts: &[glam::Vec3A]) -> Result<glam::Vec3A> {
         let (src, dst) = self.src_dst(mesh)?;
-        let vd: glam::Vec3A = verts[dst.id() as usize].into();
-        let vs: glam::Vec3A = verts[src.id() as usize].into();
+        let vd = verts[dst.id() as usize];
+        let vs = verts[src.id() as usize];
         Ok(vd - vs)
     }
 
@@ -141,7 +141,7 @@ impl EdgeID {
     /// - Cannot split group into non-contiguous segments.
     /// - Cannot split with connected triangles which would cause an overlap.
     /// - Cannot flip normals of any triangles when collapsing.
-    pub fn can_collapse_edge(self, mesh: &WingedMesh, verts: &[glam::Vec4]) -> Result<bool> {
+    pub fn can_collapse_edge(self, mesh: &WingedMesh, verts: &[glam::Vec3A]) -> Result<bool> {
         let (orig, dest) = self.src_dst(mesh)?;
 
         if !orig.is_group_embedded(mesh) {
@@ -219,7 +219,7 @@ impl EdgeID {
     pub fn edge_collapse_error(
         self,
         mesh: &WingedMesh,
-        verts: &[glam::Vec4],
+        verts: &[glam::Vec3A],
         quadric_errors: &[Quadric],
     ) -> Result<QuadricError> {
         let (orig, dest) = self.src_dst(mesh)?;

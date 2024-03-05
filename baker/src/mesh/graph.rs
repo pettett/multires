@@ -87,7 +87,7 @@ impl WingedMesh {
         &self,
     ) -> Vec<petgraph::Graph<FaceID, (), petgraph::Undirected>> {
         self.generate_keyed_graphs(
-            |face| self.clusters[face.cluster_idx].group_index,
+            |face| self.clusters[face.cluster_idx].group_index(),
             self.groups.len(),
         )
     }
@@ -143,8 +143,8 @@ impl WingedMesh {
                             .flatten();
 
                         // We don't want to encourage groupings between previously grouped clusters
-                        if self.clusters[other_face.cluster_idx].group_index
-                            == self.clusters[face.cluster_idx].group_index
+                        if self.clusters[other_face.cluster_idx].try_get_group_index()
+                            == self.clusters[face.cluster_idx].try_get_group_index()
                         {
                             graph.update_edge(n0, n1, ());
                             // Increase by a small proportion of the edges
@@ -243,12 +243,12 @@ impl WingedMesh {
         for (_, vert) in self.iter_verts() {
             for &out in vert.outgoing_edges() {
                 groups.insert(
-                    self.clusters[self.get_face(self.get_edge(out).face).cluster_idx].group_index,
+                    self.clusters[self.get_face(self.get_edge(out).face).cluster_idx].group_index(),
                 );
             }
             for &out in vert.incoming_edges() {
                 groups.insert(
-                    self.clusters[self.get_face(self.get_edge(out).face).cluster_idx].group_index,
+                    self.clusters[self.get_face(self.get_edge(out).face).cluster_idx].group_index(),
                 );
             }
 
@@ -455,7 +455,7 @@ pub mod test {
         let (mut mesh, tri_mesh) = WingedMesh::from_gltf(mesh);
 
         // Apply primary partition, that will define the lowest level clusterings
-        mesh.partition_within_groups(test_config, &tri_mesh.verts, None, Some(60))?;
+        mesh.cluster_within_groups(test_config, &tri_mesh.verts, None, Some(60))?;
         mesh.group(test_config).unwrap();
 
         graph::petgraph_to_svg(
@@ -535,7 +535,7 @@ pub mod test {
         println!("Faces: {}, Verts: {}", mesh.face_count(), mesh.vert_count());
 
         // Apply primary partition, that will define the lowest level clusterings
-        mesh.partition_within_groups(test_config, &tri_mesh.verts, None, Some(60))?;
+        mesh.cluster_within_groups(test_config, &tri_mesh.verts, None, Some(60))?;
 
         mesh.group(test_config)?;
         let mut graph: petgraph::Graph<(), ()> = petgraph::Graph::new();
@@ -550,12 +550,12 @@ pub mod test {
 
         loop {
             for (i, &n) in old_part_nodes.iter().enumerate() {
-                colouring.insert(n, mesh.clusters[i].group_index + seen_groups);
+                colouring.insert(n, mesh.clusters[i].group_index() + seen_groups);
             }
 
             seen_groups += mesh.groups.len();
 
-            mesh.partition_within_groups(test_config, &tri_mesh.verts, Some(2), None)?;
+            mesh.cluster_within_groups(test_config, &tri_mesh.verts, Some(2), None)?;
 
             let new_part_nodes: Vec<_> =
                 mesh.clusters.iter().map(|_o| graph.add_node(())).collect();
@@ -578,7 +578,7 @@ pub mod test {
         }
 
         for (i, &n) in old_part_nodes.iter().enumerate() {
-            colouring.insert(n, mesh.clusters[i].group_index + seen_groups);
+            colouring.insert(n, mesh.clusters[i].group_index() + seen_groups);
         }
 
         graph::petgraph_to_svg(

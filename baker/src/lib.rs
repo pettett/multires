@@ -184,7 +184,7 @@ pub fn group_and_partition_and_simplify(
 
         //layers.push(to_mesh_layer(&working_mesh, &verts));
 
-        let partition_count = match mesh.partition_within_groups(
+        let partition_count = match mesh.cluster_within_groups(
             group_clustering_config,
             &tri_mesh.verts,
             Some(CLUSTERS_PER_SIMPLIFIED_GROUP as _),
@@ -405,38 +405,43 @@ pub fn simplify_lod_chain(
 }
 
 pub fn meshopt_simplify_lod_chain(tri_mesh: TriMesh, name: String) -> anyhow::Result<MultiResMesh> {
-    let verts = meshopt::VertexDataAdapter::new(
-        bytemuck::cast_slice(&tri_mesh.verts),
-        mem::size_of::<glam::Vec4>(),
-        0,
-    )
-    .unwrap();
+    let verts = tri_mesh
+        .verts
+        .iter()
+        .zip(tri_mesh.normals.iter())
+        .map(|(v, n)| MeshVert {
+            pos: [v.x, v.y, v.z, 1.0],
+            normal: [n.x, n.y, n.z, 1.0],
+        })
+        .collect();
 
     let mut indices = tri_mesh.indices.to_vec();
 
-    let mut multi_res = MultiResMesh {
+    let multi_res = MultiResMesh {
         name,
         full_indices: tri_mesh.indices,
-        verts: tri_mesh
-            .verts
-            .iter()
-            .zip(tri_mesh.normals.iter())
-            .map(|(v, n)| MeshVert {
-                pos: [v.x, v.y, v.z, 1.0],
-                normal: [n.x, n.y, n.z, 1.0],
-            })
-            .collect(),
-        // layer_1_indices: indices.clone(),
-        //lods: Vec::new(),
+        verts,
         clusters: Vec::new(),
         group_count: 0,
     };
 
+    let verts_adapter = meshopt::VertexDataAdapter::new(
+        bytemuck::cast_slice(&multi_res.verts),
+        mem::size_of::<MeshVert>(),
+        0,
+    )
+    .unwrap();
+
     for i in 0..9 {
         let prev_indices = indices.clone();
 
-        indices =
-            meshopt::simplify_sloppy(&prev_indices, &verts, prev_indices.len() / 2, 1.0, None);
+        indices = meshopt::simplify_sloppy(
+            &prev_indices,
+            &verts_adapter,
+            prev_indices.len() / 2,
+            1.0,
+            None,
+        );
 
         println!("Simplified to {} indices", indices.len());
 
@@ -505,7 +510,7 @@ pub fn generate_clusters(
 ) -> Vec<MeshCluster> {
     println!("Generating meshlets!");
 
-    let inds = 5.0 / mesh.face_count() as f32;
+    //let inds = 5.0 / mesh.face_count() as f32;
 
     // Precondition: partition indexes completely span in some range 0..N
     let mut clusters: Vec<_> = mesh
@@ -513,18 +518,16 @@ pub fn generate_clusters(
         .par_iter()
         .enumerate()
         .map(|(_i, cluster)| {
-            let gi = cluster.group_index;
+            let gi = cluster.group_index();
             let group = &mesh.groups[gi];
 
             MeshCluster::new(
-                1,
-                //TODO: Connect to quadric error or something
-                1.0,
+                group.saturated_error,
                 cluster.tight_bound,
                 cluster.tight_cone,
                 group.saturated_bound,
                 lod,
-                cluster.group_index + group_offset,
+                gi + group_offset,
                 cluster.child_group_index.map(|c| c + child_group_offset),
             )
         })
@@ -586,7 +589,7 @@ pub fn generate_clusters(
 
                 let meshlets = meshopt::build_meshlets(&indices, &local_vert_adapter, 64, 124, 0.1);
 
-                cluster.error += inds * indices.len() as f32;
+                //cluster.error += inds * indices.len() as f32;
 
                 for m in meshlets.iter() {
                     //remap the meshlet-local to mesh local verts
@@ -723,7 +726,7 @@ mod test {
 
         for cluster in &mesh.clusters {
             groups
-                .entry(cluster.group_index)
+                .entry(cluster.group_index())
                 .or_default()
                 .push(cluster.saturated_bound);
         }
@@ -746,11 +749,11 @@ mod test {
         println!("Checking {} groups have monotonic bounds", groups.len());
 
         for cluster in &mesh.clusters {
-            let Some(child_group) = cluster.child_group_index else {
+            let Some(child_group) = cluster.child_group_index() else {
                 continue;
             };
 
-            groups[&cluster.group_index][0].assert_contains_sphere(&groups[&child_group][0])
+            groups[&cluster.group_index()][0].assert_contains_sphere(&groups[&child_group][0])
         }
     }
 

@@ -125,19 +125,22 @@ impl WingedMesh {
         self.verts.len()
     }
 
-    pub fn get_partition(&self) -> Vec<usize> {
-        self.faces
-            .iter_with_empty()
-            .filter_map(|f| f.as_ref().map(|f| f.cluster_idx))
-            .collect()
-    }
+    // pub fn get_partition(&self) -> Vec<usize> {
+    //     self.faces
+    //         .iter_with_empty()
+    //         .filter_map(|f| f.as_ref().map(|f| f.cluster_idx))
+    //         .collect()
+    // }
 
-    pub fn get_group(&self) -> Vec<usize> {
-        self.faces
-            .iter_with_empty()
-            .filter_map(|f| f.as_ref().map(|f| self.clusters[f.cluster_idx].group_index))
-            .collect()
-    }
+    // pub fn get_group(&self) -> Vec<usize> {
+    //     self.faces
+    //         .iter_with_empty()
+    //         .filter_map(|f| {
+    //             f.as_ref()
+    //                 .map(|f| self.clusters[f.cluster_idx].group_index())
+    //         })
+    //         .collect()
+    // }
 
     pub fn iter_edge_loop(&self, e: EdgeID) -> impl Iterator<Item = EdgeID> + '_ {
         // emit 3 edges and a none
@@ -839,7 +842,7 @@ pub mod test {
 
         mesh.assert_valid().unwrap();
 
-        mesh.partition_within_groups(test_config, &tri_mesh.verts, None, Some(60))?;
+        mesh.cluster_within_groups(test_config, &tri_mesh.verts, None, Some(60))?;
 
         mesh.assert_valid().unwrap();
 
@@ -847,7 +850,7 @@ pub mod test {
 
         mesh.assert_valid().unwrap();
 
-        mesh.partition_within_groups(test_config, &tri_mesh.verts, Some(2), None)?;
+        mesh.cluster_within_groups(test_config, &tri_mesh.verts, Some(2), None)?;
 
         println!("{} {}", mesh.cluster_count(), mesh.groups.len());
 
@@ -871,7 +874,7 @@ pub mod test {
         let (mut mesh, tri_mesh) = WingedMesh::from_gltf(mesh);
 
         // Apply primary partition, that will define the lowest level clusterings
-        mesh.partition_within_groups(test_config, &tri_mesh.verts, None, Some(60))?;
+        mesh.cluster_within_groups(test_config, &tri_mesh.verts, None, Some(60))?;
 
         let mut boundary_face_ratio = 0.0;
         for pi in 0..mesh.clusters.len() {

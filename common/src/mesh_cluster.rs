@@ -12,14 +12,13 @@ pub struct MeshCluster {
     // in order to ensure a monotonic view-dependent error function.
     pub saturated_bound: BoundingSphere,
     pub lod: usize, //We should not need this - group indexes are consistent across LOD
-    pub error: f32,
-    pub group_index: usize,
-    pub child_group_index: Option<usize>,
+    error: f32,
+    group_index: usize,
+    child_group_index: Option<usize>,
 }
 
 impl MeshCluster {
     pub fn new(
-        colours: usize,
         error: f32,
         tight_bound: BoundingSphere,
         tight_cone: OriginCone,
@@ -29,7 +28,7 @@ impl MeshCluster {
         child_group_index: Option<usize>,
     ) -> Self {
         Self {
-            meshlets: vec![Meshlet::default(); colours],
+            meshlets: Vec::new(),
             tight_bound,
             tight_cone,
 
@@ -54,9 +53,9 @@ impl MeshCluster {
     //     }
     // }
 
-    pub fn reset_meshlets(&mut self) {
-        self.meshlets.clear()
-    }
+    // pub fn reset_meshlets(&mut self) {
+    //     self.meshlets.clear()
+    // }
 
     pub fn add_meshlet(&mut self, m: Meshlet) {
         self.meshlets.push(m)
@@ -87,5 +86,17 @@ impl MeshCluster {
             .iter()
             .map(|x| x.local_strip_indices().len())
             .sum()
+    }
+
+    pub fn error(&self) -> f32 {
+        self.error
+    }
+
+    pub fn group_index(&self) -> usize {
+        self.group_index
+    }
+
+    pub fn child_group_index(&self) -> Option<usize> {
+        self.child_group_index
     }
 }

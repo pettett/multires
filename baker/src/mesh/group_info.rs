@@ -15,6 +15,9 @@ pub struct GroupInfo {
     /// Monotonic bounds for error function of partitions. Includes bounds of all other partitions in the group,
     /// and all partitions we are children to
     pub saturated_bound: BoundingSphere,
+
+    // TODO: Evaluate edge length error vs quadric error
+    pub saturated_error: f32,
 }
 
 impl GroupInfo {

@@ -68,11 +68,11 @@ impl MultiResData for MultiResMesh {
 
         // Sorting by group index allows us to represent all children with a min/max child pair
         // As they have also share some properties, this will also slightly improve GPU compute efficiency
-        clusters.sort_unstable_by_key(|x| cmp::Reverse(x.group_index));
+        clusters.sort_unstable_by_key(|x| cmp::Reverse(x.group_index()));
 
         let mut groups = vec![Vec::new(); self.group_count];
         for i in 0..clusters.len() {
-            groups[clusters[i].group_index].push(i);
+            groups[clusters[i].group_index()].push(i);
         }
 
         (clusters, groups)
@@ -98,7 +98,7 @@ impl MultiResData for MultiResMesh {
             clusters.push(ClusterData {
                 index_offset: index_sum,
                 index_count,
-                error: cluster.error,
+                error: cluster.error(),
                 center: cluster.saturated_bound.center().into(),
 
                 parent0: -1,
@@ -125,11 +125,11 @@ impl MultiResData for MultiResMesh {
         for (cluster_idx, &cluster_node_idx) in cluster_nodes.iter().enumerate() {
             let i = *dag.node_weight(cluster_node_idx).unwrap();
 
-            let cluster_group_idx = cluster_order[i].group_index;
+            let cluster_group_idx = cluster_order[i].group_index();
 
             assert!(cluster_groups[cluster_group_idx].contains(&cluster_idx));
 
-            let Some(child_group_idx) = cluster_order[i].child_group_index else {
+            let Some(child_group_idx) = cluster_order[i].child_group_index() else {
                 continue;
             };
 
@@ -181,7 +181,7 @@ impl MultiResData for MultiResMesh {
                 }
             };
 
-            if let Some(child_group) = cluster_order[i].child_group_index {
+            if let Some(child_group) = cluster_order[i].child_group_index() {
                 let min_child_index = *cluster_groups[child_group].iter().min().unwrap();
                 let max_child_index = *cluster_groups[child_group].iter().max().unwrap();
 
@@ -216,7 +216,7 @@ impl MultiResData for MultiResMesh {
             for _ in 0..(index_count / 3) {
                 partitions.push(cluster_idx as i32);
             }
-            groups.push(cluster.group_index as i32);
+            groups.push(cluster.group_index() as i32);
 
             cluster_idx += 1;
 
@@ -239,7 +239,7 @@ mod tests {
 
     use std::collections::VecDeque;
 
-    use common::{Asset, MultiResMesh};
+    use common::{Asset, BoundingSphere, MultiResMesh};
 
     use super::MultiResData;
 
@@ -400,5 +400,98 @@ mod tests {
         println!("Max queue size: {}", max_queue_size);
 
         assert!(seen.iter().all(|&p| p))
+    }
+
+    #[test]
+    fn test_monotonic_error() {
+        let mesh = MultiResMesh::load_from_cargo_manifest_dir().unwrap();
+
+        let (cluster_order, groups) = mesh.order_clusters();
+        let clusters = mesh.generate_cluster_data(&cluster_order, &groups);
+        let mut failed = false;
+        for i in 0..clusters.len() {
+            if clusters[i].layer == clusters[0].layer {
+                assert_eq!(clusters[i].parent0, -1);
+                assert_eq!(clusters[i].parent1, -1);
+            } else {
+                let c = clusters[i].error;
+                let p0 = clusters[clusters[i].parent0 as usize].error;
+                let p1 = clusters[clusters[i].parent1 as usize].error;
+
+                // PARENT > CHILDREN
+                if p0 < c {
+                    println!(
+                        "Error is not monotonic, layer {}, cluster {c}, parent {p0}",
+                        clusters[i].layer
+                    );
+                    failed = true;
+                }
+                if p1 < c {
+                    println!(
+                        "Error is not monotonic, layer {}, cluster {c}, parent {p1}",
+                        clusters[i].layer
+                    );
+                    failed = true;
+                }
+            }
+        }
+        assert!(!failed);
+    }
+
+    #[test]
+    fn test_monotonic_bounds() {
+        let mesh = MultiResMesh::load_from_cargo_manifest_dir().unwrap();
+
+        let (cluster_order, groups) = mesh.order_clusters();
+        let clusters = mesh.generate_cluster_data(&cluster_order, &groups);
+
+        for i in 0..clusters.len() {
+            if clusters[i].layer == clusters[0].layer {
+                assert_eq!(clusters[i].parent0, -1);
+                assert_eq!(clusters[i].parent1, -1);
+            } else {
+                let c = &clusters[i];
+                let p0 = &clusters[clusters[i].parent0 as usize];
+                let p1 = &clusters[clusters[i].parent1 as usize];
+
+                let b_c = BoundingSphere::new(c.center.into(), c.radius);
+                let b_p0 = BoundingSphere::new(p0.center.into(), p0.radius);
+                let b_p1 = BoundingSphere::new(p1.center.into(), p1.radius);
+
+                // PARENT > CHILDREN
+                b_p0.assert_contains_sphere(&b_c);
+                b_p1.assert_contains_sphere(&b_c);
+            }
+        }
+    }
+
+    #[test]
+    fn test_group_consistency() {
+        let mesh = MultiResMesh::load_from_cargo_manifest_dir().unwrap();
+
+        let (cluster_order, groups) = mesh.order_clusters();
+        let clusters = mesh.generate_cluster_data(&cluster_order, &groups);
+
+        for i in 0..clusters.len() {
+            if clusters[i].max_child_index >= 0 {
+                let min = clusters[i].min_child_index;
+                let max = clusters[i].max_child_index;
+
+                for c in min..max {
+                    assert_eq!(
+                        clusters[c as usize].error, clusters[max as usize].error,
+                        "Inconsistent error"
+                    );
+                    assert_eq!(
+                        clusters[c as usize].radius, clusters[max as usize].radius,
+                        "Inconsistent radius"
+                    );
+                    assert_eq!(
+                        clusters[c as usize].center, clusters[max as usize].center,
+                        "Inconsistent center"
+                    );
+                }
+            }
+        }
     }
 }

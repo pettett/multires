@@ -7,7 +7,11 @@ impl Into<Vec3> for glam::Vec3 {
         Vec3(self)
     }
 }
-
+impl Into<Vec3> for glam::Vec3A {
+    fn into(self) -> Vec3 {
+        Vec3(self.into())
+    }
+}
 impl Into<glam::Vec3> for Vec3 {
     fn into(self) -> glam::Vec3 {
         self.0
