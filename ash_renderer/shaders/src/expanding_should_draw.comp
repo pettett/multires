@@ -6,8 +6,14 @@
 #extension GL_KHR_shader_subgroup_arithmetic : enable
 #extension GL_KHR_shader_subgroup_vote : enable
 #extension GL_EXT_control_flow_attributes : require
-#extension GL_EXT_debug_printf : enable
 #extension GL_EXT_shader_explicit_arithmetic_types_int16 : enable
+#extension GL_KHR_shader_subgroup_ballot : enable
+
+#define DEBUG
+
+#ifdef DEBUG
+#extension GL_EXT_debug_printf : enable
+#endif
 
 #include "structs\camera.glsl"
 #include "structs\cluster_data.glsl"
@@ -52,14 +58,7 @@ layout(std430, binding = 7) buffer RangeBuffer {
 
 const float LARGE_ERROR = 100000000000000000.0;
 
-// Use minimim of co_parent errors. Causes weirdness otherwise for some reason
-#define MIN_ERROR
-
 #include "util\cluster.glsl"
-
-#define GROUP_SPHERE // Make culling check agaisnt the bounding sphere for the entire group. Allows early exit /
-					 // instance culling
-
 #include "util\culling.glsl"
 
 const uint LOCAL_SIZE_X = 32;
@@ -174,17 +173,16 @@ void main() {
 				// Allocate ourselves space at the end of the
 				// queue. max_child_index >= STARTING from before
 
-				uint children = min(MAX_CHILDREN, clusters[i].max_child_index - min_child_index + 1);
+				uint children = clusters[i].max_child_index - min_child_index + 1;
+				children = min(MAX_CHILDREN, children);
 
 				queue_tail += subgroupExclusiveAdd(children);
 
-				[[unroll]] for (uint c = 0; c <= children; c++) {
-
-					queue[queue_tail % QUEUE_SIZE] = uint16_t(min_child_index + c);
-					queue_tail += 1;
+				[[unroll]] for (uint c = 0; c < children; c++) {
+					queue[(queue_tail + c) % QUEUE_SIZE] = uint16_t(min_child_index + c);
 				}
 
-
+				queue_tail += children;
 			}
 		}
 
@@ -199,15 +197,11 @@ void main() {
 
 	// if (subgroupElect()){ debugPrintfEXT("Finished \n"); }
 	// if (subgroupElect()){ debugPrintfEXT("\n"); }
-
+	uint start;
 	if (subgroupElect()) {
-		// for (int i = 0; i < TASK_GROUP_SIZE; i++) {
-		// 	draw_list[pos + i] = 0;
-		// }
-
 		memoryBarrierBuffer();
 
-		uint start = atomicAdd(ranges[0].end, pos + TASK_GROUP_SIZE);
+		start = atomicAdd(ranges[0].end, pos + TASK_GROUP_SIZE);
 
 		indirect_draw[instance].group_size_x = ((pos + (TASK_GROUP_SIZE - 1)) / TASK_GROUP_SIZE);
 
@@ -215,11 +209,12 @@ void main() {
 		ranges[instance + 1].end = start + pos;
 	}
 
-	subgroupMemoryBarrierBuffer();
-
-	uint start = ranges[instance + 1].start;
+	start = subgroupBroadcastFirst(start);
 
 	for (uint i = idx; i < pos; i += LOCAL_SIZE_X) {
 		draw_list[start + i] = to_draw[i] + 1;
+	}
+	if (idx < TASK_GROUP_SIZE) {
+		draw_list[start + pos + idx] = 0;
 	}
 }

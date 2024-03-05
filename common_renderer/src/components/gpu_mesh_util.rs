@@ -494,4 +494,37 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn test_max_5_children() {
+        let mesh = MultiResMesh::load_from_cargo_manifest_dir().unwrap();
+
+        let (cluster_order, groups) = mesh.order_clusters();
+        let clusters = mesh.generate_cluster_data(&cluster_order, &groups);
+
+        for i in 0..clusters.len() {
+            if clusters[i].max_child_index >= 0 {
+                let min = clusters[i].min_child_index;
+                let max = clusters[i].max_child_index;
+
+                assert!(max - min + 1 <= 5, "Cluster {i} has too many children");
+            }
+        }
+    }
+
+    #[test]
+    fn test_max_16_meshlets() {
+        let mesh = MultiResMesh::load_from_cargo_manifest_dir().unwrap();
+
+        let (cluster_order, groups) = mesh.order_clusters();
+        let clusters = mesh.generate_cluster_data(&cluster_order, &groups);
+
+        for i in 0..clusters.len() {
+            if clusters[i].max_child_index >= 0 {
+                let count = clusters[i].meshlet_count;
+
+                assert!(count <= 16, "Cluster {i} has too many meshlets");
+            }
+        }
+    }
 }

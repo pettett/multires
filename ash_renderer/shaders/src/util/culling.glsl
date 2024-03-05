@@ -14,6 +14,12 @@ vec4[6] planes_from_mat(const mat4 mat) {
 	[[unroll]] for (int i = 0; i < 4; i++) { planes[4][i] = mat[i][3]; }
 	[[unroll]] for (int i = 0; i < 4; i++) { planes[5][i] = mat[i][3] - mat[i][2]; }
 
+	// Normalise planes
+	[[unroll]] for (int i = 0; i < 6; i++) {
+		float mag = length(planes[i].xyz);
+		planes[i] /= mag;
+	}
+
 	return planes;
 }
 // Calculate the distance from a plane to a point

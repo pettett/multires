@@ -1,5 +1,8 @@
 const uint MAX_CHILDREN = 5;
 
+// Use minimim of co_parent errors. Causes weirdness otherwise for some reason
+#define MIN_ERROR
+
 // Define INVOKE_PER_CLUSTER to say that workgroup count corresponds to maximum cluster being evaluated
 // #define INVOKE_PER_CLUSTER
 
