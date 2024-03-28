@@ -234,7 +234,7 @@ impl WingedMesh {
     pub fn generate_group_effect_graph(&self) -> petgraph::Graph<(), (), petgraph::Undirected> {
         let mut effect_graph = petgraph::Graph::new_undirected();
 
-        for g in 0..self.groups.len() {
+        for _g in 0..self.groups.len() {
             effect_graph.add_node(());
         }
 
@@ -275,7 +275,7 @@ pub fn colour_graph<Ty: petgraph::EdgeType>(
 ) -> Vec<Vec<usize>> {
     let mut neighbours = priority_queue::PriorityQueue::with_capacity(graph.node_count());
 
-    let mut colour_graph = graph.map(|n, m| None, |e, i| ());
+    let mut colour_graph = graph.map(|_n, _m| None, |_e, _i| ());
 
     let mut colours = Vec::new();
     let mut total_banned_colours = vec![false];
@@ -337,7 +337,7 @@ pub fn colour_graph<Ty: petgraph::EdgeType>(
 pub mod test {
     use std::{collections::HashMap, error};
 
-    use common::graph::{self, petgraph_to_svg};
+    use common::graph::{self};
 
     use crate::mesh::{
         graph::colour_graph,

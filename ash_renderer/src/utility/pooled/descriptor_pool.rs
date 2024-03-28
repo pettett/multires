@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use ash::vk::{self, DescriptorSetLayoutCreateInfo};
-use egui::ahash::HashMap;
+
 
 use crate::{utility::macros::*, VkHandle};
 
@@ -111,10 +111,10 @@ impl DescriptorSet {
                     let layout = &layout.layout[i];
 
                     match layout {
-                        DescriptorSetLayoutBinding::Storage { vis } => {
+                        DescriptorSetLayoutBinding::Storage { vis: _ } => {
                             assert!(buf.usage().contains(vk::BufferUsageFlags::STORAGE_BUFFER))
                         }
-                        DescriptorSetLayoutBinding::Uniform { vis } => {
+                        DescriptorSetLayoutBinding::Uniform { vis: _ } => {
                             assert!(buf.usage().contains(vk::BufferUsageFlags::UNIFORM_BUFFER))
                         }
                         DescriptorSetLayoutBinding::None => {

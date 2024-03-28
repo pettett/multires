@@ -1,15 +1,15 @@
 //use crate::MAX_TRIS_PER_CLUSTER;
 
-use std::{mem, sync::Mutex};
+
 
 use crate::mesh::{cluster_info::ClusterInfo, group_info::GroupInfo};
 
 use super::winged_mesh::WingedMesh;
 use common::{
-    graph::{assert_graph_contiguous, petgraph_to_svg, save_directed_graph},
+    graph::{assert_graph_contiguous, petgraph_to_svg},
     BoundingSphere,
 };
-use glam::Vec4Swizzles;
+
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 
 impl WingedMesh {
@@ -71,10 +71,10 @@ impl WingedMesh {
     }
 
     /// Partition the mesh into a single cluster
-    pub fn cluster_unity(&mut self, child_group_index: Option<usize>) {
+    pub fn cluster_unity(&mut self, _child_group_index: Option<usize>) {
         self.clusters = vec![ClusterInfo::new(0, self.face_count())];
 
-        for (fid, f) in self.iter_faces_mut() {
+        for (_fid, f) in self.iter_faces_mut() {
             f.cluster_idx = 0;
         }
     }
@@ -318,7 +318,7 @@ impl WingedMesh {
         let parts = graphs
             .par_iter()
             .enumerate()
-            .map(|(group_idx, graph)| {
+            .map(|(_group_idx, graph)| {
                 // TODO: fine tune so we get 64/126 meshlets
 
                 if graph.node_count() == 0 {
@@ -459,14 +459,13 @@ impl WingedMesh {
 
 #[cfg(test)]
 pub mod tests {
-    use std::{collections::HashSet, io::Write};
+    use std::{collections::HashSet};
 
-    use anyhow::Context;
+    
 
     use crate::{
         mesh::winged_mesh::{
             test::{TEST_MESH_DRAGON, TEST_MESH_LOW},
-            MeshError,
         },
         STARTING_CLUSTER_SIZE,
     };

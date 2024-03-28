@@ -1,7 +1,6 @@
 use std::{
     ffi::CString,
-    ptr,
-    sync::{Arc, Mutex},
+    sync::{Arc},
     time,
 };
 
@@ -9,7 +8,7 @@ use ash::vk::{self};
 use bevy_ecs::system::Query;
 use common::MeshVert;
 use common_renderer::components::transform::Transform;
-use gpu_allocator::vulkan::Allocator;
+
 
 use crate::{
     app::{
@@ -33,7 +32,7 @@ use crate::{
         render_pass::RenderPass,
         GraphicsPipeline, ShaderModule,
     },
-    VkHandle, CLEAR_COL, CLEAR_VALUES,
+    VkHandle, CLEAR_VALUES,
 };
 
 use super::{
@@ -190,7 +189,7 @@ impl ScreenData {
         core: &Core,
         screen: &Screen,
         render_pass: &RenderPass,
-        indirect_task_buffer: &TBuffer<vk::DrawMeshTasksIndirectCommandEXT>,
+        _indirect_task_buffer: &TBuffer<vk::DrawMeshTasksIndirectCommandEXT>,
     ) -> Self {
         let device = core.device.clone();
         let command_buffers = CommandBufferGroup::new(

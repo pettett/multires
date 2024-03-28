@@ -4,15 +4,15 @@ pub mod pidge;
 
 use std::mem;
 
-use common::{graph, MeshCluster, MeshVert, Meshlet, MultiResMesh, TriMesh};
+use common::{MeshCluster, MeshVert, Meshlet, MultiResMesh, TriMesh};
 
-use glam::Vec4;
+
 use indicatif::{ParallelProgressIterator, ProgressIterator};
 use mesh::winged_mesh::WingedMesh;
-use meshopt::SimplifyOptions;
+
 use mimalloc::MiMalloc;
 use rayon::iter::{
-    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
+    IndexedParallelIterator, IntoParallelRefIterator,
     IntoParallelRefMutIterator, ParallelIterator,
 };
 
@@ -55,7 +55,7 @@ pub fn group_and_partition_and_simplify(
     }
     .into();
 
-    let non_contig_even_clustering_config = &metis::PartitioningConfig {
+    let _non_contig_even_clustering_config = &metis::PartitioningConfig {
         method: metis::PartitioningMethod::MultilevelRecursiveBisection,
         //force_contiguous_partitions: true,
         //u_factor: Some(1),
@@ -246,7 +246,7 @@ pub fn simplify_lod_chain(
     tri_mesh: TriMesh,
     name: String,
 ) -> anyhow::Result<MultiResMesh> {
-    let non_contig_even_clustering_config = &metis::PartitioningConfig {
+    let _non_contig_even_clustering_config = &metis::PartitioningConfig {
         method: metis::PartitioningMethod::MultilevelRecursiveBisection,
         //force_contiguous_partitions: true,
         //u_factor: Some(1),
@@ -432,7 +432,7 @@ pub fn meshopt_simplify_lod_chain(tri_mesh: TriMesh, name: String) -> anyhow::Re
     )
     .unwrap();
 
-    for i in 0..9 {
+    for _i in 0..9 {
         let prev_indices = indices.clone();
 
         indices = meshopt::simplify_sloppy(
@@ -691,7 +691,7 @@ mod test {
     #[test]
     fn test_contiguous_meshes() {
         println!("Loading from gltf!");
-        let (mesh, tri_mesh) = WingedMesh::from_gltf("../../assets/dragon_1m.glb");
+        let (mesh, _tri_mesh) = WingedMesh::from_gltf("../../assets/dragon_1m.glb");
 
         let mesh_dual = mesh.generate_face_graph();
 
@@ -716,7 +716,7 @@ mod test {
         let mesh_name = "../../assets/sphere.glb";
 
         println!("Loading from gltf!");
-        let (mut mesh, tri_mesh) = WingedMesh::from_gltf(mesh_name);
+        let (mesh, tri_mesh) = WingedMesh::from_gltf(mesh_name);
 
         //group_and_partition_full_res(working_mesh, &verts, mesh_name.to_owned());
         //apply_simplification(working_mesh, &verts, mesh_name.to_owned());

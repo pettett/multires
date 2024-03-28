@@ -1,13 +1,13 @@
 use std::{
     ffi::CString,
-    sync::{Arc, Mutex},
+    sync::{Arc},
 };
 
 use ash::vk::{self};
 
 use common::MeshVert;
 
-use gpu_allocator::vulkan::Allocator;
+
 
 use crate::{
     app::{
@@ -32,7 +32,7 @@ use crate::{
         GraphicsPipeline, ShaderModule,
     },
     vertex::Vertex,
-    VkHandle, CLEAR_COL, CLEAR_VALUES,
+    VkHandle, CLEAR_VALUES,
 };
 
 use super::{

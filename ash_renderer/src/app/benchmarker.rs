@@ -3,7 +3,6 @@ use std::{fs, io::Write};
 use bevy_ecs::prelude::*;
 use common_renderer::{
     components::{camera::Camera, transform::Transform},
-    resources::time::Time,
 };
 use glam::Vec3A;
 

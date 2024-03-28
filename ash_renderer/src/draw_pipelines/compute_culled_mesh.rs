@@ -27,7 +27,7 @@ use crate::{
         render_pass::RenderPass,
         ComputePipeline, GraphicsPipeline, ShaderModule,
     },
-    VkHandle, CLEAR_COL, CLEAR_VALUES,
+    VkHandle, CLEAR_VALUES,
 };
 
 use super::{
@@ -48,7 +48,7 @@ pub struct ComputeCulledMesh {
 impl ComputeCulledMesh {
     pub fn new(
         core: Arc<Core>,
-        renderer: &Renderer,
+        _renderer: &Renderer,
         screen: &Screen,
 
         mesh_data: &MeshData,

@@ -1,4 +1,4 @@
-use idmap::IntegerId;
+
 
 use super::{edge::EdgeID, plane::Plane, quadric::Quadric, winged_mesh::WingedMesh};
 
@@ -50,7 +50,7 @@ impl VertID {
 
         //let mut last_e_part = None;
 
-        for i in 0..(vert.outgoing_edges().len() * 2) {
+        for _i in 0..(vert.outgoing_edges().len() * 2) {
             // attempt to move around the fan, by moving to our twin edge and going clockwise
             let e = mesh.get_edge(eid);
 

@@ -2,7 +2,7 @@ use ash::vk;
 
 use std::ffi::CStr;
 use std::os::raw::c_void;
-use std::ptr;
+
 
 unsafe extern "system" fn vulkan_debug_utils_callback(
     message_severity: vk::DebugUtilsMessageSeverityFlagsEXT,

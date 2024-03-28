@@ -180,7 +180,7 @@ pub fn draw_gui(
                 scene_events.send(SceneEvent::ResetScene);
             }
             if ui.button("Camera to benchmark end").clicked() {
-                let (cam, mut trans) = camera.single_mut();
+                let (_cam, mut trans) = camera.single_mut();
 
                 trans.set_pos(bench_end_pos);
                 trans.look_at(glam::Vec3A::ZERO);

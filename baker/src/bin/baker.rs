@@ -1,4 +1,4 @@
-use std::{default, fmt::Display, thread};
+use std::{thread};
 
 use baker::{
     group_and_partition_and_simplify, mesh::winged_mesh::WingedMesh, meshopt_simplify_lod_chain,

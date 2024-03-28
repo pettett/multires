@@ -1,6 +1,6 @@
 use std::cmp;
 
-use common::{graph::assert_graph_contiguous, MeshCluster, MultiResMesh};
+use common::{MeshCluster, MultiResMesh};
 
 #[repr(C)]
 #[derive(crevice::std430::AsStd430, Clone, Copy, PartialEq, Debug)]

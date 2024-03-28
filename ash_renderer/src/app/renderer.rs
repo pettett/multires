@@ -17,9 +17,8 @@ use crate::{
 };
 
 use super::{
-    fps_limiter::FPSMeasure,
     mesh_data::MeshData,
-    scene::{Scene, SceneEvent},
+    scene::{Scene},
 };
 #[derive(Debug, Clone, Copy, Event)]
 pub enum MeshDrawingPipelineType {
@@ -67,8 +66,8 @@ pub struct Renderer {
 impl Renderer {
     pub fn recreate_swapchain(
         &mut self,
-        scene: &Scene,
-        mesh_data: &MeshData,
+        _scene: &Scene,
+        _mesh_data: &MeshData,
         gui: &mut Gui,
         cam: &mut Camera,
     ) {

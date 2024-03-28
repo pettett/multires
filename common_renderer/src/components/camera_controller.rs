@@ -1,6 +1,6 @@
 use crate::{components::transform::Transform, resources::time::Time};
 use bevy_ecs::prelude::*;
-use glam::{Quat, Vec2, Vec3};
+use glam::{Vec2};
 use winit::{
     dpi::PhysicalPosition,
     event::{ElementState, KeyboardInput, MouseButton, VirtualKeyCode},

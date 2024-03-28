@@ -1,6 +1,6 @@
 use anyhow::Context;
 use common::TriMesh;
-use glam::{Vec3, Vec4};
+use glam::{Vec3};
 
 use std::{collections::HashSet, fs};
 
@@ -1057,7 +1057,7 @@ pub mod test {
 
         for mesh_name in &mesh_names {
             println!("Loading from gltf!");
-            let (mesh, tri_mesh) = WingedMesh::from_gltf(mesh_name);
+            let (mesh, _tri_mesh) = WingedMesh::from_gltf(mesh_name);
 
             mesh.assert_valid().unwrap();
         }

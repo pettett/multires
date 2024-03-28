@@ -125,7 +125,7 @@ pub fn process_scene_events(
             }
             // Reset to 50 instances
             SceneEvent::ResetScene => {
-                for (e, t, m) in transforms.iter() {
+                for (e, _t, _m) in transforms.iter() {
                     commands.entity(e).despawn()
                 }
                 scene.instances = 0;

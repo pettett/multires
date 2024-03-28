@@ -22,7 +22,7 @@ use common::graph::filter_nodes_by_weight;
 use indicatif::ProgressIterator;
 use petgraph::visit::EdgeRef;
 use rayon::prelude::*;
-use std::{collections::HashSet, fs, io::Write, ptr::null_mut, sync::mpsc, thread};
+use std::{collections::HashSet, ptr::null_mut, thread};
 use thiserror::Error;
 
 /// Specifies the used algorithm.
@@ -495,7 +495,7 @@ impl PartitioningConfig {
         //     .map(|g| )
         //     .collect();
 
-        for i in 0..partitions {
+        for _i in 0..partitions {
             let (handle, g) = rx.recv().unwrap();
             let (exact_graph, total_sub_parts) = handle?;
 

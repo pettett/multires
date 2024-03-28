@@ -1,4 +1,4 @@
-use std::{ffi::CString, io::Read, sync::Arc};
+use std::{ffi::CString, sync::Arc};
 
 use ash::vk;
 
@@ -6,7 +6,7 @@ use crate::{core::Core, VkHandle};
 
 use super::{
     device::Device,
-    macros::{vk_device_owned_wrapper, vk_handle_wrapper, vk_handle_wrapper_const},
+    macros::{vk_device_owned_wrapper, vk_handle_wrapper_const},
     pooled::descriptor_pool::DescriptorSetLayout,
 };
 

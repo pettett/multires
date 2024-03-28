@@ -1,19 +1,18 @@
 use std::{
-    ffi::CString,
-    sync::{Arc, Mutex},
+    sync::{Arc},
 };
 
 use ash::vk::{self};
 
-use common::MeshVert;
 
-use gpu_allocator::vulkan::Allocator;
+
+
 
 use crate::{
     app::{
         mesh_data::MeshData,
         renderer::Renderer,
-        scene::{ModelUniformBufferObject, Scene},
+        scene::{Scene},
     },
     core::Core,
     screen::Screen,
@@ -29,15 +28,12 @@ use crate::{
             },
         },
         render_pass::RenderPass,
-        ComputePipeline, GraphicsPipeline, ShaderModule,
+        ComputePipeline,
     },
-    vertex::Vertex,
-    VkHandle, CLEAR_COL, CLEAR_VALUES,
+    VkHandle,
 };
 
 use super::{
-    init_color_blend_attachment_states, init_depth_state_create_info,
-    init_multisample_state_create_info, init_rasterization_statue_create_info,
     render_multires::RenderMultires, render_multires_indices::RenderMultiresIndices, DrawPipeline,
 };
 

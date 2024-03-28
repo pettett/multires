@@ -3,7 +3,7 @@
 use std::{ffi, sync::Arc};
 
 use crate::{
-    app::scene::{ModelUniformBufferObject, Scene},
+    app::scene::{Scene},
     core::Core,
     utility::{
         buffer::{AsBuffer, TBuffer},

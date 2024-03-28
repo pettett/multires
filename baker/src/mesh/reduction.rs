@@ -245,7 +245,7 @@ mod tests {
 
     use crate::mesh::{
         plane::Plane,
-        winged_mesh::test::{TEST_MESH_MID, TEST_MESH_MONK},
+        winged_mesh::test::{TEST_MESH_MONK},
     };
 
     use super::super::winged_mesh::{test::TEST_MESH_HIGH, WingedMesh};

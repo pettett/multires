@@ -13,7 +13,7 @@ use crate::utility::{
 };
 
 use super::gpu_allocator::GpuAllocator;
-use bevy_ecs::prelude::*;
+
 
 pub struct Gui {
     device: Arc<Device>,

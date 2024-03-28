@@ -12,12 +12,10 @@ use crate::{
     draw_pipelines::indirect_tasks::MeshShaderMode,
     gui::allocator_visualiser_window::AllocatorVisualiserWindow,
     screen::find_depth_format,
-    spiral::Spiral,
     utility::{
         // the mod define some fixed functions that have been learned before.
         constants::*,
         pooled::descriptor_pool::DescriptorPool,
-        queue_family_indices::*,
         render_pass::RenderPass,
         swapchain::SwapChainSupportDetail,
         sync::SyncObjects,
@@ -47,11 +45,11 @@ use common_renderer::{
     },
     resources::time::Time,
 };
-use glam::{vec3a, Quat, Vec3A};
+use glam::{Quat, Vec3A};
 use gpu_allocator::{vulkan::*, AllocationSizes, AllocatorDebugSettings};
-use rand::{Rng, SeedableRng};
+
 use std::sync::Mutex;
-use std::{f32::consts::PI, sync::Arc};
+use std::{sync::Arc};
 use winit::event::WindowEvent;
 
 pub struct App {

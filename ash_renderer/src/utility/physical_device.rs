@@ -1,6 +1,6 @@
 use std::{ptr, sync::Arc};
 
-use ash::{extensions, vk};
+use ash::{vk};
 
 use crate::VkHandle;
 

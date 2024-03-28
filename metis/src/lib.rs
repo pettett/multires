@@ -236,7 +236,7 @@ pub mod test {
         for m in 0..M {
             for n in 0..N {
                 let a = nodes[m][n];
-                for i in 0..100 {
+                for _i in 0..100 {
                     if n < N - 1 {
                         graph.update_edge(a, nodes[m][n + 1], ());
 

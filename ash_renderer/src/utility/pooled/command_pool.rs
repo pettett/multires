@@ -1,4 +1,4 @@
-use std::{ptr, sync::Arc};
+use std::{sync::Arc};
 
 use ash::vk;
 
