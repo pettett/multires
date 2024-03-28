@@ -33,7 +33,11 @@ use crate::{
 use super::{
     init_color_blend_attachment_states, init_depth_state_create_info,
     init_multisample_state_create_info, init_rasterization_statue_create_info,
-    render_multires_indices::create_traditional_graphics_pipeline, DrawPipeline,
+    render_multires_indices::{
+        create_traditional_graphics_descriptor_set_layout,
+        create_traditional_graphics_descriptor_sets, create_traditional_graphics_pipeline,
+    },
+    DrawPipeline,
 };
 
 pub struct DrawIndirect {
@@ -50,7 +54,8 @@ pub struct DrawIndirect {
 
 impl DrawIndirect {
     pub fn new(renderer: &Renderer, mesh_data: &MeshData, scene: &Scene) -> Self {
-        let ubo_layout = create_descriptor_set_layout(renderer.core.device.clone());
+        let ubo_layout =
+            create_traditional_graphics_descriptor_set_layout(renderer.core.device.clone());
 
         let graphics_pipeline = create_traditional_graphics_pipeline(
             &renderer.core,
@@ -80,7 +85,7 @@ impl DrawIndirect {
             "Draw Indexed Indirect Buffer",
         );
 
-        let descriptor_sets = create_compute_culled_indices_descriptor_sets(
+        let descriptor_sets = create_traditional_graphics_descriptor_sets(
             &renderer.core.device,
             &renderer.descriptor_pool,
             &ubo_layout,
@@ -192,16 +197,6 @@ impl ScreenData {
                     core_draw.graphics_pipeline.handle(),
                 );
 
-                //let vertex_buffers = [vertex_buffer];
-                //let offsets = [0_u64];
-
-                //device.cmd_bind_vertex_buffers(command_buffer, 0, &vertex_buffers, &offsets);
-                //device.cmd_bind_index_buffer(
-                //    command_buffer,
-                //    index_buffer,
-                //    0,
-                //    vk::IndexType::UINT32,
-                //);
                 device.cmd_bind_descriptor_sets(
                     command_buffer,
                     vk::PipelineBindPoint::GRAPHICS,
@@ -224,14 +219,6 @@ impl ScreenData {
                     &[core_draw.vertex_buffer.handle()],
                     &[0],
                 );
-                // device.handle.cmd_draw_indexed(
-                //     command_buffer,
-                //     core_draw.indices_buffer.item_len() as _,
-                //     instance_count,
-                //     0,
-                //     0,
-                //     0,
-                // );
 
                 // Each instance has their own indirect drawing buffer, tracing out their position in the result buffer
                 device.cmd_draw_indexed_indirect(
@@ -241,14 +228,6 @@ impl ScreenData {
                     1,
                     core_draw.draw_indexed_indirect_buffer.stride() as _,
                 );
-                // device.cmd_draw_indexed(
-                //     command_buffer,
-                //     RECT_TEX_COORD_INDICES_DATA.len() as u32,
-                //     1,
-                //     0,
-                //     0,
-                //     0,
-                // );
 
                 device.cmd_end_render_pass(command_buffer);
 
@@ -264,70 +243,4 @@ impl ScreenData {
             command_pool: core.command_pool.clone(),
         }
     }
-}
-
-fn create_descriptor_set_layout(device: Arc<Device>) -> Arc<DescriptorSetLayout> {
-    let bindings = vec![
-        DescriptorSetLayoutBinding::Storage {
-            vis: vk::ShaderStageFlags::VERTEX,
-        },
-        DescriptorSetLayoutBinding::None,
-        DescriptorSetLayoutBinding::None,
-        DescriptorSetLayoutBinding::Uniform {
-            vis: vk::ShaderStageFlags::VERTEX,
-        },
-    ];
-    Arc::new(DescriptorSetLayout::new(device, bindings))
-}
-
-fn create_compute_culled_indices_descriptor_sets(
-    device: &Arc<Device>,
-    descriptor_pool: &Arc<DescriptorPool>,
-    descriptor_set_layout: &Arc<DescriptorSetLayout>,
-    uniform_transform_buffer: &Arc<TBuffer<ModelUniformBufferObject>>,
-    uniform_camera_buffers: &[Arc<impl AsBuffer>],
-    //texture: &Image,
-    swapchain_images_size: usize,
-) -> Vec<DescriptorSet> {
-    let mut layouts: Vec<vk::DescriptorSetLayout> = vec![];
-    for _ in 0..swapchain_images_size {
-        layouts.push(descriptor_set_layout.handle());
-    }
-
-    let descriptor_set_allocate_info = vk::DescriptorSetAllocateInfo::builder()
-        .descriptor_pool(descriptor_pool.handle())
-        .set_layouts(&layouts);
-
-    let vk_descriptor_sets = unsafe {
-        device
-            .allocate_descriptor_sets(&descriptor_set_allocate_info)
-            .expect("Failed to allocate descriptor sets!")
-    };
-
-    let descriptor_sets: Vec<_> = vk_descriptor_sets
-        .into_iter()
-        .enumerate()
-        .map(|(i, set)| {
-            DescriptorSet::new(
-                set,
-                descriptor_pool.clone(),
-                descriptor_set_layout.clone(),
-                device.clone(),
-                vec![
-                    DescriptorWriteData::Buffer {
-                        // 0
-                        buf: uniform_transform_buffer.buffer(),
-                    },
-                    DescriptorWriteData::Empty,
-                    DescriptorWriteData::Empty,
-                    DescriptorWriteData::Buffer {
-                        // 3
-                        buf: uniform_camera_buffers[i].buffer(),
-                    },
-                ],
-            )
-        })
-        .collect();
-
-    descriptor_sets
 }

@@ -52,7 +52,7 @@ impl RenderMultiresIndices {
         scene: &Scene,
         compact_indices_pipeline: ComputePipeline,
     ) -> Self {
-        let ubo_layout = create_descriptor_set_layout(core.device.clone());
+        let ubo_layout = create_traditional_graphics_descriptor_set_layout(core.device.clone());
 
         let graphics_pipeline = create_traditional_graphics_pipeline(
             &core,
@@ -68,7 +68,7 @@ impl RenderMultiresIndices {
         //     "Compact Indices Pipeline",
         // );
 
-        let descriptor_sets = create_compute_culled_indices_descriptor_sets(
+        let descriptor_sets = create_traditional_graphics_descriptor_sets(
             &core.device,
             &descriptor_pool,
             &ubo_layout,
@@ -386,7 +386,9 @@ pub fn create_traditional_graphics_pipeline(
     )
 }
 
-fn create_descriptor_set_layout(device: Arc<Device>) -> Arc<DescriptorSetLayout> {
+pub fn create_traditional_graphics_descriptor_set_layout(
+    device: Arc<Device>,
+) -> Arc<DescriptorSetLayout> {
     let bindings = vec![
         DescriptorSetLayoutBinding::Storage {
             vis: vk::ShaderStageFlags::VERTEX,
@@ -394,14 +396,14 @@ fn create_descriptor_set_layout(device: Arc<Device>) -> Arc<DescriptorSetLayout>
         DescriptorSetLayoutBinding::None,
         DescriptorSetLayoutBinding::None,
         DescriptorSetLayoutBinding::Uniform {
-            vis: vk::ShaderStageFlags::COMPUTE | vk::ShaderStageFlags::VERTEX,
+            vis: vk::ShaderStageFlags::VERTEX,
         },
     ];
 
     Arc::new(DescriptorSetLayout::new(device, bindings))
 }
 
-fn create_compute_culled_indices_descriptor_sets(
+pub fn create_traditional_graphics_descriptor_sets(
     device: &Arc<Device>,
     descriptor_pool: &Arc<DescriptorPool>,
     descriptor_set_layout: &Arc<DescriptorSetLayout>,
