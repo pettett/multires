@@ -1,38 +1,28 @@
-use std::{ffi::CString, sync::Arc};
+use std::sync::Arc;
 
 use ash::vk::{self};
 
 use common::MeshVert;
 
 use crate::{
-    app::{
-        mesh_data::MeshData,
-        renderer::Renderer,
-        scene::{ModelUniformBufferObject, Scene},
-    },
+    app::{mesh_data::MeshData, renderer::Renderer, scene::Scene},
     core::Core,
     screen::Screen,
     utility::{
-        buffer::{AsBuffer, TBuffer},
+        buffer::TBuffer,
         device::Device,
         pooled::{
             command_buffer_group::CommandBufferGroup,
             command_pool::CommandPool,
-            descriptor_pool::{
-                DescriptorPool, DescriptorSet, DescriptorSetLayout, DescriptorSetLayoutBinding,
-                DescriptorWriteData,
-            },
+            descriptor_pool::{DescriptorPool, DescriptorSet},
         },
         render_pass::RenderPass,
-        GraphicsPipeline, ShaderModule,
+        GraphicsPipeline,
     },
-    vertex::Vertex,
     VkHandle, CLEAR_VALUES,
 };
 
 use super::{
-    init_color_blend_attachment_states, init_depth_state_create_info,
-    init_multisample_state_create_info, init_rasterization_statue_create_info,
     render_multires_indices::{
         create_traditional_graphics_descriptor_set_layout,
         create_traditional_graphics_descriptor_sets, create_traditional_graphics_pipeline,
@@ -66,21 +56,19 @@ impl DrawIndirect {
 
         let instance_count = scene.uniform_transform_buffer.len();
 
-        let mut draw_indexed_commands = Vec::with_capacity(instance_count);
-
-        draw_indexed_commands.push(vk::DrawIndexedIndirectCommand {
+        let draw_indexed_commands = [vk::DrawIndexedIndirectCommand {
             index_count: mesh_data.index_buffer.len() as _,
             instance_count: instance_count as _,
             first_index: 0,
             vertex_offset: 0,
             first_instance: 0,
-        });
+        }];
 
         let draw_indexed_indirect_buffer = TBuffer::new_filled(
             &renderer.core,
             renderer.allocator.clone(),
             renderer.graphics_queue,
-            vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::INDIRECT_BUFFER,
+            vk::BufferUsageFlags::INDIRECT_BUFFER,
             &draw_indexed_commands,
             "Draw Indexed Indirect Buffer",
         );
