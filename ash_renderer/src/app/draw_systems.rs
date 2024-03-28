@@ -149,7 +149,7 @@ pub fn draw_gui(
         .show(ctx, |ui| {
             {
                 ui.checkbox(&mut scene.freeze_pos, "Freeze");
-                ui.add(egui::Slider::new(&mut scene.target_error, 0.0..=1.0).text("Target Error"));
+                ui.add(egui::Slider::new(&mut scene.target_error, 0.0..=10.0).text("Target Error"));
                 ui.add(egui::Slider::new(&mut scene.dist_pow, 0.001..=3.0).text("Distance Power"));
             }
 

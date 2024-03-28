@@ -10,6 +10,7 @@ use crate::{
     core::Core,
     multires::{self, GpuMeshlet},
     utility::buffer::TBuffer,
+    Config,
 };
 
 #[derive(Resource)]
@@ -25,8 +26,13 @@ pub struct MeshData {
 }
 
 impl MeshData {
-    pub fn new(core: &Core, allocator: &Arc<Mutex<Allocator>>, graphics_queue: vk::Queue) -> Self {
-        let data = MultiResMesh::load("assets/dragon_high.glb.bin").unwrap();
+    pub fn new(
+        core: &Core,
+        allocator: &Arc<Mutex<Allocator>>,
+        graphics_queue: vk::Queue,
+        config: &Config,
+    ) -> Self {
+        let data = MultiResMesh::load(&config.mesh_name).unwrap();
         // let data = MultiResMesh::load("assets/lucy.glb.bin").unwrap();
 
         let (cluster_order, cluster_groups) = data.order_clusters();

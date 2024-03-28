@@ -80,14 +80,12 @@ impl Instance {
             .collect();
 
         let create_info = vk::InstanceCreateInfo {
-            s_type: vk::StructureType::INSTANCE_CREATE_INFO,
             p_next: if VALIDATION.is_enable {
                 &debug_utils_create_info as *const vk::DebugUtilsMessengerCreateInfoEXT
                     as *const c_void
             } else {
                 ptr::null()
             },
-            flags: vk::InstanceCreateFlags::empty(),
             p_application_info: &app_info,
             pp_enabled_layer_names: if is_enable_debug {
                 layer_names.as_ptr()
@@ -101,6 +99,7 @@ impl Instance {
             } as u32,
             pp_enabled_extension_names: extension_names.as_ptr(),
             enabled_extension_count: extension_names.len() as u32,
+            ..Default::default()
         };
 
         println!("Creating instance");

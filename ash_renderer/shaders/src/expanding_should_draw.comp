@@ -48,7 +48,7 @@ layout(binding = 3) readonly uniform CameraUniformBufferObject {
 	CameraUniformObject ubo;
 };
 
-layout(std430, binding = 6) buffer IndirectDrawBuffer {
+layout(std430, binding = 6) writeonly buffer IndirectDrawBuffer {
 	IndirectDrawData indirect_draw[];
 };
 

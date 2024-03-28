@@ -23,6 +23,7 @@ use crate::{
         sync::SyncObjects,
         ShaderModule,
     },
+    Config,
 };
 
 use crate::app::{fps_limiter::FPSMeasure, scene::Scene};
@@ -93,7 +94,7 @@ impl App {
         false
     }
 
-    pub fn new(event_loop: &winit::event_loop::EventLoop<()>) -> App {
+    pub fn new(event_loop: &winit::event_loop::EventLoop<()>, config: &Config) -> App {
         let core = Core::new(event_loop);
 
         let device = &core.device;
@@ -243,13 +244,13 @@ impl App {
             graphics_queue,
             screen.swapchain(),
         );
-        let mesh = MeshData::new(&core, &allocator, graphics_queue);
+        let mesh = MeshData::new(&core, &allocator, graphics_queue, config);
 
         world.insert_resource(Scene {
             uniform_transform_buffer,
             uniform_camera,
             uniform_camera_buffers,
-            target_error: 0.9,
+            target_error: config.starting_error,
             dist_pow: 0.5,
             freeze_pos: false,
             instances: 0,

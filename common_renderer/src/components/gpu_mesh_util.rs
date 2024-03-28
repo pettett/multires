@@ -83,10 +83,14 @@ impl MultiResData for MultiResMesh {
         cluster_order: &[&MeshCluster],
         cluster_groups: &Vec<Vec<usize>>,
     ) -> Vec<ClusterData> {
-        let mut clusters = Vec::new();
+        let count = cluster_order.len();
+        let mut clusters = Vec::with_capacity(count);
 
-        let mut dag = petgraph::Graph::new();
-        let mut cluster_nodes = Vec::new();
+        // each node that has a parent has a minimum of 3 edges
+        let mut dag: petgraph::prelude::Graph<usize, ()> =
+            petgraph::Graph::with_capacity(count, count * 3);
+
+        let mut cluster_nodes = Vec::with_capacity(count);
 
         let mut index_sum = 0;
 
@@ -244,8 +248,21 @@ mod tests {
     use super::MultiResData;
 
     #[test]
+    fn readout() {
+        let name = "lucy.glb.bin";
+        let mesh = MultiResMesh::load_from_cargo_manifest_dir(name).unwrap();
+
+        let (cluster_order, groups) = mesh.order_clusters();
+        let clusters = mesh.generate_cluster_data(&cluster_order, &groups);
+
+        println!("{name}======");
+        println!("Cluster Count: {}", clusters.len());
+        println!("Layer Count: {}", clusters[0].layer);
+    }
+
+    #[test]
     fn test_co_parents() {
-        let mesh = MultiResMesh::load_from_cargo_manifest_dir().unwrap();
+        let mesh = MultiResMesh::load_from_cargo_manifest_dir("dragon_high.glb.bin").unwrap();
 
         let (cluster_order, groups) = mesh.order_clusters();
         let clusters = mesh.generate_cluster_data(&cluster_order, &groups);
@@ -265,7 +282,7 @@ mod tests {
 
     #[test]
     fn test_children_range() {
-        let mesh = MultiResMesh::load_from_cargo_manifest_dir().unwrap();
+        let mesh = MultiResMesh::load_from_cargo_manifest_dir("dragon_high.glb.bin").unwrap();
 
         let (cluster_order, groups) = mesh.order_clusters();
         let clusters = mesh.generate_cluster_data(&cluster_order, &groups);
@@ -283,7 +300,7 @@ mod tests {
 
     #[test]
     fn test_no_co_parents_at_zero() {
-        let mesh = MultiResMesh::load_from_cargo_manifest_dir().unwrap();
+        let mesh = MultiResMesh::load_from_cargo_manifest_dir("dragon_high.glb.bin").unwrap();
 
         let (cluster_order, groups) = mesh.order_clusters();
         let clusters = mesh.generate_cluster_data(&cluster_order, &groups);
@@ -299,7 +316,7 @@ mod tests {
 
     #[test]
     fn test_no_parents_at_zero_top() {
-        let mesh = MultiResMesh::load_from_cargo_manifest_dir().unwrap();
+        let mesh = MultiResMesh::load_from_cargo_manifest_dir("dragon_high.glb.bin").unwrap();
 
         let (cluster_order, groups) = mesh.order_clusters();
         let clusters = mesh.generate_cluster_data(&cluster_order, &groups);
@@ -318,7 +335,7 @@ mod tests {
     /// For expanding searches of the dag, starting at the top and
     #[test]
     fn test_dag_queue_traversal() {
-        let mesh = MultiResMesh::load_from_cargo_manifest_dir().unwrap();
+        let mesh = MultiResMesh::load_from_cargo_manifest_dir("dragon_high.glb.bin").unwrap();
 
         let (cluster_order, groups) = mesh.order_clusters();
         let clusters = mesh.generate_cluster_data(&cluster_order, &groups);
@@ -356,7 +373,7 @@ mod tests {
         const QUEUE_SIZE: usize = 3000;
         const STARTING: usize = 8;
 
-        let mesh = MultiResMesh::load_from_cargo_manifest_dir().unwrap();
+        let mesh = MultiResMesh::load_from_cargo_manifest_dir("dragon_high.glb.bin").unwrap();
         let (cluster_order, groups) = mesh.order_clusters();
         let clusters = mesh.generate_cluster_data(&cluster_order, &groups);
 
@@ -404,7 +421,7 @@ mod tests {
 
     #[test]
     fn test_monotonic_error() {
-        let mesh = MultiResMesh::load_from_cargo_manifest_dir().unwrap();
+        let mesh = MultiResMesh::load_from_cargo_manifest_dir("dragon_high.glb.bin").unwrap();
 
         let (cluster_order, groups) = mesh.order_clusters();
         let clusters = mesh.generate_cluster_data(&cluster_order, &groups);
@@ -440,7 +457,7 @@ mod tests {
 
     #[test]
     fn test_monotonic_bounds() {
-        let mesh = MultiResMesh::load_from_cargo_manifest_dir().unwrap();
+        let mesh = MultiResMesh::load_from_cargo_manifest_dir("dragon_high.glb.bin").unwrap();
 
         let (cluster_order, groups) = mesh.order_clusters();
         let clusters = mesh.generate_cluster_data(&cluster_order, &groups);
@@ -467,7 +484,7 @@ mod tests {
 
     #[test]
     fn test_group_consistency() {
-        let mesh = MultiResMesh::load_from_cargo_manifest_dir().unwrap();
+        let mesh = MultiResMesh::load_from_cargo_manifest_dir("dragon_high.glb.bin").unwrap();
 
         let (cluster_order, groups) = mesh.order_clusters();
         let clusters = mesh.generate_cluster_data(&cluster_order, &groups);
@@ -497,7 +514,7 @@ mod tests {
 
     #[test]
     fn test_max_5_children() {
-        let mesh = MultiResMesh::load_from_cargo_manifest_dir().unwrap();
+        let mesh = MultiResMesh::load_from_cargo_manifest_dir("dragon_high.glb.bin").unwrap();
 
         let (cluster_order, groups) = mesh.order_clusters();
         let clusters = mesh.generate_cluster_data(&cluster_order, &groups);
@@ -514,7 +531,7 @@ mod tests {
 
     #[test]
     fn test_max_16_meshlets() {
-        let mesh = MultiResMesh::load_from_cargo_manifest_dir().unwrap();
+        let mesh = MultiResMesh::load_from_cargo_manifest_dir("dragon_high.glb.bin").unwrap();
 
         let (cluster_order, groups) = mesh.order_clusters();
         let clusters = mesh.generate_cluster_data(&cluster_order, &groups);

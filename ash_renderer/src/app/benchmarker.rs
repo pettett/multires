@@ -96,8 +96,8 @@ pub fn benchmark(
                     renderer.render_gui = true;
                     commands.remove_resource::<Benchmarker>();
                 } else {
-                    scene_events.send(SceneEvent::AddInstances(200));
-                    bench.total_instances += 200;
+                    scene_events.send(SceneEvent::AddInstances(500));
+                    bench.total_instances += 500;
 
                     // Get next data ready
                     let ti = bench.total_instances;

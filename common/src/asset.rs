@@ -27,12 +27,13 @@ pub trait Asset: Sized + enc::Encode + de::Decode {
         Ok(bincode::decode_from_reader(&mut buf, config)?)
     }
 
-    fn load_from_cargo_manifest_dir() -> anyhow::Result<Self> {
+    fn load_from_cargo_manifest_dir(name: &'static str) -> anyhow::Result<Self> {
         let config = config::standard();
 
         let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         path.push("..");
-        path.push("assets/dragon_high.glb.bin");
+        path.push("assets");
+        path.push(name);
 
         let file = fs::File::open(&path).with_context(|| format!("{:?}", path.canonicalize()))?;
         let mut buf = BufReader::new(file);

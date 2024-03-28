@@ -1,0 +1,3 @@
+# mesh_name = "assets/lucy.glb.bin"
+mesh_name = "assets/dragon_high.glb.bin"
+starting_error = 0.5

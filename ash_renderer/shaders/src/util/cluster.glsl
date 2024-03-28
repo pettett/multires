@@ -30,9 +30,9 @@ float cluster_error(uint idx, vec3 local_cam_pos) {
 		vec3 dist_vec = center - local_cam_pos;
 		float sqr_center_distance = (dot(dist_vec, dist_vec));
 
-		float err_radius = error * radius;
+		float err_radius = error + radius;
 
-		return (err_radius * err_radius) / sqr_center_distance;
+		return (err_radius * err_radius) * inversesqrt(sqr_center_distance);
 		// return clusters[idx].error;
 	}
 }

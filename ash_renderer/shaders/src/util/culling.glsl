@@ -16,8 +16,8 @@ vec4[6] planes_from_mat(const mat4 mat) {
 
 	// Normalise planes
 	[[unroll]] for (int i = 0; i < 6; i++) {
-		float mag = length(planes[i].xyz);
-		planes[i] /= mag;
+		float sqr_mag = dot(planes[i].xyz, planes[i].xyz);
+		planes[i] *= inversesqrt(sqr_mag);
 	}
 
 	return planes;

@@ -18,6 +18,14 @@ const CLEAR_COL: vk::ClearColorValue = vk::ClearColorValue {
     float32: [1.0, 1.0, 1.0, 1.0],
 };
 
+use serde::Deserialize;
+
+#[derive(Deserialize)]
+pub struct Config {
+    mesh_name: String,
+    starting_error: f32,
+}
+
 pub trait VkHandle {
     type VkItem;
 
