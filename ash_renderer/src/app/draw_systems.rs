@@ -77,10 +77,6 @@ pub fn update_pipeline(
                 &renderer.screen,
                 &scene,
                 &mesh_data,
-                renderer.allocator.clone(),
-                &renderer.render_pass,
-                renderer.graphics_queue,
-                renderer.descriptor_pool.clone(),
             ))
         }
         MeshDrawingPipelineType::ComputeCulledIndices => Box::new(ComputeCulledIndices::new(
@@ -317,12 +313,11 @@ pub fn draw_frame(
         &temp2
     };
 
-    let submit_infos = [vk::SubmitInfo::builder()
+    let submit_infos = [*vk::SubmitInfo::builder()
         .command_buffers(command_buffers)
         .wait_dst_stage_mask(&wait_stages)
         .wait_semaphores(&wait_semaphores)
-        .signal_semaphores(&signal_semaphores)
-        .build()];
+        .signal_semaphores(&signal_semaphores)];
 
     unsafe {
         renderer

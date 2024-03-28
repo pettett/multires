@@ -43,7 +43,6 @@ use super::{
 
 pub struct ComputeCulledIndices {
     should_draw_pipeline: ComputePipeline,
-    compact_indices_pipeline: ComputePipeline,
     descriptor_sets: Vec<DescriptorSet>,
     screen: Option<ScreenData>,
     should_cull_buffer: Arc<TBuffer<u32>>,
@@ -136,10 +135,11 @@ impl ComputeCulledIndices {
             draw_indexed_indirect_buffer.clone(),
             renderer.descriptor_pool.clone(),
             scene,
+            compact_indices_pipeline,
         );
 
         Self {
-            compact_indices_pipeline,
+            //    compact_indices_pipeline,
             descriptor_sets,
             screen: None,
             should_cull_buffer,
@@ -198,48 +198,24 @@ impl ScreenData {
             let descriptor_sets_to_bind = [core_draw.descriptor_sets[i].handle()];
 
             let should_draw_buffer_barriers = [
-                vk::BufferMemoryBarrier2::builder()
+                *vk::BufferMemoryBarrier2::builder()
                     .buffer(core_draw.should_cull_buffer.handle())
                     .src_access_mask(vk::AccessFlags2::SHADER_STORAGE_WRITE)
                     .dst_access_mask(vk::AccessFlags2::SHADER_STORAGE_READ)
                     .src_stage_mask(vk::PipelineStageFlags2::COMPUTE_SHADER)
                     .dst_stage_mask(vk::PipelineStageFlags2::COMPUTE_SHADER)
-                    .size(vk::WHOLE_SIZE)
-                    .build(),
-                vk::BufferMemoryBarrier2::builder()
+                    .size(vk::WHOLE_SIZE),
+                *vk::BufferMemoryBarrier2::builder()
                     .buffer(core_draw.draw_indexed_indirect_buffer.handle())
                     .src_access_mask(vk::AccessFlags2::SHADER_STORAGE_WRITE)
                     .dst_access_mask(vk::AccessFlags2::SHADER_STORAGE_READ)
                     .src_stage_mask(vk::PipelineStageFlags2::COMPUTE_SHADER)
                     .dst_stage_mask(vk::PipelineStageFlags2::COMPUTE_SHADER)
-                    .size(vk::WHOLE_SIZE)
-                    .build(),
+                    .size(vk::WHOLE_SIZE),
             ];
 
             let should_draw_dependency_info =
                 vk::DependencyInfo::builder().buffer_memory_barriers(&should_draw_buffer_barriers);
-
-            let result_indices_buffer_barriers = [
-                vk::BufferMemoryBarrier2::builder()
-                    .buffer(core_draw.result_indices_buffer.handle())
-                    .src_access_mask(vk::AccessFlags2::SHADER_STORAGE_WRITE)
-                    .dst_access_mask(vk::AccessFlags2::INDEX_READ)
-                    .src_stage_mask(vk::PipelineStageFlags2::COMPUTE_SHADER)
-                    .dst_stage_mask(vk::PipelineStageFlags2::INDEX_INPUT)
-                    .size(vk::WHOLE_SIZE)
-                    .build(),
-                vk::BufferMemoryBarrier2::builder()
-                    .buffer(core_draw.draw_indexed_indirect_buffer.handle())
-                    .src_access_mask(vk::AccessFlags2::SHADER_STORAGE_WRITE)
-                    .dst_access_mask(vk::AccessFlags2::INDIRECT_COMMAND_READ)
-                    .src_stage_mask(vk::PipelineStageFlags2::COMPUTE_SHADER)
-                    .dst_stage_mask(vk::PipelineStageFlags2::DRAW_INDIRECT)
-                    .size(vk::WHOLE_SIZE)
-                    .build(),
-            ];
-
-            let result_indices_dependency_info = vk::DependencyInfo::builder()
-                .buffer_memory_barriers(&result_indices_buffer_barriers);
 
             unsafe {
                 device.cmd_bind_descriptor_sets(
@@ -271,26 +247,12 @@ impl ScreenData {
                     // Force previous compute shader to be complete before this one
                     device.cmd_pipeline_barrier2(command_buffer, &should_draw_dependency_info);
 
-                    device.cmd_bind_pipeline(
+                    core_draw.render_indices.compact_indices(
                         command_buffer,
-                        vk::PipelineBindPoint::COMPUTE,
-                        core_draw.compact_indices_pipeline.handle(),
+                        &core.device,
+                        instance,
+                        core_draw.should_cull_buffer.len(),
                     );
-
-                    device.cmd_dispatch_base(
-                        command_buffer,
-                        0,
-                        instance as _,
-                        0,
-                        core_draw.should_cull_buffer.len().div_ceil(16) as _,
-                        1,
-                        1,
-                    );
-
-                    // Force result indices to be complete before continuing.
-                    // Because we re-bind the pipelines every time, we need to specify this dependency for all
-                    // Otherwise, only the last instance will have correct info
-                    device.cmd_pipeline_barrier2(command_buffer, &result_indices_dependency_info);
                 }
 
                 core_draw.render_indices.render(

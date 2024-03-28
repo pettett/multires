@@ -297,21 +297,18 @@ fn create_graphics_pipeline(
     let main_function_name = CString::new("main").unwrap(); // the beginning function name in shader code.
 
     let shader_stages = [
-        vk::PipelineShaderStageCreateInfo::builder()
+        *vk::PipelineShaderStageCreateInfo::builder()
             .module(task_shader_module.handle())
             .name(&main_function_name)
-            .stage(vk::ShaderStageFlags::TASK_EXT)
-            .build(),
-        vk::PipelineShaderStageCreateInfo::builder()
+            .stage(vk::ShaderStageFlags::TASK_EXT),
+        *vk::PipelineShaderStageCreateInfo::builder()
             .module(mesh_shader_module.handle())
             .name(&main_function_name)
-            .stage(vk::ShaderStageFlags::MESH_EXT)
-            .build(),
-        vk::PipelineShaderStageCreateInfo::builder()
+            .stage(vk::ShaderStageFlags::MESH_EXT),
+        *vk::PipelineShaderStageCreateInfo::builder()
             .module(frag_shader_module.handle())
             .name(&main_function_name)
-            .stage(vk::ShaderStageFlags::FRAGMENT)
-            .build(),
+            .stage(vk::ShaderStageFlags::FRAGMENT),
     ];
 
     // let binding_description = VertexV3::get_binding_descriptions();
@@ -350,8 +347,7 @@ fn create_graphics_pipeline(
 
     let viewport_state_create_info = vk::PipelineViewportStateCreateInfo::builder()
         .scissors(&scissors)
-        .viewports(&viewports)
-        .build();
+        .viewports(&viewports);
 
     let rasterization_statue_create_info = init_rasterization_statue_create_info();
 

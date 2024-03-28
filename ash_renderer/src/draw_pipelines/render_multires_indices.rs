@@ -33,6 +33,7 @@ use super::{
 
 pub struct RenderMultiresIndices {
     graphics_pipeline: GraphicsPipeline,
+    compact_indices_pipeline: ComputePipeline,
     vertex_buffer: Arc<TBuffer<MeshVert>>,
     result_indices_buffer: Arc<TBuffer<u32>>,
     draw_indexed_indirect_buffer: Arc<TBuffer<vk::DrawIndexedIndirectCommand>>,
@@ -49,6 +50,7 @@ impl RenderMultiresIndices {
         draw_indexed_indirect_buffer: Arc<TBuffer<vk::DrawIndexedIndirectCommand>>,
         descriptor_pool: Arc<DescriptorPool>,
         scene: &Scene,
+        compact_indices_pipeline: ComputePipeline,
     ) -> Self {
         let ubo_layout = create_descriptor_set_layout(core.device.clone());
 
@@ -58,6 +60,13 @@ impl RenderMultiresIndices {
             screen.swapchain().extent,
             ubo_layout.clone(),
         );
+
+        // let compact_indices_pipeline = ComputePipeline::create_compute_pipeline(
+        //     &core,
+        //     include_bytes!("../../shaders/spv/compact_indices.comp"),
+        //     ubo_layout.clone(),
+        //     "Compact Indices Pipeline",
+        // );
 
         let descriptor_sets = create_compute_culled_indices_descriptor_sets(
             &core.device,
@@ -74,6 +83,58 @@ impl RenderMultiresIndices {
             result_indices_buffer,
             draw_indexed_indirect_buffer,
             descriptor_sets,
+            compact_indices_pipeline,
+        }
+    }
+
+    pub fn compact_indices(
+        &self,
+        cmd: vk::CommandBuffer,
+        device: &Device,
+        instance: usize,
+        cluster_count: usize,
+    ) {
+        let result_indices_buffer_barriers = [
+            *vk::BufferMemoryBarrier2::builder()
+                .buffer(self.result_indices_buffer.handle())
+                .src_access_mask(vk::AccessFlags2::SHADER_STORAGE_WRITE)
+                .dst_access_mask(vk::AccessFlags2::INDEX_READ)
+                .src_stage_mask(vk::PipelineStageFlags2::COMPUTE_SHADER)
+                .dst_stage_mask(vk::PipelineStageFlags2::INDEX_INPUT)
+                .size(vk::WHOLE_SIZE),
+            *vk::BufferMemoryBarrier2::builder()
+                .buffer(self.draw_indexed_indirect_buffer.handle())
+                .src_access_mask(vk::AccessFlags2::SHADER_STORAGE_WRITE)
+                .dst_access_mask(vk::AccessFlags2::INDIRECT_COMMAND_READ)
+                .src_stage_mask(vk::PipelineStageFlags2::COMPUTE_SHADER)
+                .dst_stage_mask(vk::PipelineStageFlags2::DRAW_INDIRECT)
+                .size(vk::WHOLE_SIZE),
+        ];
+
+        let result_indices_dependency_info =
+            vk::DependencyInfo::builder().buffer_memory_barriers(&result_indices_buffer_barriers);
+
+        unsafe {
+            device.cmd_bind_pipeline(
+                cmd,
+                vk::PipelineBindPoint::COMPUTE,
+                self.compact_indices_pipeline.handle(),
+            );
+
+            device.cmd_dispatch_base(
+                cmd,
+                0,
+                instance as _,
+                0,
+                cluster_count.div_ceil(16) as _,
+                1,
+                1,
+            );
+
+            // Force result indices to be complete before continuing.
+            // Because we re-bind the pipelines every time, we need to specify this dependency for all
+            // Otherwise, only the last instance will have correct info
+            device.cmd_pipeline_barrier2(cmd, &result_indices_dependency_info);
         }
     }
 }
