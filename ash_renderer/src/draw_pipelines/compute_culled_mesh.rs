@@ -27,7 +27,7 @@ use crate::{
         render_pass::RenderPass,
         ComputePipeline, GraphicsPipeline, ShaderModule,
     },
-    VkHandle, CLEAR_COL,
+    VkHandle, CLEAR_COL, CLEAR_VALUES,
 };
 
 use super::{
@@ -156,20 +156,6 @@ impl ScreenData {
                     .expect("Failed to begin recording Command Buffer at beginning!");
             }
 
-            let clear_values = [
-                vk::ClearValue {
-                    // clear value for color buffer
-                    color: CLEAR_COL,
-                },
-                vk::ClearValue {
-                    // clear value for depth buffer
-                    depth_stencil: vk::ClearDepthStencilValue {
-                        depth: 1.0,
-                        stencil: 0,
-                    },
-                },
-            ];
-
             let render_pass_begin_info = vk::RenderPassBeginInfo::builder()
                 .render_pass(render_pass.handle())
                 .framebuffer(screen.swapchain_framebuffers[i])
@@ -177,7 +163,7 @@ impl ScreenData {
                     offset: vk::Offset2D { x: 0, y: 0 },
                     extent: screen.swapchain().extent,
                 })
-                .clear_values(&clear_values);
+                .clear_values(&CLEAR_VALUES);
 
             let descriptor_sets_to_bind = [*core_draw.descriptor_sets[i]];
 

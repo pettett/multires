@@ -86,15 +86,8 @@ pub fn update_pipeline(
         MeshDrawingPipelineType::ComputeCulledIndices => Box::new(ComputeCulledIndices::new(
             renderer.core.clone(),
             &renderer,
-            &renderer.screen,
+            &scene,
             &mesh_data,
-            renderer.allocator.clone(),
-            &renderer.render_pass,
-            renderer.graphics_queue,
-            renderer.descriptor_pool.clone(),
-            scene.uniform_transform_buffer.clone(),
-            &scene.uniform_camera_buffers,
-            mesh_data.cluster_count,
         )),
         MeshDrawingPipelineType::DrawIndirect => {
             Box::new(DrawIndirect::new(&renderer, &mesh_data, &scene))

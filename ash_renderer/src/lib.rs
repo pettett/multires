@@ -18,6 +18,20 @@ const CLEAR_COL: vk::ClearColorValue = vk::ClearColorValue {
     float32: [1.0, 1.0, 1.0, 1.0],
 };
 
+const CLEAR_VALUES: [vk::ClearValue; 2] = [
+    vk::ClearValue {
+        // clear value for color buffer
+        color: CLEAR_COL,
+    },
+    vk::ClearValue {
+        // clear value for depth buffer
+        depth_stencil: vk::ClearDepthStencilValue {
+            depth: 1.0,
+            stencil: 0,
+        },
+    },
+];
+
 use serde::Deserialize;
 
 #[derive(Deserialize)]

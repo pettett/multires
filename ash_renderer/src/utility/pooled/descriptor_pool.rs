@@ -58,12 +58,12 @@ impl DescriptorPool {
             vk::DescriptorPoolSize {
                 // transform descriptor pool
                 ty: vk::DescriptorType::UNIFORM_BUFFER,
-                descriptor_count: swapchain_images_size * 4,
+                descriptor_count: swapchain_images_size * 8,
             },
             vk::DescriptorPoolSize {
                 // SSBO pool
                 ty: vk::DescriptorType::STORAGE_BUFFER,
-                descriptor_count: 8,
+                descriptor_count: 16,
             },
             vk::DescriptorPoolSize {
                 // sampler descriptor pool
@@ -74,7 +74,7 @@ impl DescriptorPool {
 
         let descriptor_pool_create_info = vk::DescriptorPoolCreateInfo::builder()
             .pool_sizes(&pool_sizes)
-            .max_sets(swapchain_images_size)
+            .max_sets(swapchain_images_size * 3)
             .flags(vk::DescriptorPoolCreateFlags::FREE_DESCRIPTOR_SET);
 
         let handle = unsafe {

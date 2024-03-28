@@ -8,6 +8,9 @@ pub mod compute_culled_mesh;
 pub mod draw_indirect;
 pub mod expanding_compute_culled_mesh;
 pub mod indirect_tasks;
+pub mod render_multires;
+pub mod render_multires_indices;
+pub mod render_multires_meshlets;
 pub mod stub;
 
 #[derive(Clone)]

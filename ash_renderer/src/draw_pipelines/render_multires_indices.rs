@@ -1,0 +1,392 @@
+// Draw indices from a should draw buffer
+
+use std::{ffi, sync::Arc};
+
+use crate::{
+    app::scene::{ModelUniformBufferObject, Scene},
+    core::Core,
+    utility::{
+        buffer::{AsBuffer, TBuffer},
+        pooled::descriptor_pool::{
+            DescriptorPool, DescriptorSet, DescriptorSetLayout, DescriptorSetLayoutBinding,
+            DescriptorWriteData,
+        },
+        ComputePipeline, GraphicsPipeline, ShaderModule,
+    },
+    vertex::Vertex,
+    VkHandle,
+};
+use ash::vk;
+use common::MeshVert;
+
+use crate::{
+    screen::Screen,
+    utility::{device::Device, render_pass::RenderPass},
+    CLEAR_VALUES,
+};
+
+use super::{
+    init_color_blend_attachment_states, init_depth_state_create_info,
+    init_multisample_state_create_info, init_rasterization_statue_create_info,
+    render_multires::RenderMultires,
+};
+
+pub struct RenderMultiresIndices {
+    graphics_pipeline: GraphicsPipeline,
+    vertex_buffer: Arc<TBuffer<MeshVert>>,
+    result_indices_buffer: Arc<TBuffer<u32>>,
+    draw_indexed_indirect_buffer: Arc<TBuffer<vk::DrawIndexedIndirectCommand>>,
+    descriptor_sets: Vec<DescriptorSet>,
+}
+
+impl RenderMultiresIndices {
+    pub fn new(
+        core: &Core,
+        screen: &Screen,
+        render_pass: &RenderPass,
+        vertex_buffer: Arc<TBuffer<MeshVert>>,
+        result_indices_buffer: Arc<TBuffer<u32>>,
+        draw_indexed_indirect_buffer: Arc<TBuffer<vk::DrawIndexedIndirectCommand>>,
+        descriptor_pool: Arc<DescriptorPool>,
+        scene: &Scene,
+    ) -> Self {
+        let ubo_layout = create_descriptor_set_layout(core.device.clone());
+
+        let graphics_pipeline = create_graphics_pipeline(
+            &core,
+            render_pass,
+            screen.swapchain().extent,
+            ubo_layout.clone(),
+        );
+
+        let descriptor_sets = create_compute_culled_indices_descriptor_sets(
+            &core.device,
+            &descriptor_pool,
+            &ubo_layout,
+            &scene.uniform_transform_buffer,
+            &scene.uniform_camera_buffers,
+            screen.swapchain().images.len(),
+        );
+
+        Self {
+            graphics_pipeline,
+            vertex_buffer,
+            result_indices_buffer,
+            draw_indexed_indirect_buffer,
+            descriptor_sets,
+        }
+    }
+}
+impl RenderMultires for RenderMultiresIndices {
+    fn render(
+        &self,
+        cmd: vk::CommandBuffer,
+        device: &Device,
+        screen: &Screen,
+        render_pass: &RenderPass,
+        frame: usize,
+    ) {
+        let descriptor_sets_to_bind = [self.descriptor_sets[frame].handle()];
+
+        let render_pass_begin_info = vk::RenderPassBeginInfo::builder()
+            .render_pass(render_pass.handle())
+            .framebuffer(screen.swapchain_framebuffers[frame])
+            .render_area(vk::Rect2D {
+                offset: vk::Offset2D { x: 0, y: 0 },
+                extent: screen.swapchain().extent,
+            })
+            .clear_values(&CLEAR_VALUES);
+
+        unsafe {
+            device.cmd_begin_render_pass(cmd, &render_pass_begin_info, vk::SubpassContents::INLINE);
+
+            device.cmd_set_scissor(
+                cmd,
+                0,
+                &[vk::Rect2D {
+                    offset: vk::Offset2D { x: 0, y: 0 },
+                    extent: screen.swapchain().extent,
+                }],
+            );
+            device.cmd_set_viewport(
+                cmd,
+                0,
+                &[vk::Viewport {
+                    x: 0.0,
+                    y: 0.0,
+                    width: screen.swapchain().extent.width as _,
+                    height: screen.swapchain().extent.height as _,
+                    min_depth: 0.0,
+                    max_depth: 1.0,
+                }],
+            );
+
+            device.cmd_bind_pipeline(
+                cmd,
+                vk::PipelineBindPoint::GRAPHICS,
+                self.graphics_pipeline.handle(),
+            );
+
+            //let vertex_buffers = [vertex_buffer];
+            //let offsets = [0_u64];
+
+            //device.cmd_bind_vertex_buffers(cmd, 0, &vertex_buffers, &offsets);
+            //device.cmd_bind_index_buffer(
+            //    cmd,
+            //    index_buffer,
+            //    0,
+            //    vk::IndexType::UINT32,
+            //);
+            device.cmd_bind_descriptor_sets(
+                cmd,
+                vk::PipelineBindPoint::GRAPHICS,
+                self.graphics_pipeline.layout(),
+                0,
+                &descriptor_sets_to_bind,
+                &[],
+            );
+
+            device.cmd_bind_index_buffer(
+                cmd,
+                self.result_indices_buffer.handle(),
+                0,
+                vk::IndexType::UINT32,
+            );
+
+            device.cmd_bind_vertex_buffers(cmd, 0, &[self.vertex_buffer.handle()], &[0]);
+            // device.handle.cmd_draw_indexed(
+            //     cmd,
+            //     core_draw.indices_buffer.item_len() as _,
+            //     instance_count,
+            //     0,
+            //     0,
+            //     0,
+            // );
+
+            // Each instance has their own indirect drawing buffer, tracing out their position in the result buffer
+            device.cmd_draw_indexed_indirect(
+                cmd,
+                self.draw_indexed_indirect_buffer.handle(),
+                0,
+                self.draw_indexed_indirect_buffer.len() as _,
+                self.draw_indexed_indirect_buffer.stride() as _,
+            );
+            // device.cmd_draw_indexed(
+            //     cmd,
+            //     RECT_TEX_COORD_INDICES_DATA.len() as u32,
+            //     1,
+            //     0,
+            //     0,
+            //     0,
+            // );
+
+            device.cmd_end_render_pass(cmd);
+        }
+    }
+}
+
+fn create_graphics_pipeline(
+    core: &Core,
+    render_pass: &RenderPass,
+    swapchain_extent: vk::Extent2D,
+    ubo_set_layout: Arc<DescriptorSetLayout>,
+) -> GraphicsPipeline {
+    let vert_shader_module = ShaderModule::new(
+        core.device.clone(),
+        bytemuck::cast_slice(include_bytes!("../../shaders/spv/vert.vert")),
+    );
+    let frag_shader_module = ShaderModule::new(
+        core.device.clone(),
+        bytemuck::cast_slice(include_bytes!("../../shaders/spv/frag_pbr.frag")),
+    );
+
+    let main_function_name = ffi::CString::new("main").unwrap(); // the beginning function name in shader code.
+
+    let shader_stages = [
+        vk::PipelineShaderStageCreateInfo::builder()
+            .module(vert_shader_module.handle())
+            .name(&main_function_name)
+            .stage(vk::ShaderStageFlags::VERTEX)
+            .build(),
+        vk::PipelineShaderStageCreateInfo::builder()
+            .module(frag_shader_module.handle())
+            .name(&main_function_name)
+            .stage(vk::ShaderStageFlags::FRAGMENT)
+            .build(),
+    ];
+
+    let binding_description = MeshVert::get_binding_descriptions();
+    let attribute_description = MeshVert::get_attribute_descriptions();
+
+    let vertex_input_state_create_info = vk::PipelineVertexInputStateCreateInfo::builder()
+        .vertex_binding_descriptions(&binding_description)
+        .vertex_attribute_descriptions(&attribute_description);
+
+    let vertex_input_assembly_state_info = vk::PipelineInputAssemblyStateCreateInfo {
+        primitive_restart_enable: vk::FALSE,
+        topology: vk::PrimitiveTopology::TRIANGLE_LIST,
+        ..Default::default()
+    };
+
+    let viewports = [vk::Viewport {
+        x: 0.0,
+        y: 0.0,
+        width: swapchain_extent.width as f32,
+        height: swapchain_extent.height as f32,
+        min_depth: 0.0,
+        max_depth: 1.0,
+    }];
+
+    let scissors = [vk::Rect2D {
+        offset: vk::Offset2D { x: 0, y: 0 },
+        extent: swapchain_extent,
+    }];
+
+    let viewport_state_create_info = vk::PipelineViewportStateCreateInfo::builder()
+        .scissors(&scissors)
+        .viewports(&viewports)
+        .build();
+
+    let rasterization_statue_create_info = init_rasterization_statue_create_info();
+
+    let multisample_state_create_info = init_multisample_state_create_info();
+
+    let depth_state_create_info = init_depth_state_create_info();
+
+    let color_blend_attachment_states = init_color_blend_attachment_states();
+
+    let color_blend_state = vk::PipelineColorBlendStateCreateInfo::builder()
+        .attachments(&color_blend_attachment_states)
+        .logic_op_enable(false)
+        .logic_op(vk::LogicOp::COPY)
+        .blend_constants([0.0, 0.0, 0.0, 0.0]);
+
+    let set_layouts = [ubo_set_layout.handle()];
+
+    let pipeline_layout_create_info =
+        vk::PipelineLayoutCreateInfo::builder().set_layouts(&set_layouts);
+
+    let dynamic_state_info = vk::PipelineDynamicStateCreateInfo::builder()
+        .dynamic_states(&[vk::DynamicState::SCISSOR, vk::DynamicState::VIEWPORT]);
+
+    let pipeline_layout = unsafe {
+        core.device
+            .create_pipeline_layout(&pipeline_layout_create_info, None)
+            .expect("Failed to create pipeline layout!")
+    };
+
+    let graphic_pipeline_create_infos = [vk::GraphicsPipelineCreateInfo::builder()
+        .stages(&shader_stages)
+        .rasterization_state(&rasterization_statue_create_info)
+        .viewport_state(&viewport_state_create_info)
+        .multisample_state(&multisample_state_create_info)
+        .depth_stencil_state(&depth_state_create_info)
+        .color_blend_state(&color_blend_state)
+        .dynamic_state(&dynamic_state_info)
+        .vertex_input_state(&vertex_input_state_create_info)
+        .input_assembly_state(&vertex_input_assembly_state_info)
+        .layout(pipeline_layout)
+        .render_pass(render_pass.handle())
+        .build()];
+
+    //  {
+    //     stage_count: shader_stages.len() as u32,
+    //     p_stages: shader_stages.as_ptr(),
+    //     p_viewport_state: &viewport_state_create_info,
+    //     p_rasterization_state: &rasterization_statue_create_info,
+    //     p_multisample_state: &multisample_state_create_info,
+    //     p_depth_stencil_state: &depth_state_create_info,
+    //     p_color_blend_state: &color_blend_state,
+    //     layout: pipeline_layout,
+    //     render_pass,
+    //     subpass: 0,
+    //     base_pipeline_handle: vk::Pipeline::null(),
+    //     base_pipeline_index: -1,
+    //     ..Default::default()
+    // };
+
+    let graphics_pipelines = unsafe {
+        core.device
+            .create_graphics_pipelines(
+                vk::PipelineCache::null(),
+                &graphic_pipeline_create_infos,
+                None,
+            )
+            .expect("Failed to create Graphics Pipeline!.")
+    };
+
+    core.name_object("Compute Culled Indices", graphics_pipelines[0]);
+
+    GraphicsPipeline::new(
+        core.device.clone(),
+        graphics_pipelines[0],
+        pipeline_layout,
+        ubo_set_layout,
+    )
+}
+
+fn create_descriptor_set_layout(device: Arc<Device>) -> Arc<DescriptorSetLayout> {
+    let bindings = vec![
+        DescriptorSetLayoutBinding::Storage {
+            vis: vk::ShaderStageFlags::VERTEX,
+        },
+        DescriptorSetLayoutBinding::None,
+        DescriptorSetLayoutBinding::None,
+        DescriptorSetLayoutBinding::Uniform {
+            vis: vk::ShaderStageFlags::COMPUTE | vk::ShaderStageFlags::VERTEX,
+        },
+    ];
+
+    Arc::new(DescriptorSetLayout::new(device, bindings))
+}
+
+fn create_compute_culled_indices_descriptor_sets(
+    device: &Arc<Device>,
+    descriptor_pool: &Arc<DescriptorPool>,
+    descriptor_set_layout: &Arc<DescriptorSetLayout>,
+    uniform_transform_buffer: &Arc<impl AsBuffer>,
+    uniform_camera_buffers: &[Arc<impl AsBuffer>],
+    swapchain_images_size: usize,
+) -> Vec<DescriptorSet> {
+    let mut layouts: Vec<vk::DescriptorSetLayout> = vec![];
+    for _ in 0..swapchain_images_size {
+        layouts.push(descriptor_set_layout.handle());
+    }
+
+    let descriptor_set_allocate_info = vk::DescriptorSetAllocateInfo::builder()
+        .descriptor_pool(descriptor_pool.handle())
+        .set_layouts(&layouts);
+
+    let vk_descriptor_sets = unsafe {
+        device
+            .allocate_descriptor_sets(&descriptor_set_allocate_info)
+            .expect("Failed to allocate descriptor sets!")
+    };
+
+    let descriptor_sets: Vec<_> = vk_descriptor_sets
+        .into_iter()
+        .enumerate()
+        .map(|(i, set)| {
+            DescriptorSet::new(
+                set,
+                descriptor_pool.clone(),
+                descriptor_set_layout.clone(),
+                device.clone(),
+                vec![
+                    DescriptorWriteData::Buffer {
+                        // 0
+                        buf: uniform_transform_buffer.buffer(),
+                    },
+                    DescriptorWriteData::Empty,
+                    DescriptorWriteData::Empty,
+                    DescriptorWriteData::Buffer {
+                        // 3
+                        buf: uniform_camera_buffers[i].buffer(),
+                    },
+                ],
+            )
+        })
+        .collect();
+
+    descriptor_sets
+}
