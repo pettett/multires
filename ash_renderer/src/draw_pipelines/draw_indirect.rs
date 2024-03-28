@@ -1,13 +1,8 @@
-use std::{
-    ffi::CString,
-    sync::{Arc},
-};
+use std::{ffi::CString, sync::Arc};
 
 use ash::vk::{self};
 
 use common::MeshVert;
-
-
 
 use crate::{
     app::{
@@ -37,7 +32,8 @@ use crate::{
 
 use super::{
     init_color_blend_attachment_states, init_depth_state_create_info,
-    init_multisample_state_create_info, init_rasterization_statue_create_info, DrawPipeline,
+    init_multisample_state_create_info, init_rasterization_statue_create_info,
+    render_multires_indices::create_traditional_graphics_pipeline, DrawPipeline,
 };
 
 pub struct DrawIndirect {
@@ -56,7 +52,7 @@ impl DrawIndirect {
     pub fn new(renderer: &Renderer, mesh_data: &MeshData, scene: &Scene) -> Self {
         let ubo_layout = create_descriptor_set_layout(renderer.core.device.clone());
 
-        let graphics_pipeline = create_graphics_pipeline(
+        let graphics_pipeline = create_traditional_graphics_pipeline(
             &renderer.core,
             &renderer.render_pass,
             renderer.screen.swapchain().extent,
@@ -268,143 +264,6 @@ impl ScreenData {
             command_pool: core.command_pool.clone(),
         }
     }
-}
-
-fn create_graphics_pipeline(
-    core: &Core,
-    render_pass: &RenderPass,
-    swapchain_extent: vk::Extent2D,
-    ubo_set_layout: Arc<DescriptorSetLayout>,
-) -> GraphicsPipeline {
-    let vert_shader_module = ShaderModule::new(
-        core.device.clone(),
-        bytemuck::cast_slice(include_bytes!("../../shaders/spv/vert.vert")),
-    );
-    let frag_shader_module = ShaderModule::new(
-        core.device.clone(),
-        bytemuck::cast_slice(include_bytes!("../../shaders/spv/frag_pbr.frag")),
-    );
-
-    let main_function_name = CString::new("main").unwrap(); // the beginning function name in shader code.
-
-    let shader_stages = [
-        *vk::PipelineShaderStageCreateInfo::builder()
-            .module(vert_shader_module.handle())
-            .name(&main_function_name)
-            .stage(vk::ShaderStageFlags::VERTEX),
-        *vk::PipelineShaderStageCreateInfo::builder()
-            .module(frag_shader_module.handle())
-            .name(&main_function_name)
-            .stage(vk::ShaderStageFlags::FRAGMENT),
-    ];
-
-    let binding_description = MeshVert::get_binding_descriptions();
-    let attribute_description = MeshVert::get_attribute_descriptions();
-
-    let vertex_input_state_create_info = vk::PipelineVertexInputStateCreateInfo::builder()
-        .vertex_binding_descriptions(&binding_description)
-        .vertex_attribute_descriptions(&attribute_description);
-
-    let vertex_input_assembly_state_info = vk::PipelineInputAssemblyStateCreateInfo {
-        primitive_restart_enable: vk::FALSE,
-        topology: vk::PrimitiveTopology::TRIANGLE_LIST,
-        ..Default::default()
-    };
-
-    let viewports = [vk::Viewport {
-        x: 0.0,
-        y: 0.0,
-        width: swapchain_extent.width as f32,
-        height: swapchain_extent.height as f32,
-        min_depth: 0.0,
-        max_depth: 1.0,
-    }];
-
-    let scissors = [vk::Rect2D {
-        offset: vk::Offset2D { x: 0, y: 0 },
-        extent: swapchain_extent,
-    }];
-
-    let viewport_state_create_info = vk::PipelineViewportStateCreateInfo::builder()
-        .scissors(&scissors)
-        .viewports(&viewports);
-
-    let rasterization_statue_create_info = init_rasterization_statue_create_info();
-
-    let multisample_state_create_info = init_multisample_state_create_info();
-
-    let depth_state_create_info = init_depth_state_create_info();
-
-    let color_blend_attachment_states = init_color_blend_attachment_states();
-
-    let color_blend_state = vk::PipelineColorBlendStateCreateInfo::builder()
-        .attachments(&color_blend_attachment_states)
-        .logic_op_enable(false)
-        .logic_op(vk::LogicOp::COPY)
-        .blend_constants([0.0, 0.0, 0.0, 0.0]);
-
-    let set_layouts = [ubo_set_layout.handle()];
-
-    let pipeline_layout_create_info =
-        vk::PipelineLayoutCreateInfo::builder().set_layouts(&set_layouts);
-
-    let dynamic_state_info = vk::PipelineDynamicStateCreateInfo::builder()
-        .dynamic_states(&[vk::DynamicState::SCISSOR, vk::DynamicState::VIEWPORT]);
-
-    let pipeline_layout = unsafe {
-        core.device
-            .create_pipeline_layout(&pipeline_layout_create_info, None)
-            .expect("Failed to create pipeline layout!")
-    };
-
-    let graphic_pipeline_create_infos = [vk::GraphicsPipelineCreateInfo::builder()
-        .stages(&shader_stages)
-        .rasterization_state(&rasterization_statue_create_info)
-        .viewport_state(&viewport_state_create_info)
-        .multisample_state(&multisample_state_create_info)
-        .depth_stencil_state(&depth_state_create_info)
-        .color_blend_state(&color_blend_state)
-        .dynamic_state(&dynamic_state_info)
-        .vertex_input_state(&vertex_input_state_create_info)
-        .input_assembly_state(&vertex_input_assembly_state_info)
-        .layout(pipeline_layout)
-        .render_pass(render_pass.handle())
-        .build()];
-
-    //  {
-    //     stage_count: shader_stages.len() as u32,
-    //     p_stages: shader_stages.as_ptr(),
-    //     p_viewport_state: &viewport_state_create_info,
-    //     p_rasterization_state: &rasterization_statue_create_info,
-    //     p_multisample_state: &multisample_state_create_info,
-    //     p_depth_stencil_state: &depth_state_create_info,
-    //     p_color_blend_state: &color_blend_state,
-    //     layout: pipeline_layout,
-    //     render_pass,
-    //     subpass: 0,
-    //     base_pipeline_handle: vk::Pipeline::null(),
-    //     base_pipeline_index: -1,
-    //     ..Default::default()
-    // };
-
-    let graphics_pipelines = unsafe {
-        core.device
-            .create_graphics_pipelines(
-                vk::PipelineCache::null(),
-                &graphic_pipeline_create_infos,
-                None,
-            )
-            .expect("Failed to create Graphics Pipeline!.")
-    };
-
-    core.name_object("Draw Indirect", graphics_pipelines[0]);
-
-    GraphicsPipeline::new(
-        core.device.clone(),
-        graphics_pipelines[0],
-        pipeline_layout,
-        ubo_set_layout,
-    )
 }
 
 fn create_descriptor_set_layout(device: Arc<Device>) -> Arc<DescriptorSetLayout> {

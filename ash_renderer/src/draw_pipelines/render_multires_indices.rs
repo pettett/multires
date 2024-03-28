@@ -3,7 +3,7 @@
 use std::{ffi, sync::Arc};
 
 use crate::{
-    app::scene::{Scene},
+    app::scene::Scene,
     core::Core,
     utility::{
         buffer::{AsBuffer, TBuffer},
@@ -54,7 +54,7 @@ impl RenderMultiresIndices {
     ) -> Self {
         let ubo_layout = create_descriptor_set_layout(core.device.clone());
 
-        let graphics_pipeline = create_graphics_pipeline(
+        let graphics_pipeline = create_traditional_graphics_pipeline(
             &core,
             render_pass,
             screen.swapchain().extent,
@@ -246,7 +246,7 @@ impl RenderMultires for RenderMultiresIndices {
     }
 }
 
-fn create_graphics_pipeline(
+pub fn create_traditional_graphics_pipeline(
     core: &Core,
     render_pass: &RenderPass,
     swapchain_extent: vk::Extent2D,
