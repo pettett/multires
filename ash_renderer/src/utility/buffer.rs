@@ -381,7 +381,7 @@ impl Buffer {
         assert!(self.usage.contains(BufferUsageFlags::TRANSFER_SRC));
         assert!(other.usage.contains(BufferUsageFlags::TRANSFER_DST));
 
-        let command_buffer = command_pool.begin_single_time_command(submit_queue);
+        let command_buffer = command_pool.begin_instant_command(submit_queue);
 
         let copy_regions = [vk::BufferCopy {
             src_offset: 0,

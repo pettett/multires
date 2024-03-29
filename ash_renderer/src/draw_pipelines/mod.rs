@@ -1,11 +1,15 @@
 use ash::vk;
 
-
-use crate::{core::Core, screen::Screen, utility::render_pass::RenderPass};
+use crate::{
+    core::Core,
+    screen::Screen,
+    utility::{pooled::command_pool::CommandBuffer, render_pass::RenderPass},
+};
 
 pub mod compute_culled_indices;
 pub mod compute_culled_mesh;
-pub mod draw_indirect;
+pub mod draw_full_res;
+pub mod draw_lod_chain;
 pub mod expanding_compute_culled_mesh;
 pub mod indirect_tasks;
 pub mod render_multires;
@@ -20,7 +24,8 @@ pub struct BufferRange {
 }
 
 pub trait DrawPipeline {
-    fn draw(&self, frame_index: usize) -> vk::CommandBuffer;
+    fn draw(&self, frame_index: usize, screen: &Screen, render_pass: &RenderPass)
+        -> &CommandBuffer;
 
     fn init_swapchain(&mut self, core: &Core, screen: &Screen, render_pass: &RenderPass);
 

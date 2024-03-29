@@ -48,8 +48,8 @@ use common_renderer::{
 use glam::{Quat, Vec3A};
 use gpu_allocator::{vulkan::*, AllocationSizes, AllocatorDebugSettings};
 
+use std::sync::Arc;
 use std::sync::Mutex;
-use std::{sync::Arc};
 use winit::event::WindowEvent;
 
 pub struct App {

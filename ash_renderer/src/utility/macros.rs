@@ -5,11 +5,11 @@ macro_rules! vk_device_owned_wrapper {
             handle: vk::$struct_name,
         }
 
-		impl $struct_name{
-			pub fn parent(&self) -> &Device{
-				&self.device
-			}
-		}
+        impl $struct_name {
+            pub fn parent(&self) -> &Device {
+                &self.device
+            }
+        }
 
         crate::utility::macros::vk_handle_wrapper!($struct_name);
         crate::utility::macros::vk_device_drop!($struct_name, $destructor_name);
@@ -43,6 +43,14 @@ macro_rules! vk_handle_wrapper {
                 self.handle
             }
         }
+
+        impl std::ops::Deref for $struct_name {
+            type Target = vk::$vk_name;
+
+            fn deref(&self) -> &Self::Target {
+                &self.handle
+            }
+        }
     };
 }
 macro_rules! vk_handle_wrapper_g {
@@ -57,6 +65,25 @@ macro_rules! vk_handle_wrapper_g {
 
         impl<P> std::ops::Deref for $struct_name<P> {
             type Target = vk::$struct_name;
+
+            fn deref(&self) -> &Self::Target {
+                &self.handle
+            }
+        }
+    };
+}
+macro_rules! vk_handle_wrapper_lifetime {
+    ($struct_name:ident, $vk_name:ident) => {
+        impl<'a> crate::VkHandle for $struct_name<'a> {
+            type VkItem = vk::$vk_name;
+
+            fn handle(&self) -> Self::VkItem {
+                self.handle
+            }
+        }
+
+        impl<'a> std::ops::Deref for $struct_name<'a> {
+            type Target = vk::$vk_name;
 
             fn deref(&self) -> &Self::Target {
                 &self.handle
@@ -112,3 +139,4 @@ pub(crate) use vk_device_owned_wrapper;
 pub(crate) use vk_handle_wrapper;
 pub(crate) use vk_handle_wrapper_const;
 pub(crate) use vk_handle_wrapper_g;
+pub(crate) use vk_handle_wrapper_lifetime;

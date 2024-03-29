@@ -1,68 +1,47 @@
-use std::{sync::Arc};
+use std::sync::Arc;
 
 use ash::vk;
 
-use crate::{utility::macros::vk_device_owned_wrapper, VkHandle};
+use crate::{
+    utility::macros::{vk_device_owned_wrapper, vk_handle_wrapper, vk_handle_wrapper_lifetime},
+    VkHandle,
+};
 
-use super::super::device::Device;
+use super::{
+    super::device::Device, command_buffer_group::CommandBufferGroup,
+    command_buffer_writer::CommandBufferWriter, instant_command_buffer::InstantCommandBuffer,
+};
 
-pub struct SingleTimeCommandBuffer {
+pub struct CommandBuffer {
     pool: Arc<CommandPool>,
-    pub handle: vk::CommandBuffer,
-    submit_queue: vk::Queue,
+    handle: vk::CommandBuffer,
 }
 
-impl Drop for SingleTimeCommandBuffer {
-    fn drop(&mut self) {
+vk_handle_wrapper!(CommandBuffer);
+
+impl CommandBuffer {
+    pub fn new(pool: Arc<CommandPool>, handle: vk::CommandBuffer) -> Self {
+        Self { pool, handle }
+    }
+
+    pub fn reset_and_write<'a>(&'a self) -> CommandBufferWriter<'a> {
         unsafe {
             self.pool
                 .device
-                .end_command_buffer(self.handle)
-                .expect("Failed to record Command Buffer at Ending!");
+                .reset_command_buffer(self.handle, vk::CommandBufferResetFlags::empty())
+                .expect("Failed to reset command buffer for writing");
         }
-
-        let buffers_to_submit = [self.handle];
-
-        let sumbit_infos = [vk::SubmitInfo {
-            command_buffer_count: 1,
-            p_command_buffers: buffers_to_submit.as_ptr(),
-            signal_semaphore_count: 0,
-
-            ..Default::default()
-        }];
-
-        unsafe {
-            self.pool
-                .device
-                .queue_submit(self.submit_queue, &sumbit_infos, vk::Fence::null())
-                .expect("Failed to Queue Submit!");
-            self.pool
-                .device
-                .queue_wait_idle(self.submit_queue)
-                .expect("Failed to wait Queue idle!");
-            self.pool
-                .device
-                .free_command_buffers(self.pool.handle, &buffers_to_submit);
-        }
+        CommandBufferWriter::new(
+            &self.pool.device,
+            self.handle,
+            vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT,
+        )
     }
 }
-
-pub struct OneShotCommandBuffer {
-    pool: Arc<CommandPool>,
-    pub handle: vk::CommandBuffer,
-}
-impl OneShotCommandBuffer {
-    pub fn end(&self) {
-        unsafe {
-            self.pool
-                .device
-                .end_command_buffer(self.handle)
-                .expect("Failed to record Command Buffer at Ending!");
-        }
-    }
-}
-impl Drop for OneShotCommandBuffer {
+impl Drop for CommandBuffer {
     fn drop(&mut self) {
+        // free commands as part of a group ideally, but we do it one by one here as it doesn't really matter for this
+
         unsafe {
             self.pool
                 .device
@@ -91,10 +70,10 @@ impl CommandPool {
         })
     }
 
-    pub fn begin_single_time_command(
+    pub fn begin_instant_command(
         self: &Arc<Self>,
         submit_queue: vk::Queue,
-    ) -> SingleTimeCommandBuffer {
+    ) -> InstantCommandBuffer {
         let command_buffer_allocate_info = vk::CommandBufferAllocateInfo {
             command_buffer_count: 1,
             command_pool: self.handle,
@@ -117,14 +96,10 @@ impl CommandPool {
                 .expect("Failed to begin recording Command Buffer at beginning!")
         };
 
-        SingleTimeCommandBuffer {
-            pool: self.clone(),
-            handle: command_buffer,
-            submit_queue,
-        }
+        InstantCommandBuffer::new(self.clone(), command_buffer, submit_queue)
     }
 
-    pub fn begin_one_shot_command(self: &Arc<Self>) -> OneShotCommandBuffer {
+    pub fn begin_one_shot_command(self: &Arc<Self>) -> CommandBuffer {
         let command_buffer_allocate_info = vk::CommandBufferAllocateInfo {
             command_buffer_count: 1,
             command_pool: self.handle,
@@ -138,16 +113,7 @@ impl CommandPool {
                 .expect("Failed to allocate Command Buffers!")
         }[0];
 
-        let command_buffer_begin_info = vk::CommandBufferBeginInfo::builder()
-            .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
-
-        unsafe {
-            self.device
-                .begin_command_buffer(handle, &command_buffer_begin_info)
-                .expect("Failed to begin recording Command Buffer at beginning!")
-        };
-
-        OneShotCommandBuffer {
+        CommandBuffer {
             pool: self.clone(),
             handle,
         }

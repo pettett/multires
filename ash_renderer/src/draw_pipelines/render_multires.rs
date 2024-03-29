@@ -2,13 +2,15 @@ use ash::vk;
 
 use crate::{
     screen::Screen,
-    utility::{device::Device, render_pass::RenderPass},
+    utility::{
+        device::Device, pooled::command_buffer_writer::CommandBufferWriter, render_pass::RenderPass,
+    },
 };
 
 pub trait RenderMultires {
     fn render(
         &self,
-        cmd: vk::CommandBuffer,
+        cmd: &mut CommandBufferWriter,
         device: &Device,
         screen: &Screen,
         render_pass: &RenderPass,

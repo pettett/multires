@@ -7,19 +7,21 @@ use raw_window_handle::HasRawDisplayHandle;
 
 use crate::utility::{
     device::Device,
-    pooled::{command_buffer_group::CommandBufferGroup, command_pool::CommandPool},
+    pooled::{
+        command_buffer_group::CommandBufferGroup,
+        command_pool::{CommandBuffer, CommandPool},
+    },
     queue_family_indices::QueueFamilyIndices,
     swapchain::Swapchain,
 };
 
 use super::gpu_allocator::GpuAllocator;
 
-
 pub struct Gui {
     device: Arc<Device>,
     window: Arc<winit::window::Window>,
     integration: egui_winit_ash_integration::Integration<GpuAllocator>,
-    ui_command_buffers: CommandBufferGroup,
+    ui_command_buffers: Arc<CommandBufferGroup>,
     in_frame: bool,
 }
 
@@ -56,7 +58,7 @@ impl Gui {
             device,
             integration,
             window,
-            ui_command_buffers,
+            ui_command_buffers: Arc::new(ui_command_buffers),
             in_frame: false,
         }
     }
@@ -71,29 +73,29 @@ impl Gui {
         self.integration.context()
     }
 
-    pub fn finish_draw(&mut self, image_index: usize) -> vk::CommandBuffer {
+    pub fn finish_draw(&mut self, image_index: usize) -> &CommandBuffer {
         let output = self.integration.end_frame(&self.window);
         self.in_frame = false;
 
         let clipped_meshes = self.integration.context().tessellate(output.shapes);
 
-        let cmd = self.ui_command_buffers[image_index];
+        let cmd = self.ui_command_buffers.get(image_index);
 
         let command_buffer_begin_info = vk::CommandBufferBeginInfo::builder()
             .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
 
         unsafe {
             self.device
-                .begin_command_buffer(cmd, &command_buffer_begin_info)
+                .begin_command_buffer(**cmd, &command_buffer_begin_info)
                 .expect("Failed to begin recording Command Buffer at beginning!")
         };
 
         self.integration
-            .paint(cmd, image_index, clipped_meshes, output.textures_delta);
+            .paint(**cmd, image_index, clipped_meshes, output.textures_delta);
 
         unsafe {
             self.device
-                .end_command_buffer(cmd)
+                .end_command_buffer(**cmd)
                 .expect("Failed to record Command Buffer at Ending!");
         }
 

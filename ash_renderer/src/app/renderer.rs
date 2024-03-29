@@ -16,14 +16,12 @@ use crate::{
     },
 };
 
-use super::{
-    mesh_data::MeshData,
-    scene::{Scene},
-};
+use super::{mesh_data::MeshData, scene::Scene};
 #[derive(Debug, Clone, Copy, Event)]
 pub enum MeshDrawingPipelineType {
     IndirectTasks,
     DrawIndirect,
+    DrawLOD,
     ComputeCulledMesh,
     ExpandingComputeCulledMesh,
     ComputeCulledIndices,

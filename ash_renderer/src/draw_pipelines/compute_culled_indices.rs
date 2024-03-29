@@ -1,19 +1,9 @@
-use std::{
-    sync::{Arc},
-};
+use std::sync::Arc;
 
 use ash::vk::{self};
 
-
-
-
-
 use crate::{
-    app::{
-        mesh_data::MeshData,
-        renderer::Renderer,
-        scene::{Scene},
-    },
+    app::{mesh_data::MeshData, renderer::Renderer, scene::Scene},
     core::Core,
     screen::Screen,
     utility::{
@@ -21,7 +11,7 @@ use crate::{
         device::Device,
         pooled::{
             command_buffer_group::CommandBufferGroup,
-            command_pool::CommandPool,
+            command_pool::{CommandBuffer, CommandPool},
             descriptor_pool::{
                 DescriptorPool, DescriptorSet, DescriptorSetLayout, DescriptorSetLayoutBinding,
                 DescriptorWriteData,
@@ -148,8 +138,17 @@ impl ComputeCulledIndices {
 }
 
 impl DrawPipeline for ComputeCulledIndices {
-    fn draw(&self, frame_index: usize) -> vk::CommandBuffer {
-        self.screen.as_ref().unwrap().command_buffers[frame_index]
+    fn draw(
+        &self,
+        frame_index: usize,
+        screen: &Screen,
+        render_pass: &RenderPass,
+    ) -> &CommandBuffer {
+        self.screen
+            .as_ref()
+            .unwrap()
+            .command_buffers
+            .get(frame_index)
     }
     fn init_swapchain(&mut self, core: &Core, screen: &Screen, render_pass: &RenderPass) {
         self.screen = Some(ScreenData::create_command_buffers(
@@ -166,7 +165,7 @@ impl DrawPipeline for ComputeCulledIndices {
 struct ScreenData {
     device: Arc<Device>,
     command_pool: Arc<CommandPool>,
-    command_buffers: CommandBufferGroup,
+    command_buffers: Arc<CommandBufferGroup>,
 }
 
 impl ScreenData {
@@ -177,20 +176,12 @@ impl ScreenData {
         render_pass: &RenderPass,
     ) -> Self {
         let device = core.device.clone();
-        let command_buffers = CommandBufferGroup::new(
+        let mut command_buffers = CommandBufferGroup::new(
             core.command_pool.clone(),
             screen.swapchain_framebuffers.len() as _,
         );
 
-        for (i, &command_buffer) in command_buffers.iter().enumerate() {
-            let command_buffer_begin_info = vk::CommandBufferBeginInfo::builder(); //.flags(vk::CommandBufferUsageFlags::SIMULTANEOUS_USE);
-
-            unsafe {
-                device
-                    .begin_command_buffer(command_buffer, &command_buffer_begin_info)
-                    .expect("Failed to begin recording Command Buffer at beginning!");
-            }
-
+        for (i, mut command_buffer) in command_buffers.iter_to_fill().enumerate() {
             let descriptor_sets_to_bind = [core_draw.descriptor_sets[i].handle()];
 
             let should_draw_buffer_barriers = [
@@ -215,7 +206,7 @@ impl ScreenData {
 
             unsafe {
                 device.cmd_bind_descriptor_sets(
-                    command_buffer,
+                    *command_buffer,
                     vk::PipelineBindPoint::COMPUTE,
                     core_draw.should_draw_pipeline.layout(),
                     0,
@@ -225,13 +216,13 @@ impl ScreenData {
 
                 for instance in 0..core_draw.draw_indexed_indirect_buffer.len() {
                     device.cmd_bind_pipeline(
-                        command_buffer,
+                        *command_buffer,
                         vk::PipelineBindPoint::COMPUTE,
                         core_draw.should_draw_pipeline.handle(),
                     );
 
                     device.cmd_dispatch_base(
-                        command_buffer,
+                        *command_buffer,
                         0,
                         instance as _,
                         0,
@@ -241,10 +232,10 @@ impl ScreenData {
                     );
 
                     // Force previous compute shader to be complete before this one
-                    device.cmd_pipeline_barrier2(command_buffer, &should_draw_dependency_info);
+                    device.cmd_pipeline_barrier2(*command_buffer, &should_draw_dependency_info);
 
                     core_draw.render_indices.compact_indices(
-                        command_buffer,
+                        *command_buffer,
                         &core.device,
                         instance,
                         core_draw.should_cull_buffer.len(),
@@ -252,21 +243,17 @@ impl ScreenData {
                 }
 
                 core_draw.render_indices.render(
-                    command_buffer,
+                    &mut command_buffer,
                     &core.device,
                     screen,
                     render_pass,
                     i,
                 );
-
-                device
-                    .end_command_buffer(command_buffer)
-                    .expect("Failed to record Command Buffer at Ending!");
             }
         }
 
         Self {
-            command_buffers,
+            command_buffers: Arc::new(command_buffers),
             device,
             command_pool: core.command_pool.clone(),
         }

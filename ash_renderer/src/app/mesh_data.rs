@@ -22,7 +22,7 @@ pub struct MeshData {
     pub stripped_meshlet_buffer: Arc<TBuffer<GpuMeshlet>>,
     pub cluster_buffer: Arc<TBuffer<ClusterData>>,
     pub meshlet_index_buffer: Arc<TBuffer<u32>>,
-    pub index_buffer: Arc<TBuffer<u32>>,
+    pub lod_index_buffers: Vec<Arc<TBuffer<u32>>>,
 }
 
 impl MeshData {
@@ -37,6 +37,37 @@ impl MeshData {
 
         let (cluster_order, cluster_groups) = data.order_clusters();
         let mut cluster_data = data.generate_cluster_data(&cluster_order, &cluster_groups);
+
+        let levels = cluster_order[0].lod + 1;
+        let mut indices = vec![Vec::new(); levels];
+
+        for c in &cluster_order {
+            for m in c.meshlets() {
+                m.calc_indices_to_vec(&mut indices[c.lod]);
+            }
+        }
+
+        let mut lod_index_buffers = Vec::new();
+
+        for l in indices {
+            let index_buffer = TBuffer::new_filled(
+                core,
+                allocator.clone(),
+                graphics_queue,
+                // Allow index use for testing
+                vk::BufferUsageFlags::INDEX_BUFFER,
+                &l,
+                "Indices Buffer",
+            );
+            println!("Size: {}", l.len());
+            lod_index_buffers.push(index_buffer)
+        }
+
+        // assert_eq!(
+        //     indices[0].len(),
+        //     data.full_indices.len(),
+        //     "LOD0 inconsistent"
+        // );
 
         let size = cluster_data[0].radius;
 
@@ -90,15 +121,6 @@ impl MeshData {
             "Submesh Buffer",
         );
 
-        let index_buffer = TBuffer::new_filled(
-            core,
-            allocator.clone(),
-            graphics_queue,
-            // Allow index use for testing
-            vk::BufferUsageFlags::INDEX_BUFFER,
-            &data.full_indices,
-            "Indices Buffer",
-        );
         let meshlet_index_buffer = TBuffer::new_filled(
             core,
             allocator.clone(),
@@ -115,7 +137,7 @@ impl MeshData {
             stripped_meshlet_buffer,
             cluster_buffer,
             meshlet_index_buffer,
-            index_buffer,
+            lod_index_buffers,
             cluster_count,
         }
     }

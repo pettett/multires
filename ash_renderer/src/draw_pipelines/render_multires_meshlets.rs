@@ -12,6 +12,7 @@ use crate::{
         buffer::{AsBuffer, TBuffer},
         device::Device,
         pooled::{
+            command_buffer_writer::CommandBufferWriter,
             descriptor_pool::{
                 DescriptorPool, DescriptorSet, DescriptorSetLayout, DescriptorSetLayoutBinding,
                 DescriptorWriteData,
@@ -92,7 +93,7 @@ impl RenderMultiresMeshlets {
 impl RenderMultires for RenderMultiresMeshlets {
     fn render(
         &self,
-        cmd: ash::vk::CommandBuffer,
+        cmd: &mut CommandBufferWriter,
         device: &crate::utility::device::Device,
         screen: &crate::screen::Screen,
         render_pass: &crate::utility::render_pass::RenderPass,
@@ -112,46 +113,31 @@ impl RenderMultires for RenderMultiresMeshlets {
         unsafe {
             let query = self.query && frame == 0;
             if query {
-                self.query_pool.reset(cmd, frame as _);
+                self.query_pool.reset(**cmd, frame as _);
             }
 
-            device.cmd_begin_render_pass(cmd, &render_pass_begin_info, vk::SubpassContents::INLINE);
+            device.cmd_begin_render_pass(
+                **cmd,
+                &render_pass_begin_info,
+                vk::SubpassContents::INLINE,
+            );
 
-            device.cmd_set_scissor(
-                cmd,
-                0,
-                &[vk::Rect2D {
-                    offset: vk::Offset2D { x: 0, y: 0 },
-                    extent: screen.swapchain().extent,
-                }],
-            );
-            device.cmd_set_viewport(
-                cmd,
-                0,
-                &[vk::Viewport {
-                    x: 0.0,
-                    y: 0.0,
-                    width: screen.swapchain().extent.width as _,
-                    height: screen.swapchain().extent.height as _,
-                    min_depth: 0.0,
-                    max_depth: 1.0,
-                }],
-            );
+            cmd.set_dynamic_screen(screen);
 
             device.cmd_bind_pipeline(
-                cmd,
+                **cmd,
                 vk::PipelineBindPoint::GRAPHICS,
                 self.graphics_pipeline.handle(),
             );
             {
                 let _qry = if query {
-                    Some(self.query_pool.begin_query(cmd, frame as _))
+                    Some(self.query_pool.begin_query(**cmd, frame as _))
                 } else {
                     None
                 };
 
                 device.cmd_bind_descriptor_sets(
-                    cmd,
+                    **cmd,
                     vk::PipelineBindPoint::GRAPHICS,
                     self.graphics_pipeline.layout(),
                     0,
@@ -159,10 +145,10 @@ impl RenderMultires for RenderMultiresMeshlets {
                     &[],
                 );
 
-                self.indirect_task_buffer.draw_tasks_indirect(cmd);
+                self.indirect_task_buffer.draw_tasks_indirect(**cmd);
             }
 
-            device.cmd_end_render_pass(cmd);
+            device.cmd_end_render_pass(**cmd);
         }
     }
 }

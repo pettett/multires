@@ -28,11 +28,15 @@ impl Meshlet {
         self.local_indices.as_ref()
     }
 
-    pub fn calc_indices(&self) -> Vec<u32> {
-        let mut indices = Vec::with_capacity(self.local_indices.len());
+    pub fn calc_indices_to_vec(&self, indices: &mut Vec<u32>) {
         for &l in &self.local_indices {
             indices.push(self.verts[l as usize]);
         }
+    }
+
+    pub fn calc_indices(&self) -> Vec<u32> {
+        let mut indices = Vec::with_capacity(self.local_indices.len());
+        self.calc_indices_to_vec(&mut indices);
         indices
     }
 

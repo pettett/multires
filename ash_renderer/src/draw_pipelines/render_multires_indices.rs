@@ -7,9 +7,12 @@ use crate::{
     core::Core,
     utility::{
         buffer::{AsBuffer, TBuffer},
-        pooled::descriptor_pool::{
-            DescriptorPool, DescriptorSet, DescriptorSetLayout, DescriptorSetLayoutBinding,
-            DescriptorWriteData,
+        pooled::{
+            command_buffer_writer::CommandBufferWriter,
+            descriptor_pool::{
+                DescriptorPool, DescriptorSet, DescriptorSetLayout, DescriptorSetLayoutBinding,
+                DescriptorWriteData,
+            },
         },
         ComputePipeline, GraphicsPipeline, ShaderModule,
     },
@@ -141,7 +144,7 @@ impl RenderMultiresIndices {
 impl RenderMultires for RenderMultiresIndices {
     fn render(
         &self,
-        cmd: vk::CommandBuffer,
+        cmd: &mut CommandBufferWriter,
         device: &Device,
         screen: &Screen,
         render_pass: &RenderPass,
@@ -159,31 +162,16 @@ impl RenderMultires for RenderMultiresIndices {
             .clear_values(&CLEAR_VALUES);
 
         unsafe {
-            device.cmd_begin_render_pass(cmd, &render_pass_begin_info, vk::SubpassContents::INLINE);
+            device.cmd_begin_render_pass(
+                **cmd,
+                &render_pass_begin_info,
+                vk::SubpassContents::INLINE,
+            );
 
-            device.cmd_set_scissor(
-                cmd,
-                0,
-                &[vk::Rect2D {
-                    offset: vk::Offset2D { x: 0, y: 0 },
-                    extent: screen.swapchain().extent,
-                }],
-            );
-            device.cmd_set_viewport(
-                cmd,
-                0,
-                &[vk::Viewport {
-                    x: 0.0,
-                    y: 0.0,
-                    width: screen.swapchain().extent.width as _,
-                    height: screen.swapchain().extent.height as _,
-                    min_depth: 0.0,
-                    max_depth: 1.0,
-                }],
-            );
+            cmd.set_dynamic_screen(screen);
 
             device.cmd_bind_pipeline(
-                cmd,
+                **cmd,
                 vk::PipelineBindPoint::GRAPHICS,
                 self.graphics_pipeline.handle(),
             );
@@ -199,7 +187,7 @@ impl RenderMultires for RenderMultiresIndices {
             //    vk::IndexType::UINT32,
             //);
             device.cmd_bind_descriptor_sets(
-                cmd,
+                **cmd,
                 vk::PipelineBindPoint::GRAPHICS,
                 self.graphics_pipeline.layout(),
                 0,
@@ -208,40 +196,24 @@ impl RenderMultires for RenderMultiresIndices {
             );
 
             device.cmd_bind_index_buffer(
-                cmd,
+                **cmd,
                 self.result_indices_buffer.handle(),
                 0,
                 vk::IndexType::UINT32,
             );
 
-            device.cmd_bind_vertex_buffers(cmd, 0, &[self.vertex_buffer.handle()], &[0]);
-            // device.handle.cmd_draw_indexed(
-            //     cmd,
-            //     core_draw.indices_buffer.item_len() as _,
-            //     instance_count,
-            //     0,
-            //     0,
-            //     0,
-            // );
+            device.cmd_bind_vertex_buffers(**cmd, 0, &[self.vertex_buffer.handle()], &[0]);
 
             // Each instance has their own indirect drawing buffer, tracing out their position in the result buffer
             device.cmd_draw_indexed_indirect(
-                cmd,
+                **cmd,
                 self.draw_indexed_indirect_buffer.handle(),
                 0,
                 self.draw_indexed_indirect_buffer.len() as _,
                 self.draw_indexed_indirect_buffer.stride() as _,
             );
-            // device.cmd_draw_indexed(
-            //     cmd,
-            //     RECT_TEX_COORD_INDICES_DATA.len() as u32,
-            //     1,
-            //     0,
-            //     0,
-            //     0,
-            // );
 
-            device.cmd_end_render_pass(cmd);
+            device.cmd_end_render_pass(**cmd);
         }
     }
 }

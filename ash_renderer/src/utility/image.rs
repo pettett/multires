@@ -278,7 +278,7 @@ impl Image {
         new_layout: vk::ImageLayout,
         mip_levels: u32,
     ) {
-        let command_buffer = command_pool.begin_single_time_command(submit_queue);
+        let command_buffer = command_pool.begin_instant_command(submit_queue);
 
         let src_access_mask;
         let dst_access_mask;
@@ -377,7 +377,7 @@ impl Image {
         tex_height: u32,
         mip_levels: u32,
     ) {
-        let command_buffer = command_pool.begin_single_time_command(submit_queue);
+        let command_buffer = command_pool.begin_instant_command(submit_queue);
 
         let mut image_barrier = vk::ImageMemoryBarrier {
             old_layout: vk::ImageLayout::UNDEFINED,
@@ -599,7 +599,7 @@ pub fn copy_buffer_to_image(
     width: u32,
     height: u32,
 ) {
-    let command_buffer = command_pool.begin_single_time_command(submit_queue);
+    let command_buffer = command_pool.begin_instant_command(submit_queue);
 
     let buffer_image_regions = [vk::BufferImageCopy {
         image_subresource: vk::ImageSubresourceLayers {

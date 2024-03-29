@@ -1,14 +1,9 @@
-use std::{
-    ffi::CString,
-    sync::{Arc},
-    time,
-};
+use std::{ffi::CString, sync::Arc, time};
 
 use ash::vk::{self};
 use bevy_ecs::system::Query;
 use common::MeshVert;
 use common_renderer::components::transform::Transform;
-
 
 use crate::{
     app::{
@@ -22,7 +17,7 @@ use crate::{
         device::Device,
         pooled::{
             command_buffer_group::CommandBufferGroup,
-            command_pool::CommandPool,
+            command_pool::{CommandBuffer, CommandPool},
             descriptor_pool::{
                 DescriptorPool, DescriptorSet, DescriptorSetLayout, DescriptorSetLayoutBinding,
                 DescriptorWriteData,
@@ -148,8 +143,17 @@ impl IndirectTasks {
 }
 
 impl DrawPipeline for IndirectTasks {
-    fn draw(&self, frame_index: usize) -> vk::CommandBuffer {
-        self.screen.as_ref().unwrap().command_buffers[frame_index]
+    fn draw(
+        &self,
+        frame_index: usize,
+        screen: &Screen,
+        render_pass: &RenderPass,
+    ) -> &CommandBuffer {
+        self.screen
+            .as_ref()
+            .unwrap()
+            .command_buffers
+            .get(frame_index)
     }
     fn init_swapchain(&mut self, core: &Core, screen: &Screen, render_pass: &RenderPass) {
         self.screen = Some(ScreenData::create_command_buffers(
@@ -180,7 +184,7 @@ impl DrawPipeline for IndirectTasks {
 struct ScreenData {
     device: Arc<Device>,
     command_pool: Arc<CommandPool>,
-    command_buffers: CommandBufferGroup,
+    command_buffers: Arc<CommandBufferGroup>,
 }
 
 impl ScreenData {
@@ -192,20 +196,12 @@ impl ScreenData {
         _indirect_task_buffer: &TBuffer<vk::DrawMeshTasksIndirectCommandEXT>,
     ) -> Self {
         let device = core.device.clone();
-        let command_buffers = CommandBufferGroup::new(
+        let mut command_buffers = CommandBufferGroup::new(
             core.command_pool.clone(),
             screen.swapchain_framebuffers.len() as _,
         );
 
-        for (i, &command_buffer) in command_buffers.iter().enumerate() {
-            let command_buffer_begin_info = vk::CommandBufferBeginInfo::builder(); //    .flags(vk::CommandBufferUsageFlags::SIMULTANEOUS_USE);
-
-            unsafe {
-                device
-                    .begin_command_buffer(command_buffer, &command_buffer_begin_info)
-                    .expect("Failed to begin recording Command Buffer at beginning!");
-            }
-
+        for (i, mut command_buffer) in command_buffers.iter_to_fill().enumerate() {
             let render_pass_begin_info = vk::RenderPassBeginInfo::builder()
                 .render_pass(render_pass.handle())
                 .framebuffer(screen.swapchain_framebuffers[i])
@@ -219,46 +215,26 @@ impl ScreenData {
                 let q = i as _;
                 let query = core_draw.query && q == 0;
                 if query {
-                    core_draw.query_pool.reset(command_buffer, q);
+                    core_draw.query_pool.reset(*command_buffer, q);
                 }
 
                 device.cmd_begin_render_pass(
-                    command_buffer,
+                    *command_buffer,
                     &render_pass_begin_info,
                     vk::SubpassContents::INLINE,
                 );
-
-                device.cmd_set_scissor(
-                    command_buffer,
-                    0,
-                    &[vk::Rect2D {
-                        offset: vk::Offset2D { x: 0, y: 0 },
-                        extent: screen.swapchain().extent,
-                    }],
-                );
-                device.cmd_set_viewport(
-                    command_buffer,
-                    0,
-                    &[vk::Viewport {
-                        x: 0.0,
-                        y: 0.0,
-                        width: screen.swapchain().extent.width as _,
-                        height: screen.swapchain().extent.height as _,
-                        min_depth: 0.0,
-                        max_depth: 1.0,
-                    }],
-                );
+                command_buffer.set_dynamic_screen(screen);
 
                 // ---------- Pipeline bound, use queries
                 {
                     let _qry = if query {
-                        Some(core_draw.query_pool.begin_query(command_buffer, q))
+                        Some(core_draw.query_pool.begin_query(*command_buffer, q))
                     } else {
                         None
                     };
 
                     device.cmd_bind_pipeline(
-                        command_buffer,
+                        *command_buffer,
                         vk::PipelineBindPoint::GRAPHICS,
                         core_draw.graphics_pipeline.handle(),
                     );
@@ -266,7 +242,7 @@ impl ScreenData {
                     let descriptor_sets_to_bind = [core_draw.descriptor_sets[i].handle()];
 
                     device.cmd_bind_descriptor_sets(
-                        command_buffer,
+                        *command_buffer,
                         vk::PipelineBindPoint::GRAPHICS,
                         core_draw.graphics_pipeline.layout(),
                         0,
@@ -276,19 +252,15 @@ impl ScreenData {
 
                     core_draw
                         .indirect_task_buffer
-                        .draw_tasks_indirect(command_buffer);
+                        .draw_tasks_indirect(*command_buffer);
                 }
 
-                device.cmd_end_render_pass(command_buffer);
-
-                device
-                    .end_command_buffer(command_buffer)
-                    .expect("Failed to record Command Buffer at Ending!");
+                device.cmd_end_render_pass(*command_buffer);
             }
         }
 
         Self {
-            command_buffers,
+            command_buffers: Arc::new(command_buffers),
             device,
             command_pool: core.command_pool.clone(),
         }

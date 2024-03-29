@@ -10,7 +10,8 @@ use crate::{
     draw_pipelines::{
         compute_culled_indices::ComputeCulledIndices,
         compute_culled_mesh::ComputeCulledMesh,
-        draw_indirect::DrawIndirect,
+        draw_full_res::DrawFullRes,
+        draw_lod_chain::DrawLODChain,
         expanding_compute_culled_mesh::ExpandingComputeCulledMesh,
         indirect_tasks::{IndirectTasks, MeshShaderMode},
         stub::Stub,
@@ -18,6 +19,7 @@ use crate::{
     },
     gui::gui::Gui,
     utility::constants::MAX_FRAMES_IN_FLIGHT,
+    VkHandle,
 };
 
 use super::{
@@ -57,6 +59,7 @@ pub fn update_pipeline(
             scene.uniform_transform_buffer.clone(),
             &scene.uniform_camera_buffers,
         )),
+
         MeshDrawingPipelineType::ComputeCulledMesh => Box::new(ComputeCulledMesh::new(
             renderer.core.clone(),
             &renderer,
@@ -86,7 +89,10 @@ pub fn update_pipeline(
             &mesh_data,
         )),
         MeshDrawingPipelineType::DrawIndirect => {
-            Box::new(DrawIndirect::new(&renderer, &mesh_data, &scene))
+            Box::new(DrawFullRes::new(&renderer, &mesh_data, &scene))
+        }
+        MeshDrawingPipelineType::DrawLOD => {
+            Box::new(DrawLODChain::new(&renderer, &mesh_data, &scene))
         }
         MeshDrawingPipelineType::None => unreachable!(),
     };
@@ -166,6 +172,9 @@ pub fn draw_gui(
 
             if ui.button("Draw Full Res").clicked() {
                 draw_events.send(MeshDrawingPipelineType::DrawIndirect)
+            }
+            if ui.button("Draw LOD").clicked() {
+                draw_events.send(MeshDrawingPipelineType::DrawLOD)
             }
             if ui.button("Add 1 More Instance").clicked() {
                 scene_events.send(SceneEvent::AddInstances(1));
@@ -299,17 +308,21 @@ pub fn draw_frame(
     let signal_semaphores =
         [renderer.sync_objects.render_finished_semaphores[renderer.current_frame]];
 
-    let draw_cmd = renderer.draw_pipeline.draw(image_index as usize);
+    let draw_cmd = renderer.draw_pipeline.draw(
+        image_index as usize,
+        &renderer.screen,
+        &renderer.render_pass,
+    );
 
     let temp1;
     let temp2;
 
     let command_buffers = if renderer.render_gui {
         let ui_cmd = gui.finish_draw(image_index as usize);
-        temp1 = [draw_cmd, ui_cmd];
+        temp1 = [draw_cmd.handle(), ui_cmd.handle()];
         &temp1[..]
     } else {
-        temp2 = [draw_cmd];
+        temp2 = [draw_cmd.handle()];
         &temp2
     };
 

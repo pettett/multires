@@ -1,12 +1,22 @@
 use ash::vk;
 
+use crate::{
+    screen::Screen,
+    utility::{pooled::command_pool::CommandBuffer, render_pass::RenderPass},
+};
+
 use super::DrawPipeline;
 
 pub struct Stub;
 
 impl DrawPipeline for Stub {
-    fn draw(&self, _frame_index: usize) -> ash::vk::CommandBuffer {
-        vk::CommandBuffer::null()
+    fn draw(
+        &self,
+        _frame_index: usize,
+        screen: &Screen,
+        render_pass: &RenderPass,
+    ) -> &CommandBuffer {
+        panic!("Stub should never reach drawing stage!")
     }
 
     fn init_swapchain(

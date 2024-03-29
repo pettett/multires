@@ -2,11 +2,23 @@ use std::{ops::Index, sync::Arc};
 
 use ash::vk;
 
-use super::command_pool::CommandPool;
+use crate::{
+    screen::Screen,
+    utility::{
+        device::Device,
+        macros::{vk_handle_wrapper, vk_handle_wrapper_lifetime},
+    },
+    VkHandle,
+};
+
+use super::{
+    command_buffer_writer::CommandBufferWriter,
+    command_pool::{CommandBuffer, CommandPool},
+};
 
 pub struct CommandBufferGroup {
     pool: Arc<CommandPool>,
-    buffers: Vec<vk::CommandBuffer>,
+    buffers: Vec<CommandBuffer>,
 }
 
 impl CommandBufferGroup {
@@ -24,31 +36,29 @@ impl CommandBufferGroup {
         };
 
         Self {
+            buffers: command_buffers
+                .into_iter()
+                .map(|handle| CommandBuffer::new(command_pool.clone(), handle))
+                .collect(),
             pool: command_pool,
-            buffers: command_buffers,
         }
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &vk::CommandBuffer> {
+    pub fn iter_to_fill<'a>(&'a mut self) -> impl Iterator<Item = CommandBufferWriter<'a>> + '_ {
+        self.buffers.iter().map(|handle| {
+            CommandBufferWriter::new(
+                self.pool.parent(),
+                handle.handle(),
+                vk::CommandBufferUsageFlags::empty(),
+            )
+        })
+    }
+
+    pub fn iter_handles(&self) -> impl Iterator<Item = &CommandBuffer> {
         self.buffers.iter()
     }
-}
 
-impl Index<usize> for CommandBufferGroup{
-    type Output = vk::CommandBuffer;
-
-    fn index(&self, index: usize) -> &Self::Output {
+    pub fn get(&self, index: usize) -> &CommandBuffer {
         &self.buffers[index]
-    }
-}
-
-
-impl Drop for CommandBufferGroup {
-    fn drop(&mut self) {
-        unsafe {
-            self.pool
-                .parent()
-                .free_command_buffers(**self.pool, &self.buffers);
-        }
     }
 }

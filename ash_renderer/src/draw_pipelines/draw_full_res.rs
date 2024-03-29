@@ -13,7 +13,7 @@ use crate::{
         device::Device,
         pooled::{
             command_buffer_group::CommandBufferGroup,
-            command_pool::CommandPool,
+            command_pool::{CommandBuffer, CommandPool},
             descriptor_pool::{DescriptorPool, DescriptorSet},
         },
         render_pass::RenderPass,
@@ -30,19 +30,20 @@ use super::{
     DrawPipeline,
 };
 
-pub struct DrawIndirect {
+pub struct DrawFullRes {
     graphics_pipeline: GraphicsPipeline,
     descriptor_sets: Vec<DescriptorSet>,
     screen: Option<ScreenData>,
     descriptor_pool: Arc<DescriptorPool>,
     core: Arc<Core>,
-    draw_indexed_indirect_buffer: Arc<TBuffer<vk::DrawIndexedIndirectCommand>>,
+    //draw_indexed_indirect_buffer: Arc<TBuffer<vk::DrawIndexedIndirectCommand>>,
     vertex_buffer: Arc<TBuffer<MeshVert>>,
     index_buffer: Arc<TBuffer<u32>>,
     query: bool,
+    instance_count: usize,
 }
 
-impl DrawIndirect {
+impl DrawFullRes {
     pub fn new(renderer: &Renderer, mesh_data: &MeshData, scene: &Scene) -> Self {
         let ubo_layout =
             create_traditional_graphics_descriptor_set_layout(renderer.core.device.clone());
@@ -54,24 +55,26 @@ impl DrawIndirect {
             ubo_layout.clone(),
         );
 
+        let index_buffer = mesh_data.lod_index_buffers[0].clone();
+
         let instance_count = scene.uniform_transform_buffer.len();
 
-        let draw_indexed_commands = [vk::DrawIndexedIndirectCommand {
-            index_count: mesh_data.index_buffer.len() as _,
-            instance_count: instance_count as _,
-            first_index: 0,
-            vertex_offset: 0,
-            first_instance: 0,
-        }];
+        // let draw_indexed_commands = [vk::DrawIndexedIndirectCommand {
+        //     index_count: index_buffer.len() as _,
+        //     instance_count: instance_count as _,
+        //     first_index: 0,
+        //     vertex_offset: 0,
+        //     first_instance: 0,
+        // }];
 
-        let draw_indexed_indirect_buffer = TBuffer::new_filled(
-            &renderer.core,
-            renderer.allocator.clone(),
-            renderer.graphics_queue,
-            vk::BufferUsageFlags::INDIRECT_BUFFER,
-            &draw_indexed_commands,
-            "Draw Indexed Indirect Buffer",
-        );
+        // let draw_indexed_indirect_buffer = TBuffer::new_filled(
+        //     &renderer.core,
+        //     renderer.allocator.clone(),
+        //     renderer.graphics_queue,
+        //     vk::BufferUsageFlags::INDIRECT_BUFFER,
+        //     &draw_indexed_commands,
+        //     "Draw Indexed Indirect Buffer",
+        // );
 
         let descriptor_sets = create_traditional_graphics_descriptor_sets(
             &renderer.core.device,
@@ -90,15 +93,25 @@ impl DrawIndirect {
             descriptor_pool: renderer.descriptor_pool.clone(),
             query: renderer.query,
             vertex_buffer: mesh_data.vertex_buffer.clone(),
-            draw_indexed_indirect_buffer,
-            index_buffer: mesh_data.index_buffer.clone(),
+            //    draw_indexed_indirect_buffer,
+            index_buffer,
+            instance_count,
         }
     }
 }
 
-impl DrawPipeline for DrawIndirect {
-    fn draw(&self, frame_index: usize) -> vk::CommandBuffer {
-        self.screen.as_ref().unwrap().command_buffers[frame_index]
+impl DrawPipeline for DrawFullRes {
+    fn draw(
+        &self,
+        frame_index: usize,
+        screen: &Screen,
+        render_pass: &RenderPass,
+    ) -> &CommandBuffer {
+        self.screen
+            .as_ref()
+            .unwrap()
+            .command_buffers
+            .get(frame_index)
     }
     fn init_swapchain(&mut self, core: &Core, screen: &Screen, render_pass: &RenderPass) {
         self.screen = Some(ScreenData::create_command_buffers(
@@ -115,31 +128,23 @@ impl DrawPipeline for DrawIndirect {
 struct ScreenData {
     device: Arc<Device>,
     command_pool: Arc<CommandPool>,
-    command_buffers: CommandBufferGroup,
+    command_buffers: Arc<CommandBufferGroup>,
 }
 
 impl ScreenData {
     pub fn create_command_buffers(
-        core_draw: &DrawIndirect,
+        core_draw: &DrawFullRes,
         core: &Core,
         screen: &Screen,
         render_pass: &RenderPass,
     ) -> Self {
         let device = core.device.clone();
-        let command_buffers = CommandBufferGroup::new(
+        let mut command_buffers = CommandBufferGroup::new(
             core.command_pool.clone(),
             screen.swapchain_framebuffers.len() as _,
         );
 
-        for (i, &command_buffer) in command_buffers.iter().enumerate() {
-            let command_buffer_begin_info = vk::CommandBufferBeginInfo::builder(); //.flags(vk::CommandBufferUsageFlags::SIMULTANEOUS_USE);
-
-            unsafe {
-                device
-                    .begin_command_buffer(command_buffer, &command_buffer_begin_info)
-                    .expect("Failed to begin recording Command Buffer at beginning!");
-            }
-
+        for (i, mut command_buffer) in command_buffers.iter_to_fill().enumerate() {
             let render_pass_begin_info = vk::RenderPassBeginInfo::builder()
                 .render_pass(render_pass.handle())
                 .framebuffer(screen.swapchain_framebuffers[i])
@@ -149,44 +154,24 @@ impl ScreenData {
                 })
                 .clear_values(&CLEAR_VALUES);
 
-            let descriptor_sets_to_bind = [core_draw.descriptor_sets[i].handle()];
-
             unsafe {
                 device.cmd_begin_render_pass(
-                    command_buffer,
+                    *command_buffer,
                     &render_pass_begin_info,
                     vk::SubpassContents::INLINE,
                 );
 
-                device.cmd_set_scissor(
-                    command_buffer,
-                    0,
-                    &[vk::Rect2D {
-                        offset: vk::Offset2D { x: 0, y: 0 },
-                        extent: screen.swapchain().extent,
-                    }],
-                );
-                device.cmd_set_viewport(
-                    command_buffer,
-                    0,
-                    &[vk::Viewport {
-                        x: 0.0,
-                        y: 0.0,
-                        width: screen.swapchain().extent.width as _,
-                        height: screen.swapchain().extent.height as _,
-                        min_depth: 0.0,
-                        max_depth: 1.0,
-                    }],
-                );
+                command_buffer.set_dynamic_screen(screen);
 
                 device.cmd_bind_pipeline(
-                    command_buffer,
+                    *command_buffer,
                     vk::PipelineBindPoint::GRAPHICS,
                     core_draw.graphics_pipeline.handle(),
                 );
 
+                let descriptor_sets_to_bind = [core_draw.descriptor_sets[i].handle()];
                 device.cmd_bind_descriptor_sets(
-                    command_buffer,
+                    *command_buffer,
                     vk::PipelineBindPoint::GRAPHICS,
                     core_draw.graphics_pipeline.layout(),
                     0,
@@ -195,38 +180,35 @@ impl ScreenData {
                 );
 
                 device.cmd_bind_index_buffer(
-                    command_buffer,
+                    *command_buffer,
                     core_draw.index_buffer.handle(),
                     0,
                     vk::IndexType::UINT32,
                 );
 
                 device.cmd_bind_vertex_buffers(
-                    command_buffer,
+                    *command_buffer,
                     0,
                     &[core_draw.vertex_buffer.handle()],
                     &[0],
                 );
 
                 // Each instance has their own indirect drawing buffer, tracing out their position in the result buffer
-                device.cmd_draw_indexed_indirect(
-                    command_buffer,
-                    core_draw.draw_indexed_indirect_buffer.handle(),
+                device.cmd_draw_indexed(
+                    *command_buffer,
+                    core_draw.index_buffer.len() as _,
+                    core_draw.instance_count as _,
                     0,
-                    1,
-                    core_draw.draw_indexed_indirect_buffer.stride() as _,
+                    0,
+                    0,
                 );
 
-                device.cmd_end_render_pass(command_buffer);
-
-                device
-                    .end_command_buffer(command_buffer)
-                    .expect("Failed to record Command Buffer at Ending!");
+                device.cmd_end_render_pass(*command_buffer);
             }
         }
 
         Self {
-            command_buffers,
+            command_buffers: Arc::new(command_buffers),
             device,
             command_pool: core.command_pool.clone(),
         }
