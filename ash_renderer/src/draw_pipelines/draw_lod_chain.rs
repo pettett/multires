@@ -2,10 +2,16 @@ use std::sync::Arc;
 
 use ash::vk::{self};
 
+use bevy_ecs::prelude::*;
 use common::MeshVert;
+use common_renderer::components::{camera::Camera, transform::Transform};
 
 use crate::{
-    app::{mesh_data::MeshData, renderer::Renderer, scene::Scene},
+    app::{
+        mesh_data::MeshData,
+        renderer::{MeshDrawingPipelineType, Renderer},
+        scene::Scene,
+    },
     core::Core,
     screen::Screen,
     utility::{
@@ -30,7 +36,8 @@ use super::{
     DrawPipeline,
 };
 
-pub struct DrawLODChain {
+#[derive(Resource)]
+pub struct DrawLODChainData {
     graphics_pipeline: GraphicsPipeline,
     descriptor_sets: Vec<DescriptorSet>,
     descriptor_pool: Arc<DescriptorPool>,
@@ -42,7 +49,94 @@ pub struct DrawLODChain {
     instance_count: usize,
 }
 
-impl DrawLODChain {
+pub fn create_lod_command_buffer(
+    mut renderer: ResMut<Renderer>,
+    mut scene: ResMut<Scene>,
+    mut camera: Query<(&mut Camera, &Transform)>,
+    mut draw: Option<ResMut<DrawLODChainData>>,
+    mesh_data: Res<MeshData>,
+) {
+    if let Some(mut draw) = draw {
+        let device = draw.core.device.clone();
+
+        while renderer.image_index >= draw.command_buffers.len() {
+            let cmd = draw.core.command_pool.begin_one_shot_command();
+            draw.command_buffers.push(cmd);
+        }
+
+        let render_pass_begin_info = vk::RenderPassBeginInfo::builder()
+            .render_pass(renderer.render_pass.handle())
+            .framebuffer(renderer.screen.swapchain_framebuffers[renderer.image_index])
+            .render_area(vk::Rect2D {
+                offset: vk::Offset2D { x: 0, y: 0 },
+                extent: renderer.screen.swapchain().extent,
+            })
+            .clear_values(&CLEAR_VALUES);
+
+        {
+            let mut command_buffer_writer =
+                draw.command_buffers[renderer.image_index].reset_and_write();
+
+            unsafe {
+                device.cmd_begin_render_pass(
+                    *command_buffer_writer,
+                    &render_pass_begin_info,
+                    vk::SubpassContents::INLINE,
+                );
+
+                command_buffer_writer.set_dynamic_screen(&renderer.screen);
+
+                device.cmd_bind_pipeline(
+                    *command_buffer_writer,
+                    vk::PipelineBindPoint::GRAPHICS,
+                    draw.graphics_pipeline.handle(),
+                );
+
+                let descriptor_sets_to_bind = [draw.descriptor_sets[renderer.image_index].handle()];
+                device.cmd_bind_descriptor_sets(
+                    *command_buffer_writer,
+                    vk::PipelineBindPoint::GRAPHICS,
+                    draw.graphics_pipeline.layout(),
+                    0,
+                    &descriptor_sets_to_bind,
+                    &[],
+                );
+
+                device.cmd_bind_index_buffer(
+                    *command_buffer_writer,
+                    draw.index_buffers[0].handle(),
+                    0,
+                    vk::IndexType::UINT32,
+                );
+
+                device.cmd_bind_vertex_buffers(
+                    *command_buffer_writer,
+                    0,
+                    &[draw.vertex_buffer.handle()],
+                    &[0],
+                );
+
+                for i in 0..draw.instance_count {
+                    // Each instance has their own indirect drawing buffer, tracing out their position in the result buffer
+                    device.cmd_draw_indexed(
+                        *command_buffer_writer,
+                        draw.index_buffers[0].len() as _,
+                        1,
+                        0,
+                        0,
+                        i as _,
+                    );
+                }
+
+                device.cmd_end_render_pass(*command_buffer_writer);
+            }
+        }
+        renderer.hacky_command_buffer_passthrough =
+            Some(draw.command_buffers[renderer.image_index].handle());
+    }
+}
+
+impl DrawLODChainData {
     pub fn new(renderer: &Renderer, mesh_data: &MeshData, scene: &Scene) -> Self {
         let ubo_layout =
             create_traditional_graphics_descriptor_set_layout(renderer.core.device.clone());
@@ -79,6 +173,20 @@ impl DrawLODChain {
     }
 }
 
+pub struct DrawLODChain;
+
+impl DrawLODChain {
+    pub fn new(
+        renderer: &Renderer,
+        mesh_data: &MeshData,
+        scene: &Scene,
+        commands: &mut Commands,
+    ) -> Self {
+        commands.insert_resource(DrawLODChainData::new(renderer, mesh_data, scene));
+        DrawLODChain
+    }
+}
+
 impl DrawPipeline for DrawLODChain {
     fn draw(
         &self,
@@ -86,85 +194,15 @@ impl DrawPipeline for DrawLODChain {
         screen: &Screen,
         render_pass: &RenderPass,
     ) -> &CommandBuffer {
-        let core = &self.core;
-        let device = core.device.clone();
-
-        let render_pass_begin_info = vk::RenderPassBeginInfo::builder()
-            .render_pass(render_pass.handle())
-            .framebuffer(screen.swapchain_framebuffers[frame_index])
-            .render_area(vk::Rect2D {
-                offset: vk::Offset2D { x: 0, y: 0 },
-                extent: screen.swapchain().extent,
-            })
-            .clear_values(&CLEAR_VALUES);
-
-        {
-            let mut command_buffer_writer = self.command_buffers[frame_index].reset_and_write();
-
-            unsafe {
-                device.cmd_begin_render_pass(
-                    *command_buffer_writer,
-                    &render_pass_begin_info,
-                    vk::SubpassContents::INLINE,
-                );
-
-                command_buffer_writer.set_dynamic_screen(screen);
-
-                device.cmd_bind_pipeline(
-                    *command_buffer_writer,
-                    vk::PipelineBindPoint::GRAPHICS,
-                    self.graphics_pipeline.handle(),
-                );
-
-                let descriptor_sets_to_bind = [self.descriptor_sets[frame_index].handle()];
-                device.cmd_bind_descriptor_sets(
-                    *command_buffer_writer,
-                    vk::PipelineBindPoint::GRAPHICS,
-                    self.graphics_pipeline.layout(),
-                    0,
-                    &descriptor_sets_to_bind,
-                    &[],
-                );
-
-                device.cmd_bind_index_buffer(
-                    *command_buffer_writer,
-                    self.index_buffers[0].handle(),
-                    0,
-                    vk::IndexType::UINT32,
-                );
-
-                device.cmd_bind_vertex_buffers(
-                    *command_buffer_writer,
-                    0,
-                    &[self.vertex_buffer.handle()],
-                    &[0],
-                );
-
-                for i in 0..self.instance_count {
-                    // Each instance has their own indirect drawing buffer, tracing out their position in the result buffer
-                    device.cmd_draw_indexed(
-                        *command_buffer_writer,
-                        self.index_buffers[0].len() as _,
-                        1,
-                        0,
-                        0,
-                        i as _,
-                    );
-                }
-
-                device.cmd_end_render_pass(*command_buffer_writer);
-            }
-        }
-
-        &self.command_buffers[frame_index]
+        panic!("Should not call draw - has set hacky workaround that needs to be replaced")
     }
     fn init_swapchain(&mut self, core: &Core, screen: &Screen, render_pass: &RenderPass) {
         // only ever top-up our commands - we dont need to reset on resize
-        while screen.swapchain_framebuffers.len() >= self.command_buffers.len() {
-            self.command_buffers
-                .push(core.command_pool.begin_one_shot_command());
-        }
     }
 
     fn stats_gui(&mut self, _ui: &mut egui::Ui, _image_index: usize) {}
+
+    fn cleanup(&mut self, commands: &mut Commands) {
+        commands.remove_resource::<DrawLODChainData>()
+    }
 }

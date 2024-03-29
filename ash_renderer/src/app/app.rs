@@ -1,7 +1,9 @@
 use crate::{
     app::{
         benchmarker::benchmark,
-        draw_systems::{draw_frame, draw_gui, start_gui, tick_clocks, update_pipeline},
+        draw_systems::{
+            acquire_swapchain, draw_frame, draw_gui, start_gui, tick_clocks, update_pipeline,
+        },
         mesh_data::MeshData,
         renderer::{Fragment, MeshDrawingPipelineType, Renderer},
         scene::{
@@ -9,7 +11,7 @@ use crate::{
         },
     },
     core::Core,
-    draw_pipelines::indirect_tasks::MeshShaderMode,
+    draw_pipelines::{draw_lod_chain::create_lod_command_buffer, indirect_tasks::MeshShaderMode},
     gui::allocator_visualiser_window::AllocatorVisualiserWindow,
     screen::find_depth_format,
     utility::{
@@ -222,14 +224,18 @@ impl App {
             benchmark,
             update_camera,
             process_scene_events,
-            update_pipeline,
+            update_pipeline.after(process_scene_events),
         ));
         let mut draw_schedule = Schedule::default();
         draw_schedule.add_systems((
             tick_clocks,
             start_gui,
-            draw_gui.after(start_gui).before(draw_frame),
-            draw_frame,
+            acquire_swapchain,
+            (
+                (draw_gui.after(start_gui), create_lod_command_buffer).before(draw_frame),
+                draw_frame,
+            )
+                .after(acquire_swapchain),
         ));
 
         let gui = Gui::new(
@@ -282,6 +288,9 @@ impl App {
             core,
             screen,
             fragment: Fragment::Lit,
+            hacky_command_buffer_passthrough: None,
+            image_index: 0,
+            is_suboptimal: false,
         });
         world.insert_non_send_resource(gui);
         world.insert_resource(mesh);

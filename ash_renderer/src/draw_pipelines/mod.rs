@@ -1,4 +1,5 @@
 use ash::vk;
+use bevy_ecs::system::Commands;
 
 use crate::{
     core::Core,
@@ -37,6 +38,8 @@ pub trait DrawPipeline {
 
     /// Notification that the user has selected a new fragment shader, and we need to regenerate our pipelines
     fn on_fragment_changed(&mut self) {}
+
+    fn cleanup(&mut self, commands: &mut Commands) {}
 }
 
 pub fn init_rasterization_statue_create_info() -> vk::PipelineRasterizationStateCreateInfo {

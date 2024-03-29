@@ -11,13 +11,15 @@ use crate::{
     gui::{gui::Gui, window::GuiWindow},
     screen::Screen,
     utility::{
-        pooled::descriptor_pool::DescriptorPool, render_pass::RenderPass, sync::SyncObjects,
+        pooled::{command_pool::CommandBuffer, descriptor_pool::DescriptorPool},
+        render_pass::RenderPass,
+        sync::SyncObjects,
         ShaderModule,
     },
 };
 
 use super::{mesh_data::MeshData, scene::Scene};
-#[derive(Debug, Clone, Copy, Event)]
+#[derive(Debug, Clone, Copy, Event, PartialEq, Eq)]
 pub enum MeshDrawingPipelineType {
     IndirectTasks,
     DrawIndirect,
@@ -49,6 +51,8 @@ pub struct Renderer {
     pub query: bool,
     pub render_gui: bool,
     pub current_frame: usize,
+    pub image_index: usize,
+    pub is_suboptimal: bool,
     pub is_framebuffer_resized: bool,
     pub app_info_open: bool,
     // Make sure to drop the core last
@@ -59,6 +63,7 @@ pub struct Renderer {
     pub fragment_lit: ShaderModule,
 
     pub fragment: Fragment,
+    pub hacky_command_buffer_passthrough: Option<vk::CommandBuffer>,
 }
 
 impl Renderer {

@@ -34,6 +34,7 @@ pub fn update_pipeline(
     scene: Res<Scene>,
     mut events: EventReader<MeshDrawingPipelineType>,
     mesh_data: Res<MeshData>,
+    mut commands: Commands,
     transforms: Query<&Transform>,
 ) {
     let s = events.read().next();
@@ -47,6 +48,9 @@ pub fn update_pipeline(
         _ => return,
     };
 
+    renderer.draw_pipeline.cleanup(&mut commands);
+
+    renderer.hacky_command_buffer_passthrough = None;
     renderer.draw_pipeline = Box::new(Stub);
 
     let mut draw_pipeline: Box<dyn DrawPipeline + Send + Sync> = match s {
@@ -91,9 +95,12 @@ pub fn update_pipeline(
         MeshDrawingPipelineType::DrawIndirect => {
             Box::new(DrawFullRes::new(&renderer, &mesh_data, &scene))
         }
-        MeshDrawingPipelineType::DrawLOD => {
-            Box::new(DrawLODChain::new(&renderer, &mesh_data, &scene))
-        }
+        MeshDrawingPipelineType::DrawLOD => Box::new(DrawLODChain::new(
+            &renderer,
+            &mesh_data,
+            &scene,
+            &mut commands,
+        )),
         MeshDrawingPipelineType::None => unreachable!(),
     };
 
@@ -256,7 +263,7 @@ pub fn draw_gui(
     renderer.app_info_open = app_info_open;
 }
 
-pub fn draw_frame(
+pub fn acquire_swapchain(
     mut renderer: ResMut<Renderer>,
     mut scene: ResMut<Scene>,
     mut camera: Query<(&mut Camera, &Transform)>,
@@ -294,13 +301,27 @@ pub fn draw_frame(
             },
         }
     };
+    renderer.image_index = image_index as _;
+    renderer.is_suboptimal = is_sub_optimal;
+}
+
+pub fn draw_frame(
+    mut renderer: ResMut<Renderer>,
+    mut scene: ResMut<Scene>,
+    mut camera: Query<(&mut Camera, &Transform)>,
+    mut gui: NonSendMut<Gui>,
+    mesh_data: Res<MeshData>,
+) {
+    let (mut cam, cam_trans) = camera.single_mut();
+
+    let image_index = renderer.image_index;
 
     // if self.transform_dirty[image_index as usize] {
     //     self.update_model_uniform_buffer(image_index as usize, delta_time);
     //     self.transform_dirty[image_index as usize] = false;
     // }
 
-    scene.update_camera_uniform_buffer(&cam, cam_trans, image_index as usize);
+    scene.update_camera_uniform_buffer(&cam, cam_trans, image_index);
 
     let wait_semaphores =
         [renderer.sync_objects.image_available_semaphores[renderer.current_frame]];
@@ -308,21 +329,28 @@ pub fn draw_frame(
     let signal_semaphores =
         [renderer.sync_objects.render_finished_semaphores[renderer.current_frame]];
 
-    let draw_cmd = renderer.draw_pipeline.draw(
-        image_index as usize,
-        &renderer.screen,
-        &renderer.render_pass,
-    );
+    let draw_cmd = renderer
+        .hacky_command_buffer_passthrough
+        .unwrap_or_else(|| {
+            renderer
+                .draw_pipeline
+                .draw(
+                    image_index as usize,
+                    &renderer.screen,
+                    &renderer.render_pass,
+                )
+                .handle()
+        });
 
     let temp1;
     let temp2;
 
     let command_buffers = if renderer.render_gui {
-        let ui_cmd = gui.finish_draw(image_index as usize);
-        temp1 = [draw_cmd.handle(), ui_cmd.handle()];
+        let ui_cmd = gui.finish_draw(image_index as usize).handle();
+        temp1 = [draw_cmd, ui_cmd];
         &temp1[..]
     } else {
-        temp2 = [draw_cmd.handle()];
+        temp2 = [draw_cmd];
         &temp2
     };
 
@@ -331,6 +359,8 @@ pub fn draw_frame(
         .wait_dst_stage_mask(&wait_stages)
         .wait_semaphores(&wait_semaphores)
         .signal_semaphores(&signal_semaphores)];
+
+    let wait_fences = [renderer.sync_objects.in_flight_fences[renderer.current_frame]];
 
     unsafe {
         renderer
@@ -351,7 +381,7 @@ pub fn draw_frame(
     }
 
     let swapchains = [renderer.screen.swapchain().handle];
-    let image_indices = [image_index];
+    let image_indices = [image_index as u32];
 
     let present_info = vk::PresentInfoKHR::builder()
         .swapchains(&swapchains)
@@ -373,7 +403,7 @@ pub fn draw_frame(
             _ => panic!("Failed to execute queue present."),
         },
     };
-    if is_resized || is_sub_optimal {
+    if is_resized || renderer.is_suboptimal {
         renderer.is_framebuffer_resized = false;
         renderer.recreate_swapchain(&scene, &mesh_data, &mut gui, &mut cam);
     }
