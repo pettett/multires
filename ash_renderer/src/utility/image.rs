@@ -6,7 +6,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use ash::vk;
+use ash::vk::{self, SamplerCreateInfoBuilder};
 use gpu_allocator::{
     vulkan::{Allocation, AllocationCreateDesc, AllocationScheme, Allocator},
     MemoryLocation,
@@ -17,9 +17,116 @@ use crate::{core::Core, VkHandle};
 use super::{
     buffer::{AsBuffer, Buffer, STAGING_BUFFER},
     device::Device,
-    macros::vk_handle_wrapper,
+    macros::{vk_device_owned_wrapper, vk_handle_wrapper},
     pooled::command_pool::CommandPool,
 };
+
+vk_device_owned_wrapper!(ImageView, destroy_image_view);
+vk_device_owned_wrapper!(Sampler, destroy_sampler);
+
+impl ImageView {
+    pub fn new_raw(
+        device: Arc<Device>,
+        image: vk::Image,
+        format: vk::Format,
+        aspect_flags: vk::ImageAspectFlags,
+        mip_levels: u32,
+    ) -> Self {
+        let imageview_create_info = vk::ImageViewCreateInfo {
+            view_type: vk::ImageViewType::TYPE_2D,
+            format,
+            components: vk::ComponentMapping {
+                r: vk::ComponentSwizzle::IDENTITY,
+                g: vk::ComponentSwizzle::IDENTITY,
+                b: vk::ComponentSwizzle::IDENTITY,
+                a: vk::ComponentSwizzle::IDENTITY,
+            },
+            subresource_range: vk::ImageSubresourceRange {
+                aspect_mask: aspect_flags,
+                base_mip_level: 0,
+                level_count: mip_levels,
+                base_array_layer: 0,
+                layer_count: 1,
+            },
+            image,
+            ..Default::default()
+        };
+
+        let handle = unsafe {
+            device
+                .create_image_view(&imageview_create_info, None)
+                .expect("Failed to create Image View!")
+        };
+
+        Self { device, handle }
+    }
+
+    pub fn create_image_views(
+        device: &Arc<Device>,
+        surface_format: vk::Format,
+        images: &[vk::Image],
+    ) -> Vec<Self> {
+        let swapchain_imageviews: Vec<_> = images
+            .iter()
+            .map(|&image| {
+                Self::new_raw(
+                    device.clone(),
+                    image,
+                    surface_format,
+                    vk::ImageAspectFlags::COLOR,
+                    1,
+                )
+            })
+            .collect();
+
+        swapchain_imageviews
+    }
+}
+
+impl Sampler {
+    pub fn new_linear(device: Arc<Device>) -> Self {
+        let sampler_create_info = vk::SamplerCreateInfo::builder()
+            .mag_filter(vk::Filter::LINEAR)
+            .min_filter(vk::Filter::LINEAR)
+            .address_mode_u(vk::SamplerAddressMode::REPEAT)
+            .address_mode_v(vk::SamplerAddressMode::REPEAT)
+            .address_mode_w(vk::SamplerAddressMode::REPEAT)
+            .mipmap_mode(vk::SamplerMipmapMode::LINEAR)
+            .compare_enable(false)
+            .min_lod(0.0)
+            .max_lod(0.0)
+            .mip_lod_bias(0.0)
+            .anisotropy_enable(true)
+            .unnormalized_coordinates(false);
+
+        Self::new(device, sampler_create_info)
+    }
+
+    pub fn new_egui(device: Arc<Device>) -> Self {
+        let sampler_create_info = vk::SamplerCreateInfo::builder()
+            .address_mode_u(vk::SamplerAddressMode::CLAMP_TO_EDGE)
+            .address_mode_v(vk::SamplerAddressMode::CLAMP_TO_EDGE)
+            .address_mode_w(vk::SamplerAddressMode::CLAMP_TO_EDGE)
+            .anisotropy_enable(false)
+            .min_filter(vk::Filter::LINEAR)
+            .mag_filter(vk::Filter::LINEAR)
+            .mipmap_mode(vk::SamplerMipmapMode::LINEAR)
+            .min_lod(0.0)
+            .max_lod(vk::LOD_CLAMP_NONE);
+
+        Self::new(device, sampler_create_info)
+    }
+
+    pub fn new(device: Arc<Device>, sampler_create_info: SamplerCreateInfoBuilder<'_>) -> Self {
+        let handle = unsafe {
+            device
+                .create_sampler(&sampler_create_info, None)
+                .expect("Failed to create Sampler!")
+        };
+
+        Self { device, handle }
+    }
+}
 
 pub struct Image {
     device: Arc<Device>,
@@ -27,8 +134,8 @@ pub struct Image {
     image_memory: Allocation,
     format: vk::Format,
     allocator: Arc<Mutex<Allocator>>,
-    image_view: Option<vk::ImageView>,
-    sampler: Option<vk::Sampler>,
+    image_view: Option<ImageView>,
+    sampler: Option<Sampler>,
 }
 
 vk_handle_wrapper!(Image);
@@ -36,12 +143,6 @@ vk_handle_wrapper!(Image);
 impl Drop for Image {
     fn drop(&mut self) {
         unsafe {
-            if let Some(sampler) = self.sampler {
-                self.device.destroy_sampler(sampler, None);
-            }
-            if let Some(image_view) = self.image_view {
-                self.device.destroy_image_view(image_view, None);
-            }
             self.device.destroy_image(self.handle, None);
 
             let mut allocation = Default::default();
@@ -229,34 +330,8 @@ impl Image {
     }
 
     pub fn create_texture_sampler(mut self) -> Self {
-        let sampler_create_info = vk::SamplerCreateInfo {
-            s_type: vk::StructureType::SAMPLER_CREATE_INFO,
-            p_next: ptr::null(),
-            flags: vk::SamplerCreateFlags::empty(),
-            mag_filter: vk::Filter::LINEAR,
-            min_filter: vk::Filter::LINEAR,
-            address_mode_u: vk::SamplerAddressMode::REPEAT,
-            address_mode_v: vk::SamplerAddressMode::REPEAT,
-            address_mode_w: vk::SamplerAddressMode::REPEAT,
-            max_anisotropy: 16.0,
-            compare_enable: vk::FALSE,
-            compare_op: vk::CompareOp::ALWAYS,
-            mipmap_mode: vk::SamplerMipmapMode::LINEAR,
-            min_lod: 0.0,
-            max_lod: 0.0,
-            mip_lod_bias: 0.0,
-            border_color: vk::BorderColor::INT_OPAQUE_BLACK,
-            anisotropy_enable: vk::TRUE,
-            unnormalized_coordinates: vk::FALSE,
-        };
+        self.sampler = Some(Sampler::new_linear(self.device.clone()));
 
-        unsafe {
-            self.sampler = Some(
-                self.device
-                    .create_sampler(&sampler_create_info, None)
-                    .expect("Failed to create Sampler!"),
-            );
-        }
         self
     }
 
@@ -500,67 +575,12 @@ impl Image {
         }
     }
 
-    pub fn sampler(&self) -> vk::Sampler {
-        self.sampler.unwrap()
+    pub fn sampler(&self) -> &Sampler {
+        self.sampler.as_ref().unwrap()
     }
 
-    pub fn image_view(&self) -> vk::ImageView {
-        self.image_view.unwrap()
-    }
-
-    pub fn create_image_views(
-        device: &Device,
-        surface_format: vk::Format,
-        images: &[vk::Image],
-    ) -> Vec<vk::ImageView> {
-        let swapchain_imageviews: Vec<vk::ImageView> = images
-            .iter()
-            .map(|&image| {
-                Self::create_raw_image_view(
-                    device,
-                    image,
-                    surface_format,
-                    vk::ImageAspectFlags::COLOR,
-                    1,
-                )
-            })
-            .collect();
-
-        swapchain_imageviews
-    }
-
-    fn create_raw_image_view(
-        device: &Device,
-        image: vk::Image,
-        format: vk::Format,
-        aspect_flags: vk::ImageAspectFlags,
-        mip_levels: u32,
-    ) -> vk::ImageView {
-        let imageview_create_info = vk::ImageViewCreateInfo {
-            view_type: vk::ImageViewType::TYPE_2D,
-            format,
-            components: vk::ComponentMapping {
-                r: vk::ComponentSwizzle::IDENTITY,
-                g: vk::ComponentSwizzle::IDENTITY,
-                b: vk::ComponentSwizzle::IDENTITY,
-                a: vk::ComponentSwizzle::IDENTITY,
-            },
-            subresource_range: vk::ImageSubresourceRange {
-                aspect_mask: aspect_flags,
-                base_mip_level: 0,
-                level_count: mip_levels,
-                base_array_layer: 0,
-                layer_count: 1,
-            },
-            image,
-            ..Default::default()
-        };
-
-        unsafe {
-            device
-                .create_image_view(&imageview_create_info, None)
-                .expect("Failed to create Image View!")
-        }
+    pub fn image_view(&self) -> &ImageView {
+        self.image_view.as_ref().unwrap()
     }
 
     pub fn create_image_view(
@@ -569,15 +589,14 @@ impl Image {
         aspect_flags: vk::ImageAspectFlags,
         mip_levels: u32,
     ) -> Self {
-        unsafe {
-            self.image_view = Some(Image::create_raw_image_view(
-                &self.device,
-                self.handle,
-                format,
-                aspect_flags,
-                mip_levels,
-            ));
-        }
+        self.image_view = Some(ImageView::new_raw(
+            self.device.clone(),
+            self.handle,
+            format,
+            aspect_flags,
+            mip_levels,
+        ));
+
         self
     }
 

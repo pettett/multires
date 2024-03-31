@@ -15,7 +15,6 @@ use crate::{
         scene::{Mesh, Scene},
     },
     core::Core,
-    screen::Screen,
     utility::{
         buffer::TBuffer,
         device::Device,
@@ -25,6 +24,7 @@ use crate::{
             descriptor_pool::{DescriptorPool, DescriptorSet},
         },
         render_pass::RenderPass,
+        screen::Screen,
         GraphicsPipeline,
     },
     VkHandle, CLEAR_VALUES,
@@ -114,7 +114,7 @@ pub fn create_lod_command_buffer(
 
         let render_pass_begin_info = vk::RenderPassBeginInfo::builder()
             .render_pass(renderer.render_pass.handle())
-            .framebuffer(renderer.screen.swapchain_framebuffers[renderer.image_index])
+            .framebuffer(renderer.screen.swapchain_framebuffers[renderer.image_index].handle())
             .render_area(vk::Rect2D {
                 offset: vk::Offset2D { x: 0, y: 0 },
                 extent: renderer.screen.swapchain().extent,
@@ -144,7 +144,7 @@ pub fn create_lod_command_buffer(
                 device.cmd_bind_descriptor_sets(
                     *command_buffer_writer,
                     vk::PipelineBindPoint::GRAPHICS,
-                    draw.graphics_pipeline.layout(),
+                    draw.graphics_pipeline.layout().handle(),
                     0,
                     &descriptor_sets_to_bind,
                     &[],

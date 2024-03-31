@@ -1,10 +1,8 @@
 use ash::vk;
 
-use crate::{
+use crate::utility::{
+    device::Device, pooled::command_buffer_writer::CommandBufferWriter, render_pass::RenderPass,
     screen::Screen,
-    utility::{
-        device::Device, pooled::command_buffer_writer::CommandBufferWriter, render_pass::RenderPass,
-    },
 };
 
 pub trait RenderMultires {

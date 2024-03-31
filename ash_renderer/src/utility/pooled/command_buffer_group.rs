@@ -2,14 +2,7 @@ use std::{ops::Index, sync::Arc};
 
 use ash::vk;
 
-use crate::{
-    screen::Screen,
-    utility::{
-        device::Device,
-        macros::{vk_handle_wrapper, vk_handle_wrapper_lifetime},
-    },
-    VkHandle,
-};
+use crate::VkHandle;
 
 use super::{
     command_buffer_writer::CommandBufferWriter,

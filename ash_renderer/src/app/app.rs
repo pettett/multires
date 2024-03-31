@@ -13,12 +13,12 @@ use crate::{
     core::Core,
     draw_pipelines::{draw_lod_chain::create_lod_command_buffer, indirect_tasks::MeshShaderMode},
     gui::allocator_visualiser_window::AllocatorVisualiserWindow,
-    screen::find_depth_format,
     utility::{
         // the mod define some fixed functions that have been learned before.
         constants::*,
         pooled::descriptor_pool::DescriptorPool,
         render_pass::RenderPass,
+        screen::{find_depth_format, Screen},
         swapchain::SwapChainSupportDetail,
         sync::SyncObjects,
         ShaderModule,
@@ -34,7 +34,6 @@ use bytemuck::Zeroable;
 
 use crate::draw_pipelines::stub::Stub;
 use crate::gui::gui::Gui;
-use crate::screen::Screen;
 use crate::utility::buffer::TBuffer;
 use crate::VkHandle;
 use common_renderer::{
@@ -137,7 +136,12 @@ impl App {
         let surface_format = swapchain_support.choose_swapchain_format().format;
         let depth_format = find_depth_format(&instance, physical_device);
 
-        let render_pass = RenderPass::new(device.clone(), surface_format, depth_format);
+        let render_pass = RenderPass::new_color_depth(
+            device.clone(),
+            surface_format,
+            depth_format,
+            vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+        );
 
         screen.remake_swapchain(graphics_queue, &render_pass, allocator.clone());
 

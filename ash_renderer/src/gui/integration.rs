@@ -4,13 +4,19 @@
 // use crate::gui::allocator::AllocationCreateInfoTrait;
 // use crate::gui::allocator::AllocationTrait;
 use crate::{
-    utility::pooled::descriptor_pool::{
-        DescriptorSet, DescriptorSetLayout, DescriptorSetLayoutBinding, DescriptorWriteData,
+    utility::{
+        buffer::{AsBuffer, Buffer},
+        device::Device,
+        image::{ImageView, Sampler},
+        pooled::descriptor_pool::{
+            DescriptorSet, DescriptorSetLayout, DescriptorSetLayoutBinding, DescriptorWriteData,
+        },
+        ShaderModule,
     },
     VkHandle,
 };
 use ::gpu_allocator::vulkan::Allocator;
-use ash::{extensions::khr::Swapchain, vk, Device};
+use ash::{extensions::khr::Swapchain, vk};
 use bytemuck::bytes_of;
 use egui::{
     epaint::{ahash::AHashMap, ImageDelta},
@@ -20,7 +26,7 @@ use egui_winit::{winit::window::Window, EventResponse};
 use gpu_allocator::{vulkan::*, MemoryLocation};
 use raw_window_handle::HasRawDisplayHandle;
 use std::{
-    ffi::CString,
+    ffi::{self, CString},
     sync::{Arc, Mutex},
 };
 
@@ -32,7 +38,7 @@ use super::{utils::insert_image_memory_barrier, *};
 pub struct Integration {
     physical_width: u32,
     physical_height: u32,
-    scale_factor: f64,
+    scale_factor: f32,
     context: Context,
     egui_winit: egui_winit::State,
     core: Arc<Core>,
@@ -44,19 +50,17 @@ pub struct Integration {
     descriptor_set_layout: Arc<DescriptorSetLayout>,
     pipeline_layout: vk::PipelineLayout,
     pipeline: vk::Pipeline,
-    sampler: vk::Sampler,
+    sampler: Sampler,
     render_pass: vk::RenderPass,
-    framebuffer_color_image_views: Vec<vk::ImageView>,
+    framebuffer_color_image_views: Vec<ImageView>,
     framebuffers: Vec<vk::Framebuffer>,
-    vertex_buffers: Vec<vk::Buffer>,
-    vertex_buffer_allocations: Vec<Allocation>,
-    index_buffers: Vec<vk::Buffer>,
-    index_buffer_allocations: Vec<Allocation>,
+    vertex_buffers: Vec<Buffer>,
+    index_buffers: Vec<Buffer>,
     texture_desc_sets: AHashMap<TextureId, DescriptorSet>,
     texture_images: AHashMap<TextureId, vk::Image>,
     texture_image_infos: AHashMap<TextureId, vk::ImageCreateInfo>,
     texture_allocations: AHashMap<TextureId, Allocation>,
-    texture_image_views: AHashMap<TextureId, vk::ImageView>,
+    texture_image_views: AHashMap<TextureId, ImageView>,
 
     user_textures: Vec<Option<vk::DescriptorSet>>,
 }
@@ -66,7 +70,7 @@ impl Integration {
         display_target: &H,
         physical_width: u32,
         physical_height: u32,
-        scale_factor: f64,
+        scale_factor: f32,
         font_definitions: egui::FontDefinitions,
         style: egui::Style,
         core: Arc<Core>,
@@ -83,7 +87,7 @@ impl Integration {
         context.set_style(style);
 
         let mut egui_winit = egui_winit::State::new(display_target);
-        egui_winit.set_pixels_per_point(scale_factor as f32);
+        egui_winit.set_pixels_per_point(scale_factor);
 
         // Get swap_images to get len of swapchain images and to create framebuffers
         let swap_images = unsafe {
@@ -102,29 +106,6 @@ impl Integration {
         );
 
         // Create DescriptorSetLayouts
-        // let descriptor_set_layouts = {
-        //     let mut sets = vec![];
-        //     for _ in 0..swap_images.len() {
-        //         sets.push(
-        //             unsafe {
-        //                 core.device.create_descriptor_set_layout(
-        //                     &vk::DescriptorSetLayoutCreateInfo::builder().bindings(&[
-        //                         vk::DescriptorSetLayoutBinding::builder()
-        //                             .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-        //                             .descriptor_count(1)
-        //                             .binding(0)
-        //                             .stage_flags(vk::ShaderStageFlags::FRAGMENT)
-        //                             .build(),
-        //                     ]),
-        //                     None,
-        //                 )
-        //             }
-        //             .expect("Failed to create descriptor set layout."),
-        //         );
-        //     }
-        //     sets
-        // };
-
         let descriptor_set_layout = Arc::new(DescriptorSetLayout::new(
             &core,
             vec![DescriptorSetLayoutBinding::Sampler {
@@ -183,205 +164,19 @@ impl Integration {
         .expect("Failed to create pipeline layout.");
 
         // Create Pipeline
-        let pipeline = {
-            let bindings = [vk::VertexInputBindingDescription::builder()
-                .binding(0)
-                .input_rate(vk::VertexInputRate::VERTEX)
-                .stride(
-                    4 * std::mem::size_of::<f32>() as u32 + 4 * std::mem::size_of::<u8>() as u32,
-                )
-                .build()];
-
-            let attributes = [
-                // position
-                vk::VertexInputAttributeDescription::builder()
-                    .binding(0)
-                    .offset(0)
-                    .location(0)
-                    .format(vk::Format::R32G32_SFLOAT)
-                    .build(),
-                // uv
-                vk::VertexInputAttributeDescription::builder()
-                    .binding(0)
-                    .offset(8)
-                    .location(1)
-                    .format(vk::Format::R32G32_SFLOAT)
-                    .build(),
-                // color
-                vk::VertexInputAttributeDescription::builder()
-                    .binding(0)
-                    .offset(16)
-                    .location(2)
-                    .format(vk::Format::R8G8B8A8_UNORM)
-                    .build(),
-            ];
-
-            let vertex_shader_module = {
-                let bytes_code = include_bytes!("../../shaders/spv/egui_vert.vert");
-                let shader_module_create_info = vk::ShaderModuleCreateInfo {
-                    code_size: bytes_code.len(),
-                    p_code: bytes_code.as_ptr() as *const u32,
-                    ..Default::default()
-                };
-                unsafe {
-                    core.device
-                        .create_shader_module(&shader_module_create_info, None)
-                }
-                .expect("Failed to create vertex shader module.")
-            };
-            let fragment_shader_module = {
-                let bytes_code = include_bytes!("../../shaders/spv/egui_frag.frag");
-                let shader_module_create_info = vk::ShaderModuleCreateInfo {
-                    code_size: bytes_code.len(),
-                    p_code: bytes_code.as_ptr() as *const u32,
-                    ..Default::default()
-                };
-                unsafe {
-                    core.device
-                        .create_shader_module(&shader_module_create_info, None)
-                }
-                .expect("Failed to create fragment shader module.")
-            };
-            let main_function_name = CString::new("main").unwrap();
-            let pipeline_shader_stages = [
-                vk::PipelineShaderStageCreateInfo::builder()
-                    .stage(vk::ShaderStageFlags::VERTEX)
-                    .module(vertex_shader_module)
-                    .name(&main_function_name)
-                    .build(),
-                vk::PipelineShaderStageCreateInfo::builder()
-                    .stage(vk::ShaderStageFlags::FRAGMENT)
-                    .module(fragment_shader_module)
-                    .name(&main_function_name)
-                    .build(),
-            ];
-
-            let input_assembly_info = vk::PipelineInputAssemblyStateCreateInfo::builder()
-                .topology(vk::PrimitiveTopology::TRIANGLE_LIST);
-            let viewport_info = vk::PipelineViewportStateCreateInfo::builder()
-                .viewport_count(1)
-                .scissor_count(1);
-            let rasterization_info = vk::PipelineRasterizationStateCreateInfo::builder()
-                .depth_clamp_enable(false)
-                .rasterizer_discard_enable(false)
-                .polygon_mode(vk::PolygonMode::FILL)
-                .cull_mode(vk::CullModeFlags::NONE)
-                .front_face(vk::FrontFace::COUNTER_CLOCKWISE)
-                .depth_bias_enable(false)
-                .line_width(1.0);
-            let stencil_op = vk::StencilOpState::builder()
-                .fail_op(vk::StencilOp::KEEP)
-                .pass_op(vk::StencilOp::KEEP)
-                .compare_op(vk::CompareOp::ALWAYS)
-                .build();
-            let depth_stencil_info = vk::PipelineDepthStencilStateCreateInfo::builder()
-                .depth_test_enable(false)
-                .depth_write_enable(false)
-                .depth_compare_op(vk::CompareOp::ALWAYS)
-                .depth_bounds_test_enable(false)
-                .stencil_test_enable(false)
-                .front(stencil_op)
-                .back(stencil_op);
-            let color_blend_attachments = [vk::PipelineColorBlendAttachmentState::builder()
-                .color_write_mask(
-                    vk::ColorComponentFlags::R
-                        | vk::ColorComponentFlags::G
-                        | vk::ColorComponentFlags::B
-                        | vk::ColorComponentFlags::A,
-                )
-                .blend_enable(true)
-                .src_color_blend_factor(vk::BlendFactor::ONE)
-                .dst_color_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA)
-                .build()];
-            let color_blend_info = vk::PipelineColorBlendStateCreateInfo::builder()
-                .attachments(&color_blend_attachments);
-            let dynamic_states = [vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR];
-            let dynamic_state_info =
-                vk::PipelineDynamicStateCreateInfo::builder().dynamic_states(&dynamic_states);
-            let vertex_input_state = vk::PipelineVertexInputStateCreateInfo::builder()
-                .vertex_attribute_descriptions(&attributes)
-                .vertex_binding_descriptions(&bindings);
-            let multisample_info = vk::PipelineMultisampleStateCreateInfo::builder()
-                .rasterization_samples(vk::SampleCountFlags::TYPE_1);
-
-            let pipeline_create_info = [vk::GraphicsPipelineCreateInfo::builder()
-                .stages(&pipeline_shader_stages)
-                .vertex_input_state(&vertex_input_state)
-                .input_assembly_state(&input_assembly_info)
-                .viewport_state(&viewport_info)
-                .rasterization_state(&rasterization_info)
-                .multisample_state(&multisample_info)
-                .depth_stencil_state(&depth_stencil_info)
-                .color_blend_state(&color_blend_info)
-                .dynamic_state(&dynamic_state_info)
-                .layout(pipeline_layout)
-                .render_pass(render_pass)
-                .subpass(0)
-                .build()];
-
-            let pipeline = unsafe {
-                core.device.create_graphics_pipelines(
-                    vk::PipelineCache::null(),
-                    &pipeline_create_info,
-                    None,
-                )
-            }
-            .expect("Failed to create graphics pipeline.")[0];
-            unsafe {
-                core.device
-                    .destroy_shader_module(vertex_shader_module, None);
-                core.device
-                    .destroy_shader_module(fragment_shader_module, None);
-            }
-            pipeline
-        };
+        let pipeline = create_pipeline(&core.device, pipeline_layout, render_pass);
 
         // Create Sampler
-        let sampler = unsafe {
-            core.device.create_sampler(
-                &vk::SamplerCreateInfo::builder()
-                    .address_mode_u(vk::SamplerAddressMode::CLAMP_TO_EDGE)
-                    .address_mode_v(vk::SamplerAddressMode::CLAMP_TO_EDGE)
-                    .address_mode_w(vk::SamplerAddressMode::CLAMP_TO_EDGE)
-                    .anisotropy_enable(false)
-                    .min_filter(vk::Filter::LINEAR)
-                    .mag_filter(vk::Filter::LINEAR)
-                    .mipmap_mode(vk::SamplerMipmapMode::LINEAR)
-                    .min_lod(0.0)
-                    .max_lod(vk::LOD_CLAMP_NONE),
-                None,
-            )
-        }
-        .expect("Failed to create sampler.");
+        let sampler = Sampler::new_egui(core.device.clone());
 
         // Create Framebuffers
-        let framebuffer_color_image_views = swap_images
-            .iter()
-            .map(|swapchain_image| unsafe {
-                core.device
-                    .create_image_view(
-                        &vk::ImageViewCreateInfo::builder()
-                            .image(swapchain_image.clone())
-                            .view_type(vk::ImageViewType::TYPE_2D)
-                            .format(surface_format.format)
-                            .subresource_range(
-                                vk::ImageSubresourceRange::builder()
-                                    .aspect_mask(vk::ImageAspectFlags::COLOR)
-                                    .base_mip_level(0)
-                                    .level_count(1)
-                                    .base_array_layer(0)
-                                    .layer_count(1)
-                                    .build(),
-                            ),
-                        None,
-                    )
-                    .expect("Failed to create image view.")
-            })
-            .collect::<Vec<_>>();
+        let framebuffer_color_image_views =
+            ImageView::create_image_views(&core.device, surface_format.format, &swap_images);
+
         let framebuffers = framebuffer_color_image_views
             .iter()
-            .map(|&image_views| unsafe {
-                let attachments = &[image_views];
+            .map(|image_views| unsafe {
+                let attachments = &[image_views.handle()];
                 core.device
                     .create_framebuffer(
                         &vk::FramebufferCreateInfo::builder()
@@ -398,82 +193,28 @@ impl Integration {
 
         // Create vertex buffer and index buffer
         let mut vertex_buffers = vec![];
-        let mut vertex_buffer_allocations = vec![];
         let mut index_buffers = vec![];
-        let mut index_buffer_allocations = vec![];
-        for _ in 0..framebuffers.len() {
-            let vertex_buffer = unsafe {
-                core.device
-                    .create_buffer(
-                        &vk::BufferCreateInfo::builder()
-                            .usage(vk::BufferUsageFlags::VERTEX_BUFFER)
-                            .sharing_mode(vk::SharingMode::EXCLUSIVE)
-                            .size(Self::vertex_buffer_size()),
-                        None,
-                    )
-                    .expect("Failed to create vertex buffer.")
-            };
-            let vertex_buffer_requirements =
-                unsafe { core.device.get_buffer_memory_requirements(vertex_buffer) };
-            let vertex_buffer_allocation = allocator
-                .lock()
-                .unwrap()
-                .allocate(&AllocationCreateDesc {
-                    requirements: vertex_buffer_requirements,
-                    location: MemoryLocation::CpuToGpu,
-                    linear: true,
-                    name: "EGUI Vert Buffer",
-                    allocation_scheme: AllocationScheme::GpuAllocatorManaged,
-                })
-                .expect("Failed to create vertex buffer.");
-            unsafe {
-                core.device
-                    .bind_buffer_memory(
-                        vertex_buffer,
-                        vertex_buffer_allocation.memory(),
-                        vertex_buffer_allocation.offset(),
-                    )
-                    .expect("Failed to create vertex buffer.")
-            }
 
-            let index_buffer = unsafe {
-                core.device
-                    .create_buffer(
-                        &vk::BufferCreateInfo::builder()
-                            .usage(vk::BufferUsageFlags::INDEX_BUFFER)
-                            .sharing_mode(vk::SharingMode::EXCLUSIVE)
-                            .size(Self::index_buffer_size()),
-                        None,
-                    )
-                    .expect("Failed to create index buffer.")
-            };
-            let index_buffer_requirements =
-                unsafe { core.device.get_buffer_memory_requirements(index_buffer) };
-            let index_buffer_allocation = allocator
-                .lock()
-                .unwrap()
-                .allocate(&AllocationCreateDesc {
-                    requirements: index_buffer_requirements,
-                    location: MemoryLocation::CpuToGpu,
-                    linear: true,
-                    name: "EGUI Index Buffer",
-                    allocation_scheme: AllocationScheme::GpuAllocatorManaged,
-                })
-                .expect("Failed to create index buffer.");
-            unsafe {
-                core.device
-                    .bind_buffer_memory(
-                        index_buffer,
-                        index_buffer_allocation.memory(),
-                        index_buffer_allocation.offset(),
-                    )
-                    .expect("Failed to create index buffer.")
-            }
+        for _ in 0..framebuffers.len() {
+            let vertex_buffer = Buffer::new(
+                &core,
+                allocator.clone(),
+                Self::vertex_buffer_size(),
+                vk::BufferUsageFlags::VERTEX_BUFFER,
+                MemoryLocation::CpuToGpu,
+                "EGUI Vertex Buffer",
+            );
+            let index_buffer = Buffer::new(
+                &core,
+                allocator.clone(),
+                Self::index_buffer_size(),
+                vk::BufferUsageFlags::INDEX_BUFFER,
+                MemoryLocation::CpuToGpu,
+                "EGUI Index Buffer",
+            );
 
             vertex_buffers.push(vertex_buffer);
-            vertex_buffer_allocations.push(vertex_buffer_allocation);
             index_buffers.push(index_buffer);
-            index_buffer_allocations.push(index_buffer_allocation);
         }
 
         // User Textures
@@ -501,9 +242,7 @@ impl Integration {
             framebuffer_color_image_views,
             framebuffers,
             vertex_buffers,
-            vertex_buffer_allocations,
             index_buffers,
-            index_buffer_allocations,
             texture_desc_sets: AHashMap::new(),
             texture_images: AHashMap::new(),
             texture_image_infos: AHashMap::new(),
@@ -570,7 +309,8 @@ impl Integration {
             self.update_texture(id, image_delta);
         }
 
-        let mut vertex_buffer_ptr = self.vertex_buffer_allocations[index]
+        let mut vertex_buffer_ptr = self.vertex_buffers[index]
+            .allocation()
             .mapped_ptr()
             .unwrap()
             .as_ptr() as *mut u8;
@@ -596,7 +336,8 @@ impl Integration {
         //         )
         //         .expect("Failed to map buffers.") as *mut u8
         // };
-        let mut index_buffer_ptr = self.index_buffer_allocations[index]
+        let mut index_buffer_ptr = self.index_buffers[index]
+            .allocation()
             .mapped_ptr()
             .unwrap()
             .as_ptr() as *mut u8;
@@ -633,12 +374,12 @@ impl Integration {
             self.core.device.cmd_bind_vertex_buffers(
                 command_buffer,
                 0,
-                &[self.vertex_buffers[index]],
+                &[self.vertex_buffers[index].handle()],
                 &[0],
             );
             self.core.device.cmd_bind_index_buffer(
                 command_buffer,
-                self.index_buffers[index],
+                self.index_buffers[index].handle(),
                 0,
                 vk::IndexType::UINT32,
             );
@@ -654,8 +395,8 @@ impl Integration {
                     .max_depth(1.0)
                     .build()],
             );
-            let width_points = self.physical_width as f32 / self.scale_factor as f32;
-            let height_points = self.physical_height as f32 / self.scale_factor as f32;
+            let width_points = self.physical_width as f32 / self.scale_factor;
+            let height_points = self.physical_height as f32 / self.scale_factor;
             self.core.device.cmd_push_constants(
                 command_buffer,
                 self.pipeline_layout,
@@ -749,8 +490,8 @@ impl Integration {
             unsafe {
                 let min = clip_rect.min;
                 let min = egui::Pos2 {
-                    x: min.x * self.scale_factor as f32,
-                    y: min.y * self.scale_factor as f32,
+                    x: min.x * self.scale_factor,
+                    y: min.y * self.scale_factor,
                 };
                 let min = egui::Pos2 {
                     x: f32::clamp(min.x, 0.0, self.physical_width as f32),
@@ -758,8 +499,8 @@ impl Integration {
                 };
                 let max = clip_rect.max;
                 let max = egui::Pos2 {
-                    x: max.x * self.scale_factor as f32,
-                    y: max.y * self.scale_factor as f32,
+                    x: max.x * self.scale_factor,
+                    y: max.y * self.scale_factor,
                 };
                 let max = egui::Pos2 {
                     x: f32::clamp(max.x, min.x, self.physical_width as f32),
@@ -810,11 +551,8 @@ impl Integration {
                     self.core.device.destroy_image(image, None);
                 }
             }
-            if let Some((_, image_view)) = self.texture_image_views.remove_entry(&id) {
-                unsafe {
-                    self.core.device.destroy_image_view(image_view, None);
-                }
-            }
+            self.texture_image_views.remove_entry(&id);
+
             if let Some((_, allocation)) = self.texture_allocations.remove_entry(&id) {
                 self.allocator.lock().unwrap().free(allocation).unwrap();
             }
@@ -950,30 +688,14 @@ impl Integration {
             (handle, create_info, allocation)
         };
         self.texture_image_infos.insert(texture_id, info);
-        let texture_image_view = {
-            let create_info = vk::ImageViewCreateInfo::builder()
-                .components(vk::ComponentMapping::default())
-                .flags(vk::ImageViewCreateFlags::empty())
-                .format(vk::Format::R8G8B8A8_UNORM)
-                .image(texture_image)
-                .subresource_range(
-                    vk::ImageSubresourceRange::builder()
-                        .aspect_mask(vk::ImageAspectFlags::COLOR)
-                        .base_array_layer(0)
-                        .base_mip_level(0)
-                        .layer_count(1)
-                        .level_count(1)
-                        .build(),
-                )
-                .view_type(vk::ImageViewType::TYPE_2D)
-                .build();
-            unsafe {
-                self.core
-                    .device
-                    .create_image_view(&create_info, None)
-                    .unwrap()
-            }
-        };
+        let texture_image_view = ImageView::new_raw(
+            self.core.device.clone(),
+            texture_image,
+            vk::Format::R8G8B8A8_UNORM,
+            vk::ImageAspectFlags::COLOR,
+            1,
+        );
+
         // begin cmd buff
         unsafe {
             let cmd_buff_begin_info = vk::CommandBufferBeginInfo::builder()
@@ -1217,9 +939,7 @@ impl Integration {
 
                     // destroy texture_image and view
                     self.core.device.destroy_image(texture_image, None);
-                    self.core
-                        .device
-                        .destroy_image_view(texture_image_view, None);
+
                     self.allocator
                         .lock()
                         .unwrap()
@@ -1237,8 +957,8 @@ impl Integration {
                 .descriptor_pool
                 .alloc(&self.descriptor_set_layout, 1, |_| {
                     vec![DescriptorWriteData::Image {
-                        view: texture_image_view,
-                        sampler: self.sampler,
+                        view: texture_image_view.handle(),
+                        sampler: self.sampler.handle(),
                     }]
                 })
                 .into_iter()
@@ -1286,9 +1006,7 @@ impl Integration {
         unsafe {
             self.core.device.destroy_render_pass(self.render_pass, None);
             self.core.device.destroy_pipeline(self.pipeline, None);
-            for &image_view in self.framebuffer_color_image_views.iter() {
-                self.core.device.destroy_image_view(image_view, None);
-            }
+
             for &framebuffer in self.framebuffers.iter() {
                 self.core.device.destroy_framebuffer(framebuffer, None);
             }
@@ -1333,191 +1051,27 @@ impl Integration {
         .expect("Failed to create render pass.");
 
         // Recreate pipeline for update render pass
-        self.pipeline = {
-            let bindings = [vk::VertexInputBindingDescription::builder()
-                .binding(0)
-                .input_rate(vk::VertexInputRate::VERTEX)
-                .stride(5 * std::mem::size_of::<f32>() as u32)
-                .build()];
-            let attributes = [
-                // position
-                vk::VertexInputAttributeDescription::builder()
-                    .binding(0)
-                    .offset(0)
-                    .location(0)
-                    .format(vk::Format::R32G32_SFLOAT)
-                    .build(),
-                // uv
-                vk::VertexInputAttributeDescription::builder()
-                    .binding(0)
-                    .offset(8)
-                    .location(1)
-                    .format(vk::Format::R32G32_SFLOAT)
-                    .build(),
-                // color
-                vk::VertexInputAttributeDescription::builder()
-                    .binding(0)
-                    .offset(16)
-                    .location(2)
-                    .format(vk::Format::R8G8B8A8_UNORM)
-                    .build(),
-            ];
-
-            let vertex_shader_module = {
-                let bytes_code = include_bytes!("../../shaders/spv/egui_vert.vert");
-                let shader_module_create_info = vk::ShaderModuleCreateInfo {
-                    code_size: bytes_code.len(),
-                    p_code: bytes_code.as_ptr() as *const u32,
-                    ..Default::default()
-                };
-                unsafe {
-                    self.core
-                        .device
-                        .create_shader_module(&shader_module_create_info, None)
-                }
-                .expect("Failed to create vertex shader module.")
-            };
-            let fragment_shader_module = {
-                let bytes_code = include_bytes!("../../shaders/spv/egui_frag.frag");
-                let shader_module_create_info = vk::ShaderModuleCreateInfo {
-                    code_size: bytes_code.len(),
-                    p_code: bytes_code.as_ptr() as *const u32,
-                    ..Default::default()
-                };
-                unsafe {
-                    self.core
-                        .device
-                        .create_shader_module(&shader_module_create_info, None)
-                }
-                .expect("Failed to create fragment shader module.")
-            };
-            let main_function_name = CString::new("main").unwrap();
-            let pipeline_shader_stages = [
-                vk::PipelineShaderStageCreateInfo::builder()
-                    .stage(vk::ShaderStageFlags::VERTEX)
-                    .module(vertex_shader_module)
-                    .name(&main_function_name)
-                    .build(),
-                vk::PipelineShaderStageCreateInfo::builder()
-                    .stage(vk::ShaderStageFlags::FRAGMENT)
-                    .module(fragment_shader_module)
-                    .name(&main_function_name)
-                    .build(),
-            ];
-
-            let input_assembly_info = vk::PipelineInputAssemblyStateCreateInfo::builder()
-                .topology(vk::PrimitiveTopology::TRIANGLE_LIST);
-            let viewport_info = vk::PipelineViewportStateCreateInfo::builder()
-                .viewport_count(1)
-                .scissor_count(1);
-            let rasterization_info = vk::PipelineRasterizationStateCreateInfo::builder()
-                .depth_clamp_enable(false)
-                .rasterizer_discard_enable(false)
-                .polygon_mode(vk::PolygonMode::FILL)
-                .cull_mode(vk::CullModeFlags::NONE)
-                .front_face(vk::FrontFace::COUNTER_CLOCKWISE)
-                .depth_bias_enable(false)
-                .line_width(1.0);
-            let stencil_op = vk::StencilOpState::builder()
-                .fail_op(vk::StencilOp::KEEP)
-                .pass_op(vk::StencilOp::KEEP)
-                .compare_op(vk::CompareOp::ALWAYS)
-                .build();
-            let depth_stencil_info = vk::PipelineDepthStencilStateCreateInfo::builder()
-                .depth_test_enable(true)
-                .depth_write_enable(true)
-                .depth_compare_op(vk::CompareOp::LESS_OR_EQUAL)
-                .depth_bounds_test_enable(false)
-                .stencil_test_enable(false)
-                .front(stencil_op)
-                .back(stencil_op);
-            let color_blend_attachments = [vk::PipelineColorBlendAttachmentState::builder()
-                .color_write_mask(
-                    vk::ColorComponentFlags::R
-                        | vk::ColorComponentFlags::G
-                        | vk::ColorComponentFlags::B
-                        | vk::ColorComponentFlags::A,
-                )
-                .blend_enable(true)
-                .src_color_blend_factor(vk::BlendFactor::ONE)
-                .dst_color_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA)
-                .build()];
-            let color_blend_info = vk::PipelineColorBlendStateCreateInfo::builder()
-                .attachments(&color_blend_attachments);
-            let dynamic_states = [vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR];
-            let dynamic_state_info =
-                vk::PipelineDynamicStateCreateInfo::builder().dynamic_states(&dynamic_states);
-            let vertex_input_state = vk::PipelineVertexInputStateCreateInfo::builder()
-                .vertex_attribute_descriptions(&attributes)
-                .vertex_binding_descriptions(&bindings);
-            let multisample_info = vk::PipelineMultisampleStateCreateInfo::builder()
-                .rasterization_samples(vk::SampleCountFlags::TYPE_1);
-
-            let pipeline_create_info = [vk::GraphicsPipelineCreateInfo::builder()
-                .stages(&pipeline_shader_stages)
-                .vertex_input_state(&vertex_input_state)
-                .input_assembly_state(&input_assembly_info)
-                .viewport_state(&viewport_info)
-                .rasterization_state(&rasterization_info)
-                .multisample_state(&multisample_info)
-                .depth_stencil_state(&depth_stencil_info)
-                .color_blend_state(&color_blend_info)
-                .dynamic_state(&dynamic_state_info)
-                .layout(self.pipeline_layout)
-                .render_pass(self.render_pass)
-                .subpass(0)
-                .build()];
-
-            let pipeline = unsafe {
-                self.core.device.create_graphics_pipelines(
-                    vk::PipelineCache::null(),
-                    &pipeline_create_info,
-                    None,
-                )
-            }
-            .expect("Failed to create graphics pipeline")[0];
-            unsafe {
-                self.core
-                    .device
-                    .destroy_shader_module(vertex_shader_module, None);
-                self.core
-                    .device
-                    .destroy_shader_module(fragment_shader_module, None);
-            }
-            pipeline
-        };
+        self.pipeline = create_pipeline(&self.core.device, self.pipeline_layout, self.render_pass);
 
         // Recreate color image views for new framebuffers
         self.framebuffer_color_image_views = swap_images
             .iter()
-            .map(|swapchain_image| unsafe {
-                self.core
-                    .device
-                    .create_image_view(
-                        &vk::ImageViewCreateInfo::builder()
-                            .image(swapchain_image.clone())
-                            .view_type(vk::ImageViewType::TYPE_2D)
-                            .format(surface_format.format)
-                            .subresource_range(
-                                vk::ImageSubresourceRange::builder()
-                                    .aspect_mask(vk::ImageAspectFlags::COLOR)
-                                    .base_mip_level(0)
-                                    .level_count(1)
-                                    .base_array_layer(0)
-                                    .layer_count(1)
-                                    .build(),
-                            ),
-                        None,
-                    )
-                    .expect("Failed to create image view.")
+            .map(|swapchain_image| {
+                ImageView::new_raw(
+                    self.core.device.clone(),
+                    *swapchain_image,
+                    surface_format.format,
+                    vk::ImageAspectFlags::COLOR,
+                    1,
+                )
             })
             .collect::<Vec<_>>();
         // Recreate framebuffers for new swapchain
         self.framebuffers = self
             .framebuffer_color_image_views
             .iter()
-            .map(|&image_views| unsafe {
-                let attachments = &[image_views];
+            .map(|image_views| unsafe {
+                let attachments = &[image_views.handle()];
                 self.core
                     .device
                     .create_framebuffer(
@@ -1625,38 +1179,11 @@ impl Integration {
     /// # Unsafe
     /// This method release vk objects memory that is not managed by Rust.
     pub unsafe fn destroy(&mut self) {
-        for (buffer, allocation) in self
-            .index_buffers
-            .drain(0..)
-            .zip(self.index_buffer_allocations.drain(0..))
-        {
-            self.core.device.destroy_buffer(buffer, None);
-            self.allocator
-                .lock()
-                .unwrap()
-                .free(allocation)
-                .expect("Failed to free allocation");
-        }
-        for (buffer, allocation) in self
-            .vertex_buffers
-            .drain(0..)
-            .zip(self.vertex_buffer_allocations.drain(0..))
-        {
-            self.core.device.destroy_buffer(buffer, None);
-            self.allocator
-                .lock()
-                .unwrap()
-                .free(allocation)
-                .expect("Failed to free allocation");
-        }
-        for &image_view in self.framebuffer_color_image_views.iter() {
-            self.core.device.destroy_image_view(image_view, None);
-        }
         for &framebuffer in self.framebuffers.iter() {
             self.core.device.destroy_framebuffer(framebuffer, None);
         }
         self.core.device.destroy_render_pass(self.render_pass, None);
-        self.core.device.destroy_sampler(self.sampler, None);
+
         self.core.device.destroy_pipeline(self.pipeline, None);
         self.core
             .device
@@ -1665,11 +1192,7 @@ impl Integration {
         for (_texture_id, texture_image) in self.texture_images.drain() {
             self.core.device.destroy_image(texture_image, None);
         }
-        for (_texture_id, texture_image_view) in self.texture_image_views.drain() {
-            self.core
-                .device
-                .destroy_image_view(texture_image_view, None);
-        }
+
         for (_texture_id, texture_allocation) in self.texture_allocations.drain() {
             self.allocator
                 .lock()
@@ -1678,4 +1201,133 @@ impl Integration {
                 .unwrap();
         }
     }
+}
+
+fn create_pipeline(
+    device: &Arc<Device>,
+    pipeline_layout: vk::PipelineLayout,
+    render_pass: vk::RenderPass,
+) -> vk::Pipeline {
+    let bindings = [vk::VertexInputBindingDescription::builder()
+        .binding(0)
+        .input_rate(vk::VertexInputRate::VERTEX)
+        .stride(5 * std::mem::size_of::<f32>() as u32)
+        .build()];
+    let attributes = [
+        // position
+        vk::VertexInputAttributeDescription::builder()
+            .binding(0)
+            .offset(0)
+            .location(0)
+            .format(vk::Format::R32G32_SFLOAT)
+            .build(),
+        // uv
+        vk::VertexInputAttributeDescription::builder()
+            .binding(0)
+            .offset(8)
+            .location(1)
+            .format(vk::Format::R32G32_SFLOAT)
+            .build(),
+        // color
+        vk::VertexInputAttributeDescription::builder()
+            .binding(0)
+            .offset(16)
+            .location(2)
+            .format(vk::Format::R8G8B8A8_UNORM)
+            .build(),
+    ];
+
+    let vertex_shader_module = ShaderModule::new(
+        device.clone(),
+        include_bytes!("../../shaders/spv/egui_vert.vert"),
+    );
+
+    let fragment_shader_module = ShaderModule::new(
+        device.clone(),
+        include_bytes!("../../shaders/spv/egui_frag.frag"),
+    );
+
+    let main_function_name = ffi::CString::new("main").unwrap();
+    let pipeline_shader_stages = [
+        vk::PipelineShaderStageCreateInfo::builder()
+            .stage(vk::ShaderStageFlags::VERTEX)
+            .module(vertex_shader_module.handle())
+            .name(&main_function_name)
+            .build(),
+        vk::PipelineShaderStageCreateInfo::builder()
+            .stage(vk::ShaderStageFlags::FRAGMENT)
+            .module(fragment_shader_module.handle())
+            .name(&main_function_name)
+            .build(),
+    ];
+
+    let input_assembly_info = vk::PipelineInputAssemblyStateCreateInfo::builder()
+        .topology(vk::PrimitiveTopology::TRIANGLE_LIST);
+    let viewport_info = vk::PipelineViewportStateCreateInfo::builder()
+        .viewport_count(1)
+        .scissor_count(1);
+    let rasterization_info = vk::PipelineRasterizationStateCreateInfo::builder()
+        .depth_clamp_enable(false)
+        .rasterizer_discard_enable(false)
+        .polygon_mode(vk::PolygonMode::FILL)
+        .cull_mode(vk::CullModeFlags::NONE)
+        .front_face(vk::FrontFace::COUNTER_CLOCKWISE)
+        .depth_bias_enable(false)
+        .line_width(1.0);
+    let stencil_op = vk::StencilOpState::builder()
+        .fail_op(vk::StencilOp::KEEP)
+        .pass_op(vk::StencilOp::KEEP)
+        .compare_op(vk::CompareOp::ALWAYS)
+        .build();
+    let depth_stencil_info = vk::PipelineDepthStencilStateCreateInfo::builder()
+        .depth_test_enable(true)
+        .depth_write_enable(true)
+        .depth_compare_op(vk::CompareOp::LESS_OR_EQUAL)
+        .depth_bounds_test_enable(false)
+        .stencil_test_enable(false)
+        .front(stencil_op)
+        .back(stencil_op);
+    let color_blend_attachments = [vk::PipelineColorBlendAttachmentState::builder()
+        .color_write_mask(
+            vk::ColorComponentFlags::R
+                | vk::ColorComponentFlags::G
+                | vk::ColorComponentFlags::B
+                | vk::ColorComponentFlags::A,
+        )
+        .blend_enable(true)
+        .src_color_blend_factor(vk::BlendFactor::ONE)
+        .dst_color_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA)
+        .build()];
+    let color_blend_info =
+        vk::PipelineColorBlendStateCreateInfo::builder().attachments(&color_blend_attachments);
+    let dynamic_states = [vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR];
+    let dynamic_state_info =
+        vk::PipelineDynamicStateCreateInfo::builder().dynamic_states(&dynamic_states);
+    let vertex_input_state = vk::PipelineVertexInputStateCreateInfo::builder()
+        .vertex_attribute_descriptions(&attributes)
+        .vertex_binding_descriptions(&bindings);
+    let multisample_info = vk::PipelineMultisampleStateCreateInfo::builder()
+        .rasterization_samples(vk::SampleCountFlags::TYPE_1);
+
+    let pipeline_create_info = [vk::GraphicsPipelineCreateInfo::builder()
+        .stages(&pipeline_shader_stages)
+        .vertex_input_state(&vertex_input_state)
+        .input_assembly_state(&input_assembly_info)
+        .viewport_state(&viewport_info)
+        .rasterization_state(&rasterization_info)
+        .multisample_state(&multisample_info)
+        .depth_stencil_state(&depth_stencil_info)
+        .color_blend_state(&color_blend_info)
+        .dynamic_state(&dynamic_state_info)
+        .layout(pipeline_layout)
+        .render_pass(render_pass)
+        .subpass(0)
+        .build()];
+
+    let pipeline = unsafe {
+        device.create_graphics_pipelines(vk::PipelineCache::null(), &pipeline_create_info, None)
+    }
+    .expect("Failed to create graphics pipeline")[0];
+
+    pipeline
 }

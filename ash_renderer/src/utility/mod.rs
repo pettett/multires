@@ -13,6 +13,7 @@ mod pipeline;
 pub mod pooled;
 pub mod queue_family_indices;
 pub mod render_pass;
+pub mod screen;
 pub mod surface;
 pub mod swapchain;
 pub mod sync;
@@ -20,6 +21,7 @@ pub mod tools;
 
 pub use pipeline::ComputePipeline;
 pub use pipeline::GraphicsPipeline;
+pub use pipeline::PipelineLayout;
 pub use pipeline::ShaderModule;
 
 // Macros for common wrapper implementations

@@ -4,7 +4,6 @@ pub mod core;
 pub mod draw_pipelines;
 pub mod gui;
 pub mod multires;
-pub mod screen;
 pub mod utility;
 pub mod vertex;
 

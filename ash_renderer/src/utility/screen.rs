@@ -6,19 +6,58 @@ use gpu_allocator::vulkan::Allocator;
 use crate::{
     core::Core,
     utility::{
-        image::Image, physical_device::PhysicalDevice, render_pass::RenderPass,
+        device::Device,
+        image::{Image, ImageView},
+        physical_device::PhysicalDevice,
+        render_pass::RenderPass,
         swapchain::Swapchain,
     },
     VkHandle,
 };
+
+use super::macros::vk_device_owned_wrapper;
 
 /// data structures that depend on the resolution of the current screen
 pub struct Screen {
     core: Arc<Core>,
     swapchain: Option<Swapchain>,
     depth: Option<Arc<Image>>,
-    pub swapchain_framebuffers: Vec<vk::Framebuffer>,
-    pub swapchain_image_views: Vec<vk::ImageView>,
+    pub swapchain_framebuffers: Vec<Framebuffer>,
+    pub swapchain_image_views: Vec<ImageView>,
+}
+
+vk_device_owned_wrapper!(Framebuffer, destroy_framebuffer);
+
+// TODO: Technically this should contain a reference to Arc<Renderpass>
+impl Framebuffer {
+    pub fn new(
+        device: &Arc<Device>,
+        render_pass: &RenderPass,
+        view: &ImageView,
+        physical_width: u32,
+        physical_height: u32,
+    ) -> Self {
+        let attachments = &[view.handle()];
+
+        let handle = unsafe {
+            device
+                .create_framebuffer(
+                    &vk::FramebufferCreateInfo::builder()
+                        .render_pass(render_pass.handle())
+                        .attachments(attachments)
+                        .width(physical_width)
+                        .height(physical_height)
+                        .layers(1),
+                    None,
+                )
+                .expect("Failed to create framebuffer.")
+        };
+
+        Framebuffer {
+            device: device.clone(),
+            handle,
+        }
+    }
 }
 
 impl Screen {
@@ -50,7 +89,6 @@ impl Screen {
         // Cleanup old swapchain
 
         self.swapchain = None;
-        self.cleanup();
 
         self.swapchain = Some(Swapchain::new(
             self.core.device.clone(),
@@ -67,7 +105,7 @@ impl Screen {
             allocator.clone(),
         ));
 
-        self.swapchain_image_views = Image::create_image_views(
+        self.swapchain_image_views = ImageView::create_image_views(
             &self.core.device,
             self.swapchain().surface_format.format,
             &self.swapchain().images,
@@ -75,29 +113,11 @@ impl Screen {
 
         self.swapchain_framebuffers = create_framebuffers(
             &self.core.device,
-            render_pass.handle(),
+            render_pass,
             &self.swapchain_image_views,
             self.depth().image_view(),
             self.swapchain().extent,
         );
-    }
-
-    fn cleanup(&mut self) {
-        unsafe {
-            for &framebuffer in self.swapchain_framebuffers.iter() {
-                self.core.device.destroy_framebuffer(framebuffer, None);
-            }
-
-            for &image_view in self.swapchain_image_views.iter() {
-                self.core.device.destroy_image_view(image_view, None);
-            }
-        }
-    }
-}
-
-impl Drop for Screen {
-    fn drop(&mut self) {
-        self.cleanup()
     }
 }
 
@@ -167,31 +187,34 @@ fn has_stencil_component(format: vk::Format) -> bool {
 }
 
 fn create_framebuffers(
-    device: &ash::Device,
-    render_pass: vk::RenderPass,
-    image_views: &[vk::ImageView],
-    depth_image_view: vk::ImageView,
+    device: &Arc<Device>,
+    render_pass: &RenderPass,
+    image_views: &[ImageView],
+    depth_image_view: &ImageView,
     swapchain_extent: vk::Extent2D,
-) -> Vec<vk::Framebuffer> {
+) -> Vec<Framebuffer> {
     let mut framebuffers = vec![];
 
-    for &image_view in image_views.iter() {
-        let attachments = [image_view, depth_image_view];
+    for image_view in image_views.iter() {
+        let attachments = [image_view.handle(), depth_image_view.handle()];
 
         let framebuffer_create_info = vk::FramebufferCreateInfo::builder()
-            .render_pass(render_pass)
+            .render_pass(render_pass.handle())
             .attachments(&attachments)
             .width(swapchain_extent.width)
             .height(swapchain_extent.height)
             .layers(1);
 
-        let framebuffer = unsafe {
+        let handle = unsafe {
             device
                 .create_framebuffer(&framebuffer_create_info, None)
                 .expect("Failed to create Framebuffer!")
         };
 
-        framebuffers.push(framebuffer);
+        framebuffers.push(Framebuffer {
+            device: device.clone(),
+            handle,
+        });
     }
 
     framebuffers

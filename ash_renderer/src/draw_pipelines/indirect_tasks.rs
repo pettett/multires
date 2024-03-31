@@ -11,7 +11,6 @@ use crate::{
         scene::ModelUniformBufferObject,
     },
     core::Core,
-    screen::Screen,
     utility::{
         buffer::{AsBuffer, TBuffer},
         device::Device,
@@ -25,7 +24,8 @@ use crate::{
             query_pool::{QueryPool, QueryResult},
         },
         render_pass::RenderPass,
-        GraphicsPipeline, ShaderModule,
+        screen::Screen,
+        GraphicsPipeline, PipelineLayout, ShaderModule,
     },
     VkHandle, CLEAR_VALUES,
 };
@@ -204,7 +204,7 @@ impl ScreenData {
         for (i, mut command_buffer) in command_buffers.iter_to_fill().enumerate() {
             let render_pass_begin_info = vk::RenderPassBeginInfo::builder()
                 .render_pass(render_pass.handle())
-                .framebuffer(screen.swapchain_framebuffers[i])
+                .framebuffer(screen.swapchain_framebuffers[i].handle())
                 .render_area(vk::Rect2D {
                     offset: vk::Offset2D { x: 0, y: 0 },
                     extent: screen.swapchain().extent,
@@ -244,7 +244,7 @@ impl ScreenData {
                     device.cmd_bind_descriptor_sets(
                         *command_buffer,
                         vk::PipelineBindPoint::GRAPHICS,
-                        core_draw.graphics_pipeline.layout(),
+                        core_draw.graphics_pipeline.layout().handle(),
                         0,
                         &descriptor_sets_to_bind,
                         &[],
@@ -437,19 +437,10 @@ fn create_graphics_pipeline(
         .logic_op(vk::LogicOp::COPY)
         .blend_constants([0.0, 0.0, 0.0, 0.0]);
 
-    let set_layouts = [ubo_set_layout.handle()];
-
-    let pipeline_layout_create_info =
-        vk::PipelineLayoutCreateInfo::builder().set_layouts(&set_layouts);
-
     let dynamic_state_info = vk::PipelineDynamicStateCreateInfo::builder()
         .dynamic_states(&[vk::DynamicState::SCISSOR, vk::DynamicState::VIEWPORT]);
 
-    let pipeline_layout = unsafe {
-        core.device
-            .create_pipeline_layout(&pipeline_layout_create_info, None)
-            .expect("Failed to create pipeline layout!")
-    };
+    let pipeline_layout = PipelineLayout::new(core.device.clone(), ubo_set_layout);
 
     let graphic_pipeline_create_infos = [vk::GraphicsPipelineCreateInfo::builder()
         .stages(&shader_stages)
@@ -459,25 +450,9 @@ fn create_graphics_pipeline(
         .depth_stencil_state(&depth_state_create_info)
         .color_blend_state(&color_blend_state)
         .dynamic_state(&dynamic_state_info)
-        .layout(pipeline_layout)
+        .layout(pipeline_layout.handle())
         .render_pass(render_pass.handle())
         .build()];
-
-    //  {
-    //     stage_count: shader_stages.len() as u32,
-    //     p_stages: shader_stages.as_ptr(),
-    //     p_viewport_state: &viewport_state_create_info,
-    //     p_rasterization_state: &rasterization_statue_create_info,
-    //     p_multisample_state: &multisample_state_create_info,
-    //     p_depth_stencil_state: &depth_state_create_info,
-    //     p_color_blend_state: &color_blend_state,
-    //     layout: pipeline_layout,
-    //     render_pass,
-    //     subpass: 0,
-    //     base_pipeline_handle: vk::Pipeline::null(),
-    //     base_pipeline_index: -1,
-    //     ..Default::default()
-    // };
 
     let graphics_pipelines = unsafe {
         core.device
@@ -491,10 +466,5 @@ fn create_graphics_pipeline(
 
     core.name_object("Indirect Tasks", graphics_pipelines[0]);
 
-    GraphicsPipeline::new(
-        core.device.clone(),
-        graphics_pipelines[0],
-        pipeline_layout,
-        ubo_set_layout,
-    )
+    GraphicsPipeline::new_raw(core.device.clone(), graphics_pipelines[0], pipeline_layout)
 }

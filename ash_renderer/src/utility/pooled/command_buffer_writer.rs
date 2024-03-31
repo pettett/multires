@@ -2,12 +2,10 @@ use std::{ops::Index, sync::Arc};
 
 use ash::vk;
 
-use crate::{
+use crate::utility::{
+    device::Device,
+    macros::{vk_handle_wrapper, vk_handle_wrapper_lifetime},
     screen::Screen,
-    utility::{
-        device::Device,
-        macros::{vk_handle_wrapper, vk_handle_wrapper_lifetime},
-    },
 };
 
 pub struct CommandBufferWriter<'a> {

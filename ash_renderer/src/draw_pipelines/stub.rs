@@ -1,8 +1,7 @@
 use ash::vk;
 
-use crate::{
-    screen::Screen,
-    utility::{pooled::command_pool::CommandBuffer, render_pass::RenderPass},
+use crate::utility::{
+    pooled::command_pool::CommandBuffer, render_pass::RenderPass, screen::Screen,
 };
 
 use super::DrawPipeline;
@@ -22,7 +21,7 @@ impl DrawPipeline for Stub {
     fn init_swapchain(
         &mut self,
         _core: &crate::core::Core,
-        _screen: &crate::screen::Screen,
+        _screen: &Screen,
         _render_pass: &crate::utility::render_pass::RenderPass,
     ) {
     }

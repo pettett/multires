@@ -7,7 +7,6 @@ use common::MeshVert;
 use crate::{
     app::{mesh_data::MeshData, renderer::Renderer, scene::Scene},
     core::Core,
-    screen::Screen,
     utility::{
         buffer::TBuffer,
         device::Device,
@@ -17,6 +16,7 @@ use crate::{
             descriptor_pool::{DescriptorPool, DescriptorSet},
         },
         render_pass::RenderPass,
+        screen::Screen,
         GraphicsPipeline,
     },
     VkHandle, CLEAR_VALUES,
@@ -146,7 +146,7 @@ impl ScreenData {
         for (i, mut command_buffer) in command_buffers.iter_to_fill().enumerate() {
             let render_pass_begin_info = vk::RenderPassBeginInfo::builder()
                 .render_pass(render_pass.handle())
-                .framebuffer(screen.swapchain_framebuffers[i])
+                .framebuffer(screen.swapchain_framebuffers[i].handle())
                 .render_area(vk::Rect2D {
                     offset: vk::Offset2D { x: 0, y: 0 },
                     extent: screen.swapchain().extent,
@@ -172,7 +172,7 @@ impl ScreenData {
                 device.cmd_bind_descriptor_sets(
                     *command_buffer,
                     vk::PipelineBindPoint::GRAPHICS,
-                    core_draw.graphics_pipeline.layout(),
+                    core_draw.graphics_pipeline.layout().handle(),
                     0,
                     &descriptor_sets_to_bind,
                     &[],

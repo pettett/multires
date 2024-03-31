@@ -3,8 +3,7 @@ use bevy_ecs::system::Commands;
 
 use crate::{
     core::Core,
-    screen::Screen,
-    utility::{pooled::command_pool::CommandBuffer, render_pass::RenderPass},
+    utility::{pooled::command_pool::CommandBuffer, render_pass::RenderPass, screen::Screen},
 };
 
 pub mod compute_culled_indices;

@@ -5,7 +5,6 @@ use ash::vk::{self};
 use crate::{
     app::{mesh_data::MeshData, renderer::Renderer, scene::Scene},
     core::Core,
-    screen::Screen,
     utility::{
         buffer::{AsBuffer, TBuffer},
         device::Device,
@@ -18,6 +17,7 @@ use crate::{
             },
         },
         render_pass::RenderPass,
+        screen::Screen,
         ComputePipeline,
     },
     VkHandle,
@@ -208,7 +208,7 @@ impl ScreenData {
                 device.cmd_bind_descriptor_sets(
                     *command_buffer,
                     vk::PipelineBindPoint::COMPUTE,
-                    core_draw.should_draw_pipeline.layout(),
+                    core_draw.should_draw_pipeline.layout().handle(),
                     0,
                     &descriptor_sets_to_bind,
                     &[],

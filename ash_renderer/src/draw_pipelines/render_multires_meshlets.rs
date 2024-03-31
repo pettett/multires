@@ -7,7 +7,6 @@ use ash::vk;
 use crate::{
     app::{mesh_data::MeshData, renderer::Renderer, scene::Scene},
     core::Core,
-    screen::Screen,
     utility::{
         buffer::{AsBuffer, TBuffer},
         device::Device,
@@ -20,7 +19,8 @@ use crate::{
             query_pool::QueryPool,
         },
         render_pass::RenderPass,
-        GraphicsPipeline, ShaderModule,
+        screen::Screen,
+        GraphicsPipeline, PipelineLayout, ShaderModule,
     },
     CLEAR_VALUES,
 };
@@ -95,13 +95,13 @@ impl RenderMultires for RenderMultiresMeshlets {
         &self,
         cmd: &mut CommandBufferWriter,
         device: &crate::utility::device::Device,
-        screen: &crate::screen::Screen,
+        screen: &Screen,
         render_pass: &crate::utility::render_pass::RenderPass,
         frame: usize,
     ) {
         let render_pass_begin_info = vk::RenderPassBeginInfo::builder()
             .render_pass(render_pass.handle())
-            .framebuffer(screen.swapchain_framebuffers[frame])
+            .framebuffer(screen.swapchain_framebuffers[frame].handle())
             .render_area(vk::Rect2D {
                 offset: vk::Offset2D { x: 0, y: 0 },
                 extent: screen.swapchain().extent,
@@ -139,7 +139,7 @@ impl RenderMultires for RenderMultiresMeshlets {
                 device.cmd_bind_descriptor_sets(
                     **cmd,
                     vk::PipelineBindPoint::GRAPHICS,
-                    self.graphics_pipeline.layout(),
+                    self.graphics_pipeline.layout().handle(),
                     0,
                     &descriptor_sets_to_bind,
                     &[],
@@ -223,21 +223,12 @@ fn create_graphics_pipeline(
         .logic_op(vk::LogicOp::COPY)
         .blend_constants([0.0, 0.0, 0.0, 0.0]);
 
-    let set_layouts = [ubo_set_layout.handle()];
-
-    let pipeline_layout_create_info =
-        vk::PipelineLayoutCreateInfo::builder().set_layouts(&set_layouts);
-
     let dynamic_state_info = vk::PipelineDynamicStateCreateInfo::builder()
         .dynamic_states(&[vk::DynamicState::SCISSOR, vk::DynamicState::VIEWPORT]);
 
-    let pipeline_layout = unsafe {
-        device
-            .create_pipeline_layout(&pipeline_layout_create_info, None)
-            .expect("Failed to create pipeline layout!")
-    };
+    let pipeline_layout = PipelineLayout::new(device.clone(), ubo_set_layout);
 
-    let graphic_pipeline_create_infos = [vk::GraphicsPipelineCreateInfo::builder()
+    let graphic_pipeline_create_info = vk::GraphicsPipelineCreateInfo::builder()
         .stages(&shader_stages)
         .rasterization_state(&rasterization_statue_create_info)
         .viewport_state(&viewport_state_create_info)
@@ -245,26 +236,10 @@ fn create_graphics_pipeline(
         .depth_stencil_state(&depth_state_create_info)
         .color_blend_state(&color_blend_state)
         .dynamic_state(&dynamic_state_info)
-        .layout(pipeline_layout)
-        .render_pass(render_pass.handle())
-        .build()];
+        .layout(pipeline_layout.handle())
+        .render_pass(render_pass.handle());
 
-    let graphics_pipelines = unsafe {
-        device
-            .create_graphics_pipelines(
-                vk::PipelineCache::null(),
-                &graphic_pipeline_create_infos,
-                None,
-            )
-            .expect("Failed to create Graphics Pipeline!.")
-    };
-
-    GraphicsPipeline::new(
-        device,
-        graphics_pipelines[0],
-        pipeline_layout,
-        ubo_set_layout,
-    )
+    GraphicsPipeline::new(device, graphic_pipeline_create_info, pipeline_layout)
 }
 
 fn create_descriptor_set_layout(core: &Core) -> Arc<DescriptorSetLayout> {

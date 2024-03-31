@@ -14,7 +14,7 @@ use crate::{
                 DescriptorWriteData,
             },
         },
-        ComputePipeline, GraphicsPipeline, ShaderModule,
+        ComputePipeline, GraphicsPipeline, PipelineLayout, ShaderModule,
     },
     vertex::Vertex,
     VkHandle,
@@ -23,8 +23,7 @@ use ash::vk;
 use common::MeshVert;
 
 use crate::{
-    screen::Screen,
-    utility::{device::Device, render_pass::RenderPass},
+    utility::{device::Device, render_pass::RenderPass, screen::Screen},
     CLEAR_VALUES,
 };
 
@@ -154,7 +153,7 @@ impl RenderMultires for RenderMultiresIndices {
 
         let render_pass_begin_info = vk::RenderPassBeginInfo::builder()
             .render_pass(render_pass.handle())
-            .framebuffer(screen.swapchain_framebuffers[frame])
+            .framebuffer(screen.swapchain_framebuffers[frame].handle())
             .render_area(vk::Rect2D {
                 offset: vk::Offset2D { x: 0, y: 0 },
                 extent: screen.swapchain().extent,
@@ -189,7 +188,7 @@ impl RenderMultires for RenderMultiresIndices {
             device.cmd_bind_descriptor_sets(
                 **cmd,
                 vk::PipelineBindPoint::GRAPHICS,
-                self.graphics_pipeline.layout(),
+                self.graphics_pipeline.layout().handle(),
                 0,
                 &descriptor_sets_to_bind,
                 &[],
@@ -294,19 +293,10 @@ pub fn create_traditional_graphics_pipeline(
         .logic_op(vk::LogicOp::COPY)
         .blend_constants([0.0, 0.0, 0.0, 0.0]);
 
-    let set_layouts = [ubo_set_layout.handle()];
-
-    let pipeline_layout_create_info =
-        vk::PipelineLayoutCreateInfo::builder().set_layouts(&set_layouts);
-
     let dynamic_state_info = vk::PipelineDynamicStateCreateInfo::builder()
         .dynamic_states(&[vk::DynamicState::SCISSOR, vk::DynamicState::VIEWPORT]);
 
-    let pipeline_layout = unsafe {
-        core.device
-            .create_pipeline_layout(&pipeline_layout_create_info, None)
-            .expect("Failed to create pipeline layout!")
-    };
+    let pipeline_layout = PipelineLayout::new(core.device.clone(), ubo_set_layout);
 
     let graphic_pipeline_create_infos = [vk::GraphicsPipelineCreateInfo::builder()
         .stages(&shader_stages)
@@ -318,25 +308,9 @@ pub fn create_traditional_graphics_pipeline(
         .dynamic_state(&dynamic_state_info)
         .vertex_input_state(&vertex_input_state_create_info)
         .input_assembly_state(&vertex_input_assembly_state_info)
-        .layout(pipeline_layout)
+        .layout(pipeline_layout.handle())
         .render_pass(render_pass.handle())
         .build()];
-
-    //  {
-    //     stage_count: shader_stages.len() as u32,
-    //     p_stages: shader_stages.as_ptr(),
-    //     p_viewport_state: &viewport_state_create_info,
-    //     p_rasterization_state: &rasterization_statue_create_info,
-    //     p_multisample_state: &multisample_state_create_info,
-    //     p_depth_stencil_state: &depth_state_create_info,
-    //     p_color_blend_state: &color_blend_state,
-    //     layout: pipeline_layout,
-    //     render_pass,
-    //     subpass: 0,
-    //     base_pipeline_handle: vk::Pipeline::null(),
-    //     base_pipeline_index: -1,
-    //     ..Default::default()
-    // };
 
     let graphics_pipelines = unsafe {
         core.device
@@ -350,12 +324,7 @@ pub fn create_traditional_graphics_pipeline(
 
     core.name_object("Compute Culled Indices", graphics_pipelines[0]);
 
-    GraphicsPipeline::new(
-        core.device.clone(),
-        graphics_pipelines[0],
-        pipeline_layout,
-        ubo_set_layout,
-    )
+    GraphicsPipeline::new_raw(core.device.clone(), graphics_pipelines[0], pipeline_layout)
 }
 
 pub fn create_traditional_graphics_descriptor_set_layout(core: &Core) -> Arc<DescriptorSetLayout> {

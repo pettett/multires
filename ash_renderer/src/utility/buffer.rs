@@ -244,6 +244,7 @@ impl Drop for Buffer {
 vk_handle_wrapper!(Buffer);
 
 impl Buffer {
+    /// Create a new exclusive buffer, with a backing allocation from the allocator
     pub fn new(
         core: &Core,
         allocator: Arc<Mutex<Allocator>>,
