@@ -115,11 +115,3 @@ impl Gui {
         );
     }
 }
-
-impl Drop for Gui {
-    fn drop(&mut self) {
-        unsafe {
-            self.integration.destroy();
-        }
-    }
-}

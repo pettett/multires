@@ -10,40 +10,40 @@ vk_device_owned_wrapper!(RenderPass, destroy_render_pass);
 
 impl RenderPass {
     pub fn new_color(device: Arc<Device>, surface_format: vk::Format) -> RenderPass {
-        let attachments = [vk::AttachmentDescription::builder()
-            .format(surface_format)
-            .samples(vk::SampleCountFlags::TYPE_1)
-            .load_op(vk::AttachmentLoadOp::LOAD)
-            .store_op(vk::AttachmentStoreOp::STORE)
-            .stencil_load_op(vk::AttachmentLoadOp::DONT_CARE)
-            .stencil_store_op(vk::AttachmentStoreOp::DONT_CARE)
-            .initial_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
-            .final_layout(vk::ImageLayout::PRESENT_SRC_KHR)
-            .build()];
+        let handle = unsafe {
+            device.create_render_pass(
+                &vk::RenderPassCreateInfo::builder()
+                    .attachments(&[vk::AttachmentDescription::builder()
+                        .format(surface_format)
+                        .samples(vk::SampleCountFlags::TYPE_1)
+                        .load_op(vk::AttachmentLoadOp::LOAD)
+                        .store_op(vk::AttachmentStoreOp::STORE)
+                        .stencil_load_op(vk::AttachmentLoadOp::DONT_CARE)
+                        .stencil_store_op(vk::AttachmentStoreOp::DONT_CARE)
+                        .initial_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+                        .final_layout(vk::ImageLayout::PRESENT_SRC_KHR)
+                        .build()])
+                    .subpasses(&[vk::SubpassDescription::builder()
+                        .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
+                        .color_attachments(&[vk::AttachmentReference::builder()
+                            .attachment(0)
+                            .layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+                            .build()])
+                        .build()])
+                    .dependencies(&[vk::SubpassDependency::builder()
+                        .src_subpass(vk::SUBPASS_EXTERNAL)
+                        .dst_subpass(0)
+                        .src_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_WRITE)
+                        .dst_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_WRITE)
+                        .src_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
+                        .dst_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
+                        .build()]),
+                None,
+            )
+        }
+        .expect("Failed to create render pass.");
 
-        let subpasses = [vk::SubpassDescription::builder()
-            .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
-            .color_attachments(&[vk::AttachmentReference::builder()
-                .attachment(0)
-                .layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
-                .build()])
-            .build()];
-
-        let dependencies = [vk::SubpassDependency::builder()
-            .src_subpass(vk::SUBPASS_EXTERNAL)
-            .dst_subpass(0)
-            .src_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_WRITE)
-            .dst_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_WRITE)
-            .src_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
-            .dst_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
-            .build()];
-
-        let create_info = vk::RenderPassCreateInfo::builder()
-            .attachments(&attachments)
-            .subpasses(&subpasses)
-            .dependencies(&dependencies);
-
-        Self::new(device, create_info)
+        RenderPass { device, handle }
     }
 
     pub fn new_color_depth(

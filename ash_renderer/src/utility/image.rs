@@ -136,6 +136,8 @@ pub struct Image {
     allocator: Arc<Mutex<Allocator>>,
     image_view: Option<ImageView>,
     sampler: Option<Sampler>,
+    width: u32,
+    height: u32,
 }
 
 vk_handle_wrapper!(Image);
@@ -226,6 +228,8 @@ impl Image {
             format,
             image_view: None,
             sampler: None,
+            width,
+            height,
         }
     }
 
@@ -606,6 +610,14 @@ impl Image {
 
     pub fn format(&self) -> vk::Format {
         self.format
+    }
+
+    pub fn width(&self) -> u32 {
+        self.width
+    }
+
+    pub fn height(&self) -> u32 {
+        self.height
     }
 }
 
