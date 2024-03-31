@@ -20,7 +20,7 @@ impl RenderPass {
             stencil_store_op: vk::AttachmentStoreOp::DONT_CARE,
             initial_layout: vk::ImageLayout::UNDEFINED,
             // Pass forward to the ui stage
-            final_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            final_layout: vk::ImageLayout::PRESENT_SRC_KHR,
         };
 
         let depth_attachment = vk::AttachmentDescription {

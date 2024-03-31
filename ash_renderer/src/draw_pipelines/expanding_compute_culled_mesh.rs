@@ -53,7 +53,7 @@ impl ExpandingComputeCulledMesh {
         scene: &Scene,
         mesh_data: &MeshData,
     ) -> Self {
-        let ubo_layout = create_descriptor_set_layout(core.device.clone());
+        let ubo_layout = create_descriptor_set_layout(&core);
 
         let should_draw_pipeline = ComputePipeline::create_compute_pipeline(
             &core,
@@ -311,7 +311,7 @@ impl ScreenData {
     }
 }
 
-fn create_descriptor_set_layout(device: Arc<Device>) -> Arc<DescriptorSetLayout> {
+fn create_descriptor_set_layout(core: &Core) -> Arc<DescriptorSetLayout> {
     let bindings = vec![
         DescriptorSetLayoutBinding::Storage {
             vis: vk::ShaderStageFlags::COMPUTE,
@@ -335,7 +335,11 @@ fn create_descriptor_set_layout(device: Arc<Device>) -> Arc<DescriptorSetLayout>
         },
     ];
 
-    Arc::new(DescriptorSetLayout::new(device, bindings))
+    Arc::new(DescriptorSetLayout::new(
+        core,
+        bindings,
+        "expanding culling mesh compute layout",
+    ))
 }
 
 fn create_compute_culled_meshes_descriptor_sets(
@@ -350,55 +354,28 @@ fn create_compute_culled_meshes_descriptor_sets(
     mesh_data: &MeshData,
     swapchain_images_size: usize,
 ) -> Vec<DescriptorSet> {
-    let mut layouts: Vec<vk::DescriptorSetLayout> = vec![];
-    for _ in 0..swapchain_images_size {
-        layouts.push(descriptor_set_layout.handle());
-    }
-
-    let descriptor_set_allocate_info = vk::DescriptorSetAllocateInfo::builder()
-        .descriptor_pool(descriptor_pool.handle())
-        .set_layouts(&layouts);
-
-    let vk_descriptor_sets = unsafe {
-        device
-            .allocate_descriptor_sets(&descriptor_set_allocate_info)
-            .expect("Failed to allocate descriptor sets!")
-    };
-
-    let descriptor_sets: Vec<_> = vk_descriptor_sets
-        .into_iter()
-        .enumerate()
-        .map(|(i, set)| {
-            DescriptorSet::new(
-                set,
-                descriptor_pool.clone(),
-                descriptor_set_layout.clone(),
-                device.clone(),
-                vec![
-                    DescriptorWriteData::Buffer {
-                        buf: scene.uniform_transform_buffer.buffer(),
-                    },
-                    DescriptorWriteData::Buffer {
-                        buf: cluster_draw_buffer.buffer(),
-                    },
-                    DescriptorWriteData::Buffer {
-                        buf: mesh_data.cluster_buffer.buffer(), //
-                    },
-                    DescriptorWriteData::Buffer {
-                        buf: scene.uniform_camera_buffers[i].buffer(),
-                    },
-                    DescriptorWriteData::Empty,
-                    DescriptorWriteData::Empty,
-                    DescriptorWriteData::Buffer {
-                        buf: indirect_data_buffer.buffer(), //
-                    },
-                    DescriptorWriteData::Buffer {
-                        buf: range_buffer.buffer(), //
-                    },
-                ],
-            )
-        })
-        .collect();
-
-    descriptor_sets
+    descriptor_pool.alloc(descriptor_set_layout, swapchain_images_size, |i| {
+        vec![
+            DescriptorWriteData::Buffer {
+                buf: scene.uniform_transform_buffer.buffer(),
+            },
+            DescriptorWriteData::Buffer {
+                buf: cluster_draw_buffer.buffer(),
+            },
+            DescriptorWriteData::Buffer {
+                buf: mesh_data.cluster_buffer.buffer(), //
+            },
+            DescriptorWriteData::Buffer {
+                buf: scene.uniform_camera_buffers[i].buffer(),
+            },
+            DescriptorWriteData::Empty,
+            DescriptorWriteData::Empty,
+            DescriptorWriteData::Buffer {
+                buf: indirect_data_buffer.buffer(), //
+            },
+            DescriptorWriteData::Buffer {
+                buf: range_buffer.buffer(), //
+            },
+        ]
+    })
 }

@@ -45,8 +45,7 @@ pub struct DrawFullRes {
 
 impl DrawFullRes {
     pub fn new(renderer: &Renderer, mesh_data: &MeshData, scene: &Scene) -> Self {
-        let ubo_layout =
-            create_traditional_graphics_descriptor_set_layout(renderer.core.device.clone());
+        let ubo_layout = create_traditional_graphics_descriptor_set_layout(&renderer.core);
 
         let graphics_pipeline = create_traditional_graphics_pipeline(
             &renderer.core,

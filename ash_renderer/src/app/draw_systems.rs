@@ -53,6 +53,8 @@ pub fn update_pipeline(
     renderer.hacky_command_buffer_passthrough = None;
     renderer.draw_pipeline = Box::new(Stub);
 
+    println!("Switching to {s:?}");
+
     let mut draw_pipeline: Box<dyn DrawPipeline + Send + Sync> = match s {
         MeshDrawingPipelineType::IndirectTasks => Box::new(IndirectTasks::new(
             renderer.core.clone(),

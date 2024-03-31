@@ -78,7 +78,7 @@ impl IndirectTasks {
         uniform_transform_buffer: Arc<TBuffer<ModelUniformBufferObject>>,
         uniform_camera_buffers: &[Arc<impl AsBuffer>],
     ) -> Self {
-        let ubo_layout = create_descriptor_set_layout(core.device.clone());
+        let ubo_layout = create_descriptor_set_layout(&core);
 
         let graphics_pipeline = create_graphics_pipeline(
             &core,
@@ -267,7 +267,7 @@ impl ScreenData {
     }
 }
 
-fn create_descriptor_set_layout(device: Arc<Device>) -> Arc<DescriptorSetLayout> {
+fn create_descriptor_set_layout(core: &Core) -> Arc<DescriptorSetLayout> {
     let bindings = vec![
         DescriptorSetLayoutBinding::Storage {
             vis: vk::ShaderStageFlags::MESH_EXT | vk::ShaderStageFlags::TASK_EXT,
@@ -290,7 +290,11 @@ fn create_descriptor_set_layout(device: Arc<Device>) -> Arc<DescriptorSetLayout>
         },
     ];
 
-    Arc::new(DescriptorSetLayout::new(device, bindings))
+    Arc::new(DescriptorSetLayout::new(
+        core,
+        bindings,
+        "indirect tasks layout",
+    ))
 }
 
 fn create_descriptor_sets(
@@ -306,62 +310,35 @@ fn create_descriptor_sets(
     //texture: &Image,
     swapchain_images_size: usize,
 ) -> Vec<DescriptorSet> {
-    let mut layouts: Vec<vk::DescriptorSetLayout> = vec![];
-    for _ in 0..swapchain_images_size {
-        layouts.push(descriptor_set_layout.handle());
-    }
-
-    let descriptor_set_allocate_info = vk::DescriptorSetAllocateInfo::builder()
-        .descriptor_pool(descriptor_pool.handle())
-        .set_layouts(&layouts);
-
-    let vk_descriptor_sets = unsafe {
-        device
-            .allocate_descriptor_sets(&descriptor_set_allocate_info)
-            .expect("Failed to allocate descriptor sets!")
-    };
-
-    let descriptor_sets: Vec<_> = vk_descriptor_sets
-        .into_iter()
-        .enumerate()
-        .map(|(i, set)| {
-            DescriptorSet::new(
-                set,
-                descriptor_pool.clone(),
-                descriptor_set_layout.clone(),
-                device.clone(),
-                vec![
-                    DescriptorWriteData::Buffer {
-                        //  0
-                        buf: uniform_transform_buffer.buffer(),
-                    },
-                    DescriptorWriteData::Empty,
-                    DescriptorWriteData::Buffer {
-                        //  2
-                        buf: cluster_buffer.buffer(),
-                    },
-                    DescriptorWriteData::Buffer {
-                        // 3
-                        buf: uniform_camera_buffers[i].buffer(),
-                    },
-                    DescriptorWriteData::Buffer {
-                        //  4
-                        buf: meshlet_buffer.buffer(),
-                    },
-                    DescriptorWriteData::Buffer {
-                        //  5
-                        buf: vertex_buffer.buffer(),
-                    },
-                    DescriptorWriteData::Buffer {
-                        //  6
-                        buf: indirect_draw_array_buffer.buffer(),
-                    },
-                ],
-            )
-        })
-        .collect();
-
-    descriptor_sets
+    descriptor_pool.alloc(descriptor_set_layout, swapchain_images_size, |i| {
+        vec![
+            DescriptorWriteData::Buffer {
+                //  0
+                buf: uniform_transform_buffer.buffer(),
+            },
+            DescriptorWriteData::Empty,
+            DescriptorWriteData::Buffer {
+                //  2
+                buf: cluster_buffer.buffer(),
+            },
+            DescriptorWriteData::Buffer {
+                // 3
+                buf: uniform_camera_buffers[i].buffer(),
+            },
+            DescriptorWriteData::Buffer {
+                //  4
+                buf: meshlet_buffer.buffer(),
+            },
+            DescriptorWriteData::Buffer {
+                //  5
+                buf: vertex_buffer.buffer(),
+            },
+            DescriptorWriteData::Buffer {
+                //  6
+                buf: indirect_draw_array_buffer.buffer(),
+            },
+        ]
+    })
 }
 
 fn create_graphics_pipeline(

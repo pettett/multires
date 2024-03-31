@@ -25,13 +25,13 @@ forms = {
     "ExpandingComputeCulledMesh": "-",
     "IndirectTasks": "-.",
     "DrawIndirect": "--",
-    "DrawLOD": "-",
+    "DrawLOD": ":",
 }
 names = {
     "ExpandingComputeCulledMesh": "DAG Explore",
     "IndirectTasks": "Task Select",
     "DrawIndirect": "Instanced Full Resolution",
-    "DrawLOD": "CPU Controlled LOD Chain",
+    "DrawLOD": "LOD Chain",
 }
 alphas = {
     "ExpandingComputeCulledMesh": 1.0,

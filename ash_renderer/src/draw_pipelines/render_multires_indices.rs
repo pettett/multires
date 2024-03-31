@@ -55,7 +55,7 @@ impl RenderMultiresIndices {
         scene: &Scene,
         compact_indices_pipeline: ComputePipeline,
     ) -> Self {
-        let ubo_layout = create_traditional_graphics_descriptor_set_layout(core.device.clone());
+        let ubo_layout = create_traditional_graphics_descriptor_set_layout(core);
 
         let graphics_pipeline = create_traditional_graphics_pipeline(
             &core,
@@ -358,9 +358,7 @@ pub fn create_traditional_graphics_pipeline(
     )
 }
 
-pub fn create_traditional_graphics_descriptor_set_layout(
-    device: Arc<Device>,
-) -> Arc<DescriptorSetLayout> {
+pub fn create_traditional_graphics_descriptor_set_layout(core: &Core) -> Arc<DescriptorSetLayout> {
     let bindings = vec![
         DescriptorSetLayoutBinding::Storage {
             vis: vk::ShaderStageFlags::VERTEX,
@@ -372,7 +370,7 @@ pub fn create_traditional_graphics_descriptor_set_layout(
         },
     ];
 
-    Arc::new(DescriptorSetLayout::new(device, bindings))
+    Arc::new(DescriptorSetLayout::new(core, bindings, "indices layout"))
 }
 
 pub fn create_traditional_graphics_descriptor_sets(
@@ -383,45 +381,18 @@ pub fn create_traditional_graphics_descriptor_sets(
     uniform_camera_buffers: &[Arc<impl AsBuffer>],
     swapchain_images_size: usize,
 ) -> Vec<DescriptorSet> {
-    let mut layouts: Vec<vk::DescriptorSetLayout> = vec![];
-    for _ in 0..swapchain_images_size {
-        layouts.push(descriptor_set_layout.handle());
-    }
-
-    let descriptor_set_allocate_info = vk::DescriptorSetAllocateInfo::builder()
-        .descriptor_pool(descriptor_pool.handle())
-        .set_layouts(&layouts);
-
-    let vk_descriptor_sets = unsafe {
-        device
-            .allocate_descriptor_sets(&descriptor_set_allocate_info)
-            .expect("Failed to allocate descriptor sets!")
-    };
-
-    let descriptor_sets: Vec<_> = vk_descriptor_sets
-        .into_iter()
-        .enumerate()
-        .map(|(i, set)| {
-            DescriptorSet::new(
-                set,
-                descriptor_pool.clone(),
-                descriptor_set_layout.clone(),
-                device.clone(),
-                vec![
-                    DescriptorWriteData::Buffer {
-                        // 0
-                        buf: uniform_transform_buffer.buffer(),
-                    },
-                    DescriptorWriteData::Empty,
-                    DescriptorWriteData::Empty,
-                    DescriptorWriteData::Buffer {
-                        // 3
-                        buf: uniform_camera_buffers[i].buffer(),
-                    },
-                ],
-            )
-        })
-        .collect();
-
-    descriptor_sets
+    descriptor_pool.alloc(descriptor_set_layout, swapchain_images_size, |i| {
+        vec![
+            DescriptorWriteData::Buffer {
+                // 0
+                buf: uniform_transform_buffer.buffer(),
+            },
+            DescriptorWriteData::Empty,
+            DescriptorWriteData::Empty,
+            DescriptorWriteData::Buffer {
+                // 3
+                buf: uniform_camera_buffers[i].buffer(),
+            },
+        ]
+    })
 }

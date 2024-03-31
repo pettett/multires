@@ -116,6 +116,7 @@ macro_rules! vk_device_drop {
 	($struct_name:ident, $destructor_name:ident) => {
 		impl Drop for $struct_name {
 			fn drop(&mut self) {
+				println!("Destroying {}",stringify!($struct_name) );
 				unsafe {
 					self.device.$destructor_name(self.handle, None);
 				}

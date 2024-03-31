@@ -32,23 +32,19 @@ pub trait AsBuffer: VkHandle<VkItem = vk::Buffer> {
             range: self.size(),
         }
     }
-    fn write_descriptor_sets(
+    fn write_descriptor_sets<'a>(
         &self,
         dst_set: vk::DescriptorSet,
         descriptor_type: vk::DescriptorType,
-        info: &[vk::DescriptorBufferInfo; 1],
+        info: &'a [vk::DescriptorBufferInfo; 1],
         dst_binding: u32,
-    ) -> vk::WriteDescriptorSet {
-        vk::WriteDescriptorSet {
-            // transform uniform
-            dst_set,
-            dst_binding,
-            dst_array_element: 0,
-            descriptor_count: 1,
-            descriptor_type,
-            p_buffer_info: info.as_ptr(),
-            ..Default::default()
-        }
+    ) -> vk::WriteDescriptorSetBuilder<'a> {
+        vk::WriteDescriptorSet::builder()
+            .dst_set(dst_set)
+            .dst_binding(dst_binding)
+            .dst_array_element(0)
+            .descriptor_type(descriptor_type)
+            .buffer_info(info)
     }
 }
 #[repr(transparent)]

@@ -1,9 +1,7 @@
 use std::{fs, io::Write};
 
 use bevy_ecs::prelude::*;
-use common_renderer::{
-    components::{camera::Camera, transform::Transform},
-};
+use common_renderer::components::{camera::Camera, transform::Transform};
 use glam::Vec3A;
 
 use crate::app::scene::SceneEvent;
@@ -34,6 +32,10 @@ pub struct Benchmarker {
 }
 
 impl Benchmarker {
+    pub fn default() -> Self {
+        Benchmarker::new(glam::Vec3A::Z * 10.0, glam::Vec3A::Z * 500.0, 5.0)
+    }
+
     pub fn new(start: glam::Vec3A, end: glam::Vec3A, time: f32) -> Self {
         println!("Beginning benchmark between {} and {}", start, end);
         Self {

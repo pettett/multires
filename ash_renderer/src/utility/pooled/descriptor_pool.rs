@@ -2,8 +2,7 @@ use std::sync::Arc;
 
 use ash::vk::{self, DescriptorSetLayoutCreateInfo};
 
-
-use crate::{utility::macros::*, VkHandle};
+use crate::{core::Core, utility::macros::*, VkHandle};
 
 use super::super::{
     buffer::{AsBuffer, Buffer},
@@ -14,6 +13,7 @@ use super::super::{
 pub enum DescriptorSetLayoutBinding {
     Storage { vis: vk::ShaderStageFlags },
     Uniform { vis: vk::ShaderStageFlags },
+    Sampler { vis: vk::ShaderStageFlags },
     None,
 }
 
@@ -22,6 +22,9 @@ impl DescriptorSetLayoutBinding {
         match self {
             DescriptorSetLayoutBinding::Storage { .. } => vk::DescriptorType::STORAGE_BUFFER,
             DescriptorSetLayoutBinding::Uniform { .. } => vk::DescriptorType::UNIFORM_BUFFER,
+            DescriptorSetLayoutBinding::Sampler { .. } => {
+                vk::DescriptorType::COMBINED_IMAGE_SAMPLER
+            }
             DescriptorSetLayoutBinding::None => unreachable!(),
         }
     }
@@ -46,10 +49,15 @@ vk_handle_wrapper!(DescriptorSetLayout);
 vk_device_drop!(DescriptorSetLayout, destroy_descriptor_set_layout);
 
 pub enum DescriptorWriteData {
-    Buffer { buf: Arc<Buffer> },
+    Buffer {
+        buf: Arc<Buffer>,
+    },
     Empty,
     //TODO:
-    Image,
+    Image {
+        view: vk::ImageView,
+        sampler: vk::Sampler,
+    },
 }
 
 impl DescriptorPool {
@@ -72,9 +80,17 @@ impl DescriptorPool {
             },
         ];
 
+        Self::new_sized(device, &pool_sizes, swapchain_images_size * 3)
+    }
+
+    pub fn new_sized(
+        device: Arc<Device>,
+        pool_sizes: &[vk::DescriptorPoolSize],
+        max_sets: u32,
+    ) -> Arc<DescriptorPool> {
         let descriptor_pool_create_info = vk::DescriptorPoolCreateInfo::builder()
             .pool_sizes(&pool_sizes)
-            .max_sets(swapchain_images_size * 3)
+            .max_sets(max_sets)
             .flags(vk::DescriptorPoolCreateFlags::FREE_DESCRIPTOR_SET);
 
         let handle = unsafe {
@@ -84,6 +100,39 @@ impl DescriptorPool {
         };
 
         Arc::new(Self { handle, device })
+    }
+
+    pub fn alloc<Write: Fn(usize) -> Vec<DescriptorWriteData>>(
+        self: &Arc<DescriptorPool>,
+        descriptor_set_layout: &Arc<DescriptorSetLayout>,
+        count: usize,
+        write: Write,
+    ) -> Vec<DescriptorSet> {
+        let layouts = vec![descriptor_set_layout.handle(); count];
+
+        let descriptor_set_allocate_info = vk::DescriptorSetAllocateInfo::builder()
+            .descriptor_pool(self.handle())
+            .set_layouts(&layouts);
+
+        let vk_descriptor_sets = unsafe {
+            self.device
+                .allocate_descriptor_sets(&descriptor_set_allocate_info)
+                .expect("Failed to allocate descriptor sets!")
+        };
+
+        vk_descriptor_sets
+            .into_iter()
+            .enumerate()
+            .map(|(i, set)| {
+                DescriptorSet::new(
+                    set,
+                    self.clone(),
+                    descriptor_set_layout.clone(),
+                    self.device.clone(),
+                    write(i),
+                )
+            })
+            .collect()
     }
 }
 
@@ -103,6 +152,22 @@ impl DescriptorSet {
             })
             .collect();
 
+        let image_info: Vec<_> = buffers
+            .iter()
+            .enumerate()
+            .filter_map(|(i, w)| match w {
+                DescriptorWriteData::Image { view, sampler } => Some(
+                    *vk::DescriptorImageInfo::builder()
+                        .image_view(*view)
+                        .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
+                        .sampler(*sampler),
+                ),
+                _ => None,
+            })
+            .collect();
+
+        let mut image_index = 0;
+
         let descriptor_write_sets: Vec<_> = buffers
             .iter()
             .enumerate()
@@ -120,6 +185,9 @@ impl DescriptorSet {
                         DescriptorSetLayoutBinding::None => {
                             panic!("Attempted to write into empty binding slot")
                         }
+                        DescriptorSetLayoutBinding::Sampler { vis } => {
+                            panic!("Attempted to write buffer into sampler slot")
+                        }
                     }
 
                     Some(buf.write_descriptor_sets(
@@ -129,9 +197,25 @@ impl DescriptorSet {
                         i as _,
                     ))
                 }
+                DescriptorWriteData::Image { .. } => {
+                    let dsc_writes = vk::WriteDescriptorSet::builder()
+                        .dst_set(handle)
+                        .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                        .dst_array_element(0_u32)
+                        .dst_binding(i as u32)
+                        .image_info(&image_info[image_index..image_index + 1]);
+
+                    image_index += 1;
+                    Some(dsc_writes)
+                }
                 _ => None,
             })
             .collect();
+
+        unsafe {
+            let descriptor_writes: Vec<_> = descriptor_write_sets.into_iter().map(|x| *x).collect();
+            device.update_descriptor_sets(&descriptor_writes, &[]);
+        }
 
         let buffers: Vec<_> = buffers
             .into_iter()
@@ -140,10 +224,6 @@ impl DescriptorSet {
                 _ => None,
             })
             .collect();
-
-        unsafe {
-            device.update_descriptor_sets(&descriptor_write_sets, &[]);
-        }
 
         Self {
             handle,
@@ -174,6 +254,10 @@ fn binding_struct_to_vk(
                 bindings[i].stage_flags = vis;
                 bindings[i].descriptor_type = vk::DescriptorType::UNIFORM_BUFFER;
             }
+            DescriptorSetLayoutBinding::Sampler { vis } => {
+                bindings[i].stage_flags = vis;
+                bindings[i].descriptor_type = vk::DescriptorType::COMBINED_IMAGE_SAMPLER;
+            }
         }
 
         bindings[i].binding = binding as _;
@@ -185,21 +269,24 @@ fn binding_struct_to_vk(
 }
 
 impl DescriptorSetLayout {
-    pub fn new(device: Arc<Device>, binding_struct: Vec<DescriptorSetLayoutBinding>) -> Self {
-        let bindings = binding_struct_to_vk(&binding_struct);
+    pub fn new(core: &Core, layout: Vec<DescriptorSetLayoutBinding>, name: &str) -> Self {
+        let bindings = binding_struct_to_vk(&layout);
+
+        let handle = unsafe {
+            core.device
+                .create_descriptor_set_layout(
+                    &DescriptorSetLayoutCreateInfo::builder().bindings(&bindings),
+                    None,
+                )
+                .expect("Failed to create Descriptor Set Layout!")
+        };
+
+        core.name_object(name, handle);
 
         Self {
-            handle: unsafe {
-                device
-                    .create_descriptor_set_layout(
-                        &DescriptorSetLayoutCreateInfo::builder().bindings(&bindings),
-                        None,
-                    )
-                    .expect("Failed to create Descriptor Set Layout!")
-            },
-
-            device,
-            layout: binding_struct,
+            handle,
+            device: core.device.clone(),
+            layout,
         }
     }
 }

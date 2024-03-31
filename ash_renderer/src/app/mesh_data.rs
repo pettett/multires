@@ -65,7 +65,7 @@ impl MeshData {
                 &l,
                 "Indices Buffer",
             );
-            let error = 200025.0 / l.len() as f32;
+            let error = 500025.0 / l.len() as f32;
             // measure edge lengths
             // for t in l.chunks(3) {
             //     let [t1, t2, t3] = t else { unreachable!() };

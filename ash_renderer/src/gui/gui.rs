@@ -5,29 +5,30 @@ use ash::vk;
 use gpu_allocator::vulkan::Allocator;
 use raw_window_handle::HasRawDisplayHandle;
 
-use crate::utility::{
-    device::Device,
-    pooled::{
-        command_buffer_group::CommandBufferGroup,
-        command_pool::{CommandBuffer, CommandPool},
+use crate::{
+    core::Core,
+    utility::{
+        device::Device,
+        pooled::{
+            command_buffer_group::CommandBufferGroup,
+            command_pool::{CommandBuffer, CommandPool},
+        },
+        queue_family_indices::QueueFamilyIndices,
+        swapchain::Swapchain,
     },
-    queue_family_indices::QueueFamilyIndices,
-    swapchain::Swapchain,
 };
-
-use super::gpu_allocator::GpuAllocator;
 
 pub struct Gui {
     device: Arc<Device>,
     window: Arc<winit::window::Window>,
-    integration: egui_winit_ash_integration::Integration<GpuAllocator>,
+    integration: super::integration::Integration,
     ui_command_buffers: Arc<CommandBufferGroup>,
     in_frame: bool,
 }
 
 impl Gui {
     pub fn new(
-        device: Arc<Device>,
+        core: Arc<Core>,
         window: Arc<winit::window::Window>,
         target: &impl HasRawDisplayHandle,
         allocator: Arc<Mutex<Allocator>>,
@@ -39,23 +40,23 @@ impl Gui {
         let ui_command_buffers =
             CommandBufferGroup::new(command_pool.clone(), swapchain.images.len() as _);
 
-        let integration = egui_winit_ash_integration::Integration::<GpuAllocator>::new(
+        let integration = super::integration::Integration::new(
             target,
             swapchain.extent.width,
             swapchain.extent.height,
             1.0,
             egui::FontDefinitions::default(),
             egui::Style::default(),
-            (**device).clone(),
-            GpuAllocator(allocator.clone()),
+            core.clone(),
+            allocator.clone(),
             queue_family.graphics_family.unwrap(),
             graphics_queue,
-            device.fn_swapchain.clone(),
+            core.device.fn_swapchain.clone(),
             swapchain.handle,
             swapchain.surface_format,
         );
         Self {
-            device,
+            device: core.device.clone(),
             integration,
             window,
             ui_command_buffers: Arc::new(ui_command_buffers),

@@ -34,7 +34,8 @@ gpu-allocator = { version = "0.24.0", default-features = false, features = [
 	"vulkan",
 	"visualizer",
 ] }
-egui-winit-ash-integration = { version = "0.6.0" }
+egui-winit = { version = "0.23", default-features = false }
+# egui-winit-ash-integration = { version = "0.6.0" }
 anyhow.workspace = true
 chrono = "0.4"
 toml = "0.8"

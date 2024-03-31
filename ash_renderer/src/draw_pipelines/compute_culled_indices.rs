@@ -39,7 +39,7 @@ pub struct ComputeCulledIndices {
 
 impl ComputeCulledIndices {
     pub fn new(core: Arc<Core>, renderer: &Renderer, scene: &Scene, mesh_data: &MeshData) -> Self {
-        let ubo_layout = create_descriptor_set_layout(core.device.clone());
+        let ubo_layout = create_descriptor_set_layout(&core);
 
         let should_draw_pipeline = ComputePipeline::create_compute_pipeline(
             &core,
@@ -260,7 +260,7 @@ impl ScreenData {
     }
 }
 
-fn create_descriptor_set_layout(device: Arc<Device>) -> Arc<DescriptorSetLayout> {
+fn create_descriptor_set_layout(core: &Core) -> Arc<DescriptorSetLayout> {
     let bindings = vec![
         DescriptorSetLayoutBinding::Storage {
             vis: vk::ShaderStageFlags::MESH_EXT
@@ -290,7 +290,11 @@ fn create_descriptor_set_layout(device: Arc<Device>) -> Arc<DescriptorSetLayout>
         },
     ];
 
-    Arc::new(DescriptorSetLayout::new(device, bindings))
+    Arc::new(DescriptorSetLayout::new(
+        core,
+        bindings,
+        "compute culled indices layout",
+    ))
 }
 
 fn create_compute_culled_indices_descriptor_sets(
@@ -308,67 +312,40 @@ fn create_compute_culled_indices_descriptor_sets(
     //texture: &Image,
     swapchain_images_size: usize,
 ) -> Vec<DescriptorSet> {
-    let mut layouts: Vec<vk::DescriptorSetLayout> = vec![];
-    for _ in 0..swapchain_images_size {
-        layouts.push(descriptor_set_layout.handle());
-    }
-
-    let descriptor_set_allocate_info = vk::DescriptorSetAllocateInfo::builder()
-        .descriptor_pool(descriptor_pool.handle())
-        .set_layouts(&layouts);
-
-    let vk_descriptor_sets = unsafe {
-        device
-            .allocate_descriptor_sets(&descriptor_set_allocate_info)
-            .expect("Failed to allocate descriptor sets!")
-    };
-
-    let descriptor_sets: Vec<_> = vk_descriptor_sets
-        .into_iter()
-        .enumerate()
-        .map(|(i, set)| {
-            DescriptorSet::new(
-                set,
-                descriptor_pool.clone(),
-                descriptor_set_layout.clone(),
-                device.clone(),
-                vec![
-                    DescriptorWriteData::Buffer {
-                        // 0
-                        buf: uniform_transform_buffer.buffer(),
-                    },
-                    DescriptorWriteData::Buffer {
-                        // 1
-                        buf: should_draw_buffer.buffer(),
-                    },
-                    DescriptorWriteData::Buffer {
-                        // 2
-                        buf: cluster_buffer.buffer(), //
-                    },
-                    DescriptorWriteData::Buffer {
-                        // 3
-                        buf: uniform_camera_buffers[i].buffer(),
-                    },
-                    DescriptorWriteData::Buffer {
-                        // 4
-                        buf: meshlet_buffer.buffer(), //
-                    },
-                    DescriptorWriteData::Buffer {
-                        // 5
-                        buf: result_indices_buffer.buffer(), //
-                    },
-                    DescriptorWriteData::Buffer {
-                        // 6
-                        buf: indices_buffer.buffer(), //
-                    },
-                    DescriptorWriteData::Buffer {
-                        // 6
-                        buf: draw_indexed_indirect_buffer.buffer(), //
-                    },
-                ],
-            )
-        })
-        .collect();
-
-    descriptor_sets
+    descriptor_pool.alloc(descriptor_set_layout, swapchain_images_size, |i| {
+        vec![
+            DescriptorWriteData::Buffer {
+                // 0
+                buf: uniform_transform_buffer.buffer(),
+            },
+            DescriptorWriteData::Buffer {
+                // 1
+                buf: should_draw_buffer.buffer(),
+            },
+            DescriptorWriteData::Buffer {
+                // 2
+                buf: cluster_buffer.buffer(), //
+            },
+            DescriptorWriteData::Buffer {
+                // 3
+                buf: uniform_camera_buffers[i].buffer(),
+            },
+            DescriptorWriteData::Buffer {
+                // 4
+                buf: meshlet_buffer.buffer(), //
+            },
+            DescriptorWriteData::Buffer {
+                // 5
+                buf: result_indices_buffer.buffer(), //
+            },
+            DescriptorWriteData::Buffer {
+                // 6
+                buf: indices_buffer.buffer(), //
+            },
+            DescriptorWriteData::Buffer {
+                // 6
+                buf: draw_indexed_indirect_buffer.buffer(), //
+            },
+        ]
+    })
 }

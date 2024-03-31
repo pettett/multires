@@ -51,5 +51,11 @@ metis = { path = "metis" }
 inherits = "release"
 debug = true
 
+[profile.opt-with-debug]
+inherits = "release"
+opt-level = 1
+debug = true
+
+
 [profile.dev.package."*"]
 debug = false

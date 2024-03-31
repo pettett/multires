@@ -161,7 +161,7 @@ pub fn create_lod_command_buffer(
 
                 let (cam, cam_trans) = camera.single();
 
-                let mut draw = scene
+                let draw = scene
                     .uniform_transforms
                     .par_iter()
                     .map(|u| {
@@ -247,8 +247,7 @@ pub fn create_lod_command_buffer(
 
 impl DrawLODChainData {
     pub fn new(renderer: &Renderer, mesh_data: &MeshData, scene: &Scene) -> Self {
-        let ubo_layout =
-            create_traditional_graphics_descriptor_set_layout(renderer.core.device.clone());
+        let ubo_layout = create_traditional_graphics_descriptor_set_layout(&renderer.core);
 
         let graphics_pipeline = create_traditional_graphics_pipeline(
             &renderer.core,

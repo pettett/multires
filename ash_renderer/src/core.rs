@@ -37,7 +37,7 @@ impl Core {
             crate::app::window::init_window(event_loop, WINDOW_TITLE, WINDOW_WIDTH, WINDOW_HEIGHT);
 
         // init vulkan stuff
-        println!("initing vulkan");
+        println!("linking vulkan");
         let entry = ash::Entry::linked();
 
         let required_instance_extensions =

@@ -4,7 +4,9 @@ use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEve
 use winit::event_loop::{ControlFlow, EventLoop};
 
 use super::app::App;
-use super::renderer::Renderer;
+use super::benchmarker::Benchmarker;
+use super::renderer::{MeshDrawingPipelineType, Renderer};
+use super::scene::SceneEvent;
 
 pub fn init_window(
     event_loop: &EventLoop<()>,
@@ -57,6 +59,33 @@ impl ProgramProc {
                                 (Some(VirtualKeyCode::Escape), ElementState::Pressed) => {
                                     vulkan_app.renderer().core.device.wait_device_idle();
                                     *control_flow = ControlFlow::Exit
+                                }
+                                (Some(VirtualKeyCode::F1), ElementState::Pressed) => {
+                                    vulkan_app.world.send_event(SceneEvent::AddInstances(20));
+                                }
+                                (Some(VirtualKeyCode::F5), ElementState::Pressed) => {
+                                    // FIXME: release mode fucks the UI
+                                    vulkan_app
+                                        .world
+                                        .send_event(MeshDrawingPipelineType::DrawLOD);
+                                }
+                                (Some(VirtualKeyCode::F6), ElementState::Pressed) => {
+                                    vulkan_app
+                                        .world
+                                        .send_event(MeshDrawingPipelineType::DrawIndirect);
+                                }
+                                (Some(VirtualKeyCode::F7), ElementState::Pressed) => {
+                                    vulkan_app
+                                        .world
+                                        .send_event(MeshDrawingPipelineType::IndirectTasks);
+                                }
+                                (Some(VirtualKeyCode::F8), ElementState::Pressed) => {
+                                    vulkan_app.world.send_event(
+                                        MeshDrawingPipelineType::ExpandingComputeCulledMesh,
+                                    );
+                                }
+                                (Some(VirtualKeyCode::F9), ElementState::Pressed) => {
+                                    vulkan_app.world.insert_resource(Benchmarker::default());
                                 }
                                 _ => {}
                             },

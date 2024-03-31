@@ -209,9 +209,9 @@ impl App {
         world.insert_resource(Time::default());
 
         if core.device.features.mesh_shader {
-            world.send_event(MeshDrawingPipelineType::IndirectTasks);
+            world.send_event(MeshDrawingPipelineType::DrawIndirect);
         } else {
-            world.send_event(MeshDrawingPipelineType::ComputeCulledIndices);
+            world.send_event(MeshDrawingPipelineType::DrawIndirect);
         }
 
         let camera = world
@@ -239,7 +239,7 @@ impl App {
         ));
 
         let gui = Gui::new(
-            device.clone(),
+            core.clone(),
             window.clone(),
             event_loop,
             allocator.clone(),
