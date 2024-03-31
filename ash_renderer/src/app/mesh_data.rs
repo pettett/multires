@@ -4,6 +4,7 @@ use ash::vk;
 use bevy_ecs::system::Resource;
 use common::{Asset, MeshVert, MultiResMesh};
 use common_renderer::components::gpu_mesh_util::{ClusterData, MultiResData};
+use glam::Vec3;
 use gpu_allocator::vulkan::Allocator;
 
 use crate::{
@@ -12,6 +13,11 @@ use crate::{
     utility::buffer::TBuffer,
     Config,
 };
+
+pub struct LODChainLevel {
+    pub index_buffer: Arc<TBuffer<u32>>,
+    pub error: f32,
+}
 
 #[derive(Resource)]
 pub struct MeshData {
@@ -22,7 +28,7 @@ pub struct MeshData {
     pub stripped_meshlet_buffer: Arc<TBuffer<GpuMeshlet>>,
     pub cluster_buffer: Arc<TBuffer<ClusterData>>,
     pub meshlet_index_buffer: Arc<TBuffer<u32>>,
-    pub lod_index_buffers: Vec<Arc<TBuffer<u32>>>,
+    pub lod_chain: Vec<LODChainLevel>,
 }
 
 impl MeshData {
@@ -47,7 +53,7 @@ impl MeshData {
             }
         }
 
-        let mut lod_index_buffers = Vec::new();
+        let mut lod_chain = Vec::new();
 
         for l in indices {
             let index_buffer = TBuffer::new_filled(
@@ -59,8 +65,23 @@ impl MeshData {
                 &l,
                 "Indices Buffer",
             );
-            println!("Size: {}", l.len());
-            lod_index_buffers.push(index_buffer)
+            let error = 200025.0 / l.len() as f32;
+            // measure edge lengths
+            // for t in l.chunks(3) {
+            //     let [t1, t2, t3] = t else { unreachable!() };
+            //     for (a, b) in [(t1, t2), (t2, t3), (t3, t1)] {
+            //         error += Vec3::from_slice(&data.verts[*a as usize].pos)
+            //             .distance(Vec3::from_slice(&data.verts[*b as usize].pos));
+            //     }
+            // }
+
+            // error /= 200000000;
+
+            println!("Size: {}, Error: {}", l.len(), error);
+            lod_chain.push(LODChainLevel {
+                index_buffer,
+                error,
+            })
         }
 
         // assert_eq!(
@@ -137,7 +158,7 @@ impl MeshData {
             stripped_meshlet_buffer,
             cluster_buffer,
             meshlet_index_buffer,
-            lod_index_buffers,
+            lod_chain,
             cluster_count,
         }
     }

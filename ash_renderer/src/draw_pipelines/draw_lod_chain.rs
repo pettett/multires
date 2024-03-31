@@ -5,12 +5,14 @@ use ash::vk::{self};
 use bevy_ecs::prelude::*;
 use common::MeshVert;
 use common_renderer::components::{camera::Camera, transform::Transform};
+use glam::{Mat4, Vec3, Vec3Swizzles, Vec4, Vec4Swizzles};
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 
 use crate::{
     app::{
         mesh_data::MeshData,
         renderer::{MeshDrawingPipelineType, Renderer},
-        scene::Scene,
+        scene::{Mesh, Scene},
     },
     core::Core,
     screen::Screen,
@@ -43,17 +45,63 @@ pub struct DrawLODChainData {
     descriptor_pool: Arc<DescriptorPool>,
     core: Arc<Core>,
     vertex_buffer: Arc<TBuffer<MeshVert>>,
-    index_buffers: Vec<Arc<TBuffer<u32>>>,
     query: bool,
     command_buffers: Vec<CommandBuffer>,
-    instance_count: usize,
+}
+
+// Calculates the frustum and planes from a projection matrix.
+fn planes_from_mat(mat: Mat4) -> [Vec4; 6] {
+    let mut planes = [Vec4::ZERO; 6];
+
+    for i in 0..4 {
+        planes[0][i] = mat.col(i)[3] + mat.col(i)[0];
+    }
+    for i in 0..4 {
+        planes[1][i] = mat.col(i)[3] - mat.col(i)[0];
+    }
+
+    for i in 0..4 {
+        planes[2][i] = mat.col(i)[3] + mat.col(i)[1];
+    }
+    for i in 0..4 {
+        planes[3][i] = mat.col(i)[3] - mat.col(i)[1];
+    }
+
+    // Vulkan places it's near plane at w = 0, same as DX11, so use that part of the paper
+    for i in 0..4 {
+        planes[4][i] = mat.col(i)[3];
+    }
+    for i in 0..4 {
+        planes[5][i] = mat.col(i)[3] - mat.col(i)[2];
+    }
+
+    // Normalise planes
+    for i in 0..6 {
+        planes[i] *= (planes[i].xyz()).length_recip();
+    }
+
+    return planes;
+}
+// Calculate the distance from a plane to a point
+fn dist_to_plane(plane: Vec4, point: glam::Vec3) -> f32 {
+    return plane.xyz().dot(point) + plane.w;
+}
+// Is a sphere within a set of six planes Based on the distance to each plane.
+fn sphere_inside_planes(planes: &[Vec4; 6], sphere: Vec4) -> bool {
+    for i in 0..6 {
+        if -sphere.w > dist_to_plane(planes[i], sphere.xyz()) {
+            return false;
+        }
+    }
+    return true;
 }
 
 pub fn create_lod_command_buffer(
     mut renderer: ResMut<Renderer>,
-    mut scene: ResMut<Scene>,
-    mut camera: Query<(&mut Camera, &Transform)>,
-    mut draw: Option<ResMut<DrawLODChainData>>,
+    scene: Res<Scene>,
+    camera: Query<(&Camera, &Transform)>,
+    meshes: Query<(&Transform, &Mesh)>,
+    draw: Option<ResMut<DrawLODChainData>>,
     mesh_data: Res<MeshData>,
 ) {
     if let Some(mut draw) = draw {
@@ -102,13 +150,6 @@ pub fn create_lod_command_buffer(
                     &[],
                 );
 
-                device.cmd_bind_index_buffer(
-                    *command_buffer_writer,
-                    draw.index_buffers[0].handle(),
-                    0,
-                    vk::IndexType::UINT32,
-                );
-
                 device.cmd_bind_vertex_buffers(
                     *command_buffer_writer,
                     0,
@@ -116,15 +157,83 @@ pub fn create_lod_command_buffer(
                     &[0],
                 );
 
-                for i in 0..draw.instance_count {
+                let mut prev_level = usize::MAX;
+
+                let (cam, cam_trans) = camera.single();
+
+                let mut draw = scene
+                    .uniform_transforms
+                    .par_iter()
+                    .map(|u| {
+                        let planes =
+                            planes_from_mat(scene.uniform_camera.culling_view_proj * u.model);
+                        // Calculate screen space error
+                        //let center = *transform.get_pos();
+                        // vec3 cam =  ubo.camera_pos;
+                        // vec3 center = (models[idy].model * vec4(clusters[idx].center, 1.0)).xyz ;
+                        let radius = mesh_data.size;
+
+                        let sphere = glam::Vec3A::ZERO.extend(radius);
+
+                        if !sphere_inside_planes(&planes, sphere) {
+                            return None;
+                        }
+
+                        // float radius = length((models[idy].model * vec4(normalize(vec3(1)) * clusters[idx].radius, 0.0)).xyz);
+
+                        let mut level = 0;
+                        let mut current_error = 0.0;
+
+                        let local_cam_pos = u.inv_model.transform_point3a(*cam_trans.get_pos());
+
+                        while current_error <= scene.target_error
+                            && level < mesh_data.lod_chain.len()
+                        {
+                            // center is zero - model space
+                            let inv_distance = local_cam_pos.length_recip();
+
+                            let err_radius = mesh_data.lod_chain[level].error * radius;
+
+                            current_error = err_radius * inv_distance;
+
+                            level += 1;
+                        }
+                        // rust doesn't have do-while
+                        level -= 1;
+
+                        Some(level)
+                    })
+                    .collect::<Vec<_>>();
+
+                for (transform, mesh) in meshes.iter() {
+                    if mesh.id >= scene.uniform_transforms.len() {
+                        continue;
+                    }
+
+                    let Some(level) = draw[mesh.id] else {
+                        continue;
+                    };
+
+                    // Draw
+
+                    if level != prev_level {
+                        device.cmd_bind_index_buffer(
+                            *command_buffer_writer,
+                            mesh_data.lod_chain[level].index_buffer.handle(),
+                            0,
+                            vk::IndexType::UINT32,
+                        );
+                        prev_level = level;
+                    }
+
                     // Each instance has their own indirect drawing buffer, tracing out their position in the result buffer
                     device.cmd_draw_indexed(
                         *command_buffer_writer,
-                        draw.index_buffers[0].len() as _,
+                        mesh_data.lod_chain[level].index_buffer.len() as _,
                         1,
                         0,
                         0,
-                        i as _,
+                        mesh.id as _,
                     );
                 }
 
@@ -148,8 +257,6 @@ impl DrawLODChainData {
             ubo_layout.clone(),
         );
 
-        let instance_count = scene.uniform_transform_buffer.len();
-
         let descriptor_sets = create_traditional_graphics_descriptor_sets(
             &renderer.core.device,
             &renderer.descriptor_pool,
@@ -166,9 +273,7 @@ impl DrawLODChainData {
             descriptor_pool: renderer.descriptor_pool.clone(),
             query: renderer.query,
             vertex_buffer: mesh_data.vertex_buffer.clone(),
-            index_buffers: mesh_data.lod_index_buffers.clone(),
             command_buffers: Vec::new(),
-            instance_count,
         }
     }
 }

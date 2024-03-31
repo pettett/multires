@@ -258,6 +258,7 @@ impl App {
             dist_pow: 0.5,
             freeze_pos: false,
             instances: 0,
+            uniform_transforms,
         });
 
         world.insert_resource(Renderer {

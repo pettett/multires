@@ -55,7 +55,7 @@ impl DrawFullRes {
             ubo_layout.clone(),
         );
 
-        let index_buffer = mesh_data.lod_index_buffers[0].clone();
+        let index_buffer = mesh_data.lod_chain[0].index_buffer.clone();
 
         let instance_count = scene.uniform_transform_buffer.len();
 

@@ -43,7 +43,7 @@ pub trait DrawPipeline {
 }
 
 pub fn init_rasterization_statue_create_info() -> vk::PipelineRasterizationStateCreateInfo {
-    vk::PipelineRasterizationStateCreateInfo::builder()
+    *vk::PipelineRasterizationStateCreateInfo::builder()
         .depth_clamp_enable(false)
         .cull_mode(vk::CullModeFlags::BACK)
         .front_face(vk::FrontFace::CLOCKWISE)
@@ -51,7 +51,6 @@ pub fn init_rasterization_statue_create_info() -> vk::PipelineRasterizationState
         .polygon_mode(vk::PolygonMode::FILL)
         .rasterizer_discard_enable(false)
         .depth_bias_enable(false)
-        .build()
 }
 pub fn init_multisample_state_create_info() -> vk::PipelineMultisampleStateCreateInfo {
     vk::PipelineMultisampleStateCreateInfo {

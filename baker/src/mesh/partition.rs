@@ -1,7 +1,5 @@
 //use crate::MAX_TRIS_PER_CLUSTER;
 
-
-
 use crate::mesh::{cluster_info::ClusterInfo, group_info::GroupInfo};
 
 use super::winged_mesh::WingedMesh;
@@ -439,6 +437,7 @@ impl WingedMesh {
 
         // We just need to normalise the axis, and force each cone to include every face plane (min(dot(face, axis) - 1)).
         for cluster in clusters.iter_mut() {
+            //FIXME: this is a bad calculation
             cluster.average_edge_length /= cluster.num_tris as f32;
 
             cluster.tight_cone.normalise_axis();
@@ -459,14 +458,10 @@ impl WingedMesh {
 
 #[cfg(test)]
 pub mod tests {
-    use std::{collections::HashSet};
-
-    
+    use std::collections::HashSet;
 
     use crate::{
-        mesh::winged_mesh::{
-            test::{TEST_MESH_DRAGON, TEST_MESH_LOW},
-        },
+        mesh::winged_mesh::test::{TEST_MESH_DRAGON, TEST_MESH_LOW},
         STARTING_CLUSTER_SIZE,
     };
 

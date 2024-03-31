@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use ash::vk;
 use bevy_ecs::prelude::*;
+use bytemuck::Zeroable;
 use common_renderer::components::{camera::Camera, transform::Transform};
 
 use crate::{spiral::Spiral, utility::buffer::TBuffer};
@@ -27,9 +28,9 @@ pub struct ModelUniformBufferObject {
 #[repr(C)]
 #[derive(Clone, Debug, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct CameraUniformBufferObject {
-    view_proj: glam::Mat4,
+    pub view_proj: glam::Mat4,
     // Freezable view-proj matrix, for culling calculations
-    culling_view_proj: glam::Mat4,
+    pub culling_view_proj: glam::Mat4,
     pub cam_pos: glam::Vec3,
     pub target_error: f32,
     pub dist_pow: f32,
@@ -42,6 +43,7 @@ pub struct CameraUniformBufferObject {
 pub struct Scene {
     //texture_image: Image,
     pub uniform_transform_buffer: Arc<TBuffer<ModelUniformBufferObject>>,
+    pub uniform_transforms: Vec<ModelUniformBufferObject>,
     pub uniform_camera: CameraUniformBufferObject,
     pub target_error: f32,
     pub dist_pow: f32,
@@ -50,7 +52,9 @@ pub struct Scene {
     pub instances: usize,
 }
 #[derive(Component)]
-pub struct Mesh;
+pub struct Mesh {
+    pub id: usize,
+}
 
 impl CameraUniformBufferObject {
     pub fn new(view_proj: glam::Mat4, cam_pos: glam::Vec3, target_error: f32) -> Self {
@@ -114,9 +118,14 @@ pub fn process_scene_events(
 
                     *transform.scale_mut() = glam::Vec3A::ONE * 30.0 / mesh_data.size;
 
-                    commands.spawn((transform, Mesh));
+                    commands.spawn((
+                        transform,
+                        Mesh {
+                            id: scene.instances,
+                        },
+                    ));
+                    scene.instances += 1;
                 }
-                scene.instances += count;
                 // Update buffers after commands have been completed next frame
                 // We are not allowed to read and write events in the same system
                 commands.add(|w: &mut World| {
@@ -131,13 +140,13 @@ pub fn process_scene_events(
                 scene.instances = 0;
             }
             SceneEvent::UpdateInstanceBuffers => {
-                let mut uniform_transforms = Vec::with_capacity(scene.instances);
+                let mut uniform_transforms = vec![Zeroable::zeroed(); scene.instances];
 
-                for (_, transform, _) in transforms.iter() {
-                    uniform_transforms.push(ModelUniformBufferObject {
+                for (_, transform, mesh) in transforms.iter() {
+                    uniform_transforms[mesh.id] = ModelUniformBufferObject {
                         model: transform.get_local_to_world(),
                         inv_model: transform.get_local_to_world().inverse(),
-                    });
+                    };
                 }
                 println!("{}", uniform_transforms.len());
                 scene.uniform_transform_buffer = TBuffer::new_filled(
@@ -148,7 +157,7 @@ pub fn process_scene_events(
                     &uniform_transforms,
                     "Transform Buffer",
                 );
-
+                scene.uniform_transforms = uniform_transforms;
                 // Refresh pipelines
                 // TODO: Some way to just replace the descriptor groups instead of the entire pipeline
 

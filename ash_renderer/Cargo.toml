@@ -39,6 +39,7 @@ anyhow.workspace = true
 chrono = "0.4"
 toml = "0.8"
 serde = "1.0"
+rayon = "1.10"
 
 [build-dependencies]
 shaderc = { version = "0.8", optional = true }

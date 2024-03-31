@@ -249,7 +249,7 @@ mod tests {
 
     #[test]
     fn readout() {
-        let name = "lucy.glb.bin";
+        let name = "dragon_high.glb.bin";
         let mesh = MultiResMesh::load_from_cargo_manifest_dir(name).unwrap();
 
         let (cluster_order, groups) = mesh.order_clusters();
@@ -258,6 +258,10 @@ mod tests {
         println!("{name}======");
         println!("Cluster Count: {}", clusters.len());
         println!("Layer Count: {}", clusters[0].layer);
+
+        for c in clusters.chunks(10) {
+            println!("{} {}", c[0].layer, c[0].error);
+        }
     }
 
     #[test]
