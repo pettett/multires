@@ -28,13 +28,13 @@ memoffset = "0.9"
 num = "0.4"
 rand = "0.8"
 image = "0.22"
-egui = "0.23"
-egui_plot = "0.23"
-gpu-allocator = { version = "0.24.0", default-features = false, features = [
+egui = "0.24"
+egui_plot = "0.24"
+egui-winit = { version = "0.24", default-features = false }
+gpu-allocator = { version = "0.25", default-features = false, features = [
 	"vulkan",
 	"visualizer",
 ] }
-egui-winit = { version = "0.23", default-features = false }
 # egui-winit-ash-integration = { version = "0.6.0" }
 anyhow.workspace = true
 chrono = "0.4"

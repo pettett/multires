@@ -133,6 +133,7 @@ pub struct Image {
     handle: vk::Image,
     image_memory: Allocation,
     format: vk::Format,
+    current_layout: vk::ImageLayout,
     allocator: Arc<Mutex<Allocator>>,
     image_view: Option<ImageView>,
     sampler: Option<Sampler>,
@@ -170,6 +171,7 @@ impl Image {
         allocator: Arc<Mutex<Allocator>>,
         name: &str,
     ) -> Image {
+        let initial_layout = vk::ImageLayout::UNDEFINED;
         let image_create_info = vk::ImageCreateInfo {
             s_type: vk::StructureType::IMAGE_CREATE_INFO,
             p_next: ptr::null(),
@@ -184,7 +186,7 @@ impl Image {
             sharing_mode: vk::SharingMode::EXCLUSIVE,
             queue_family_index_count: 0,
             p_queue_family_indices: ptr::null(),
-            initial_layout: vk::ImageLayout::UNDEFINED,
+            initial_layout,
             extent: vk::Extent3D {
                 width,
                 height,
@@ -229,6 +231,7 @@ impl Image {
             image_view: None,
             sampler: None,
             width,
+            current_layout: initial_layout,
             height,
         }
     }
@@ -284,7 +287,7 @@ impl Image {
             data_ptr.copy_from_nonoverlapping(image_data.as_ptr(), image_data.len());
         }
 
-        let texture_image = Self::create_image(
+        let mut texture_image = Self::create_image(
             core,
             image_width,
             image_height,
@@ -298,13 +301,10 @@ impl Image {
             name,
         );
 
-        Self::transition_image_layout(
+        texture_image.transition_image_layout(
             &core.device,
             command_pool,
             submit_queue,
-            &texture_image,
-            vk::Format::R8G8B8A8_SRGB,
-            vk::ImageLayout::UNDEFINED,
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
             1,
         );
@@ -319,13 +319,10 @@ impl Image {
             image_height,
         );
 
-        Self::transition_image_layout(
+        texture_image.transition_image_layout(
             &core.device,
             command_pool,
             submit_queue,
-            &texture_image,
-            vk::Format::R8G8B8A8_UNORM,
-            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
             vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
             1,
         );
@@ -348,12 +345,10 @@ impl Image {
     }
 
     pub fn transition_image_layout(
+        &mut self,
         device: &Device,
         command_pool: &Arc<CommandPool>,
         submit_queue: vk::Queue,
-        image: &Image,
-        _format: vk::Format,
-        old_layout: vk::ImageLayout,
         new_layout: vk::ImageLayout,
         mip_levels: u32,
     ) {
@@ -364,42 +359,37 @@ impl Image {
         let source_stage;
         let destination_stage;
 
-        if old_layout == vk::ImageLayout::UNDEFINED
-            && new_layout == vk::ImageLayout::TRANSFER_DST_OPTIMAL
-        {
-            src_access_mask = vk::AccessFlags::empty();
-            dst_access_mask = vk::AccessFlags::TRANSFER_WRITE;
-            source_stage = vk::PipelineStageFlags::TOP_OF_PIPE;
-            destination_stage = vk::PipelineStageFlags::TRANSFER;
-        } else if old_layout == vk::ImageLayout::TRANSFER_DST_OPTIMAL
-            && new_layout == vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL
-        {
-            src_access_mask = vk::AccessFlags::TRANSFER_WRITE;
-            dst_access_mask = vk::AccessFlags::SHADER_READ;
-            source_stage = vk::PipelineStageFlags::TRANSFER;
-            destination_stage = vk::PipelineStageFlags::FRAGMENT_SHADER;
-        } else if old_layout == vk::ImageLayout::UNDEFINED
-            && new_layout == vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL
-        {
-            src_access_mask = vk::AccessFlags::empty();
-            dst_access_mask =
-                vk::AccessFlags::COLOR_ATTACHMENT_READ | vk::AccessFlags::COLOR_ATTACHMENT_WRITE;
-            source_stage = vk::PipelineStageFlags::TOP_OF_PIPE;
-            destination_stage = vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT;
-        } else {
-            panic!("Unsupported layout transition!")
+        match (self.current_layout, new_layout) {
+            (vk::ImageLayout::UNDEFINED, vk::ImageLayout::TRANSFER_DST_OPTIMAL) => {
+                src_access_mask = vk::AccessFlags::empty();
+                dst_access_mask = vk::AccessFlags::TRANSFER_WRITE;
+                source_stage = vk::PipelineStageFlags::TOP_OF_PIPE;
+                destination_stage = vk::PipelineStageFlags::TRANSFER;
+            }
+            (vk::ImageLayout::TRANSFER_DST_OPTIMAL, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL) => {
+                src_access_mask = vk::AccessFlags::TRANSFER_WRITE;
+                dst_access_mask = vk::AccessFlags::SHADER_READ;
+                source_stage = vk::PipelineStageFlags::TRANSFER;
+                destination_stage = vk::PipelineStageFlags::FRAGMENT_SHADER;
+            }
+            (vk::ImageLayout::UNDEFINED, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL) => {
+                src_access_mask = vk::AccessFlags::empty();
+                dst_access_mask = vk::AccessFlags::COLOR_ATTACHMENT_READ
+                    | vk::AccessFlags::COLOR_ATTACHMENT_WRITE;
+                source_stage = vk::PipelineStageFlags::TOP_OF_PIPE;
+                destination_stage = vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT;
+            }
+            _ => panic!("Unsupported layout transition!"),
         }
 
         let image_barriers = [vk::ImageMemoryBarrier {
-            s_type: vk::StructureType::IMAGE_MEMORY_BARRIER,
-            p_next: ptr::null(),
             src_access_mask,
             dst_access_mask,
-            old_layout,
+            old_layout: self.current_layout,
             new_layout,
             src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
             dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-            image: image.handle,
+            image: self.handle,
             subresource_range: vk::ImageSubresourceRange {
                 aspect_mask: vk::ImageAspectFlags::COLOR,
                 base_mip_level: 0,
@@ -407,7 +397,10 @@ impl Image {
                 base_array_layer: 0,
                 layer_count: 1,
             },
+            ..Default::default()
         }];
+
+        self.current_layout = new_layout;
 
         unsafe {
             device.cmd_pipeline_barrier(
@@ -618,6 +611,13 @@ impl Image {
 
     pub fn height(&self) -> u32 {
         self.height
+    }
+
+    pub fn current_layout(&self) -> vk::ImageLayout {
+        self.current_layout
+    }
+    pub fn set_current_layout(&mut self, layout: vk::ImageLayout) {
+        self.current_layout = layout
     }
 }
 

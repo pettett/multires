@@ -85,8 +85,12 @@ impl Integration {
         context.set_fonts(font_definitions);
         context.set_style(style);
 
-        let mut egui_winit = egui_winit::State::new(display_target);
-        egui_winit.set_pixels_per_point(scale_factor);
+        let egui_winit = egui_winit::State::new(
+            context.viewport_id(),
+            display_target,
+            Some(scale_factor),
+            None,
+        );
 
         // Get swap_images to get len of swapchain images and to create framebuffers
         let swap_images = unsafe {
@@ -220,11 +224,11 @@ impl Integration {
     }
 
     /// handling winit event.
-    pub fn handle_event(
+    pub fn handle_window_event(
         &mut self,
         winit_event: &egui_winit::winit::event::WindowEvent,
     ) -> EventResponse {
-        self.egui_winit.on_event(&self.context, winit_event)
+        self.egui_winit.on_window_event(&self.context, winit_event)
     }
 
     /// begin frame.
@@ -247,8 +251,8 @@ impl Integration {
     }
 
     /// Get [`egui::Context`].
-    pub fn context(&self) -> Context {
-        self.context.clone()
+    pub fn context(&self) -> &Context {
+        &self.context
     }
 
     /// Record paint commands.
@@ -571,7 +575,7 @@ impl Integration {
             ptr.copy_from_nonoverlapping(data.as_ptr(), data.len());
         }
 
-        let texture_image = Image::create_image(
+        let mut texture_image = Image::create_image(
             &self.core,
             delta.image.width() as _,
             delta.image.height() as _,
@@ -649,15 +653,14 @@ impl Integration {
         insert_image_memory_barrier(
             &self.core.device,
             &cmd_buff,
-            &texture_image,
+            &mut texture_image,
             vk::QUEUE_FAMILY_IGNORED,
             vk::QUEUE_FAMILY_IGNORED,
             vk::AccessFlags2::NONE_KHR,
             vk::AccessFlags2::TRANSFER_WRITE,
-            vk::ImageLayout::UNDEFINED,
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-            vk::PipelineStageFlags::HOST,
-            vk::PipelineStageFlags::TRANSFER,
+            vk::PipelineStageFlags2::HOST,
+            vk::PipelineStageFlags2::TRANSFER,
             vk::ImageSubresourceRange::builder()
                 .aspect_mask(vk::ImageAspectFlags::COLOR)
                 .base_array_layer(0u32)
@@ -697,15 +700,14 @@ impl Integration {
         insert_image_memory_barrier(
             &self.core.device,
             &cmd_buff,
-            &texture_image,
+            &mut texture_image,
             vk::QUEUE_FAMILY_IGNORED,
             vk::QUEUE_FAMILY_IGNORED,
             vk::AccessFlags2::TRANSFER_WRITE,
             vk::AccessFlags2::SHADER_READ,
-            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
             vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-            vk::PipelineStageFlags::TRANSFER,
-            vk::PipelineStageFlags::VERTEX_SHADER,
+            vk::PipelineStageFlags2::TRANSFER,
+            vk::PipelineStageFlags2::VERTEX_SHADER,
             vk::ImageSubresourceRange::builder()
                 .aspect_mask(vk::ImageAspectFlags::COLOR)
                 .base_array_layer(0u32)
@@ -737,9 +739,8 @@ impl Integration {
 
         if let Some(pos) = delta.pos {
             // Blit texture data to existing texture if delta pos exists (e.g. font changed)
-            let existing_texture = self.texture_images.get(&texture_id);
+            let existing_texture = self.texture_images.get_mut(&texture_id);
             if let Some(existing_texture) = existing_texture {
-                let image = self.texture_images.get(&texture_id).unwrap();
                 unsafe {
                     self.core
                         .device
@@ -759,15 +760,14 @@ impl Integration {
                     insert_image_memory_barrier(
                         &self.core.device,
                         &cmd_buff,
-                        &existing_texture,
+                        existing_texture,
                         vk::QUEUE_FAMILY_IGNORED,
                         vk::QUEUE_FAMILY_IGNORED,
                         vk::AccessFlags2::SHADER_READ,
                         vk::AccessFlags2::TRANSFER_WRITE,
-                        vk::ImageLayout::UNDEFINED,
                         vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-                        vk::PipelineStageFlags::FRAGMENT_SHADER,
-                        vk::PipelineStageFlags::TRANSFER,
+                        vk::PipelineStageFlags2::FRAGMENT_SHADER,
+                        vk::PipelineStageFlags2::TRANSFER,
                         vk::ImageSubresourceRange::builder()
                             .aspect_mask(vk::ImageAspectFlags::COLOR)
                             .base_array_layer(0u32)
@@ -780,15 +780,14 @@ impl Integration {
                     insert_image_memory_barrier(
                         &self.core.device,
                         &cmd_buff,
-                        &texture_image,
+                        &mut texture_image,
                         vk::QUEUE_FAMILY_IGNORED,
                         vk::QUEUE_FAMILY_IGNORED,
                         vk::AccessFlags2::SHADER_READ,
                         vk::AccessFlags2::TRANSFER_READ,
-                        vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                         vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
-                        vk::PipelineStageFlags::FRAGMENT_SHADER,
-                        vk::PipelineStageFlags::TRANSFER,
+                        vk::PipelineStageFlags2::FRAGMENT_SHADER,
+                        vk::PipelineStageFlags2::TRANSFER,
                         vk::ImageSubresourceRange::builder()
                             .aspect_mask(vk::ImageAspectFlags::COLOR)
                             .base_array_layer(0u32)
@@ -818,8 +817,8 @@ impl Integration {
                         src_offsets: [
                             vk::Offset3D { x: 0, y: 0, z: 0 },
                             vk::Offset3D {
-                                x: image.width() as _,
-                                y: image.height() as _,
+                                x: existing_texture.width() as _,
+                                y: existing_texture.height() as _,
                                 z: 1,
                             },
                         ],
@@ -845,15 +844,14 @@ impl Integration {
                     insert_image_memory_barrier(
                         &self.core.device,
                         &cmd_buff,
-                        &existing_texture,
+                        existing_texture,
                         vk::QUEUE_FAMILY_IGNORED,
                         vk::QUEUE_FAMILY_IGNORED,
                         vk::AccessFlags2::TRANSFER_WRITE,
                         vk::AccessFlags2::SHADER_READ,
-                        vk::ImageLayout::TRANSFER_DST_OPTIMAL,
                         vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-                        vk::PipelineStageFlags::TRANSFER,
-                        vk::PipelineStageFlags::FRAGMENT_SHADER,
+                        vk::PipelineStageFlags2::TRANSFER,
+                        vk::PipelineStageFlags2::FRAGMENT_SHADER,
                         vk::ImageSubresourceRange::builder()
                             .aspect_mask(vk::ImageAspectFlags::COLOR)
                             .base_array_layer(0u32)

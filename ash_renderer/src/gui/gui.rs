@@ -69,7 +69,7 @@ impl Gui {
         self.in_frame = true;
     }
 
-    pub fn draw(&self) -> egui::Context {
+    pub fn draw(&self) -> &egui::Context {
         assert!(self.in_frame);
         self.integration.context()
     }
@@ -78,7 +78,10 @@ impl Gui {
         let output = self.integration.end_frame(&self.window);
         self.in_frame = false;
 
-        let clipped_meshes = self.integration.context().tessellate(output.shapes);
+        let clipped_meshes = self
+            .integration
+            .context()
+            .tessellate(output.shapes, self.integration.context().pixels_per_point());
 
         let cmd = self.ui_command_buffers.get(image_index);
 
@@ -104,7 +107,7 @@ impl Gui {
     }
 
     pub fn handle_event(&mut self, winit_event: &winit::event::WindowEvent<'_>) -> bool {
-        self.integration.handle_event(winit_event).consumed
+        self.integration.handle_window_event(winit_event).consumed
     }
     pub fn update_swapchain(&mut self, swapchain: &Swapchain) {
         self.integration.update_swapchain(
