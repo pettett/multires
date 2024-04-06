@@ -76,7 +76,7 @@ impl Renderer {
     ) {
         self.core.device.wait_device_idle();
 
-        let size = self.window_ref().inner_size();
+        let size = self.window().inner_size();
 
         cam.on_resize(&size);
 
@@ -106,7 +106,7 @@ impl Renderer {
         }
     }
 
-    pub fn window_ref(&self) -> &winit::window::Window {
+    pub fn window(&self) -> &winit::window::Window {
         &self.core.window
     }
     pub fn get_allocator(&self) -> MutexGuard<Allocator> {

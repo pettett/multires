@@ -160,13 +160,43 @@ impl Swapchain {
     fn choose_swapchain_present_mode(
         available_present_modes: &[vk::PresentModeKHR],
     ) -> vk::PresentModeKHR {
-        for &available_present_mode in available_present_modes {
-            if available_present_mode == vk::PresentModeKHR::MAILBOX {
-                return available_present_mode;
+        println!("Available swapchain modes: {:?}", available_present_modes);
+
+        assert!(
+            available_present_modes.len() > 0,
+            "Swapchain has no viable modes"
+        );
+
+        // https://vulkan-tutorial.com/Drawing_a_triangle/Presentation/Swap_chain
+        // VK_PRESENT_MODE_IMMEDIATE_KHR: Images submitted by your application are transferred to the screen
+        //			right away, which may result in tearing.
+        // VK_PRESENT_MODE_FIFO_KHR: The swap chain is a queue where the display
+        // 			takes an image from the front of the queue when the display is refreshed
+        // 			and the program inserts rendered images at the back of the queue. If the queue
+        // 			is full then the program has to wait. This is most similar to vertical sync as
+        // 			found in modern games. The moment that the display is refreshed is known as "vertical blank".
+        // VK_PRESENT_MODE_FIFO_RELAXED_KHR: This mode only differs from the previous one if the
+        //			application is late and the queue was empty at the last vertical blank.
+        //			Instead of waiting for the next vertical blank, the image is transferred right
+        //			away when it finally arrives. This may result in visible tearing.
+        // VK_PRESENT_MODE_MAILBOX_KHR: This is another variation of the second mode. Instead of blocking the
+        // 			application when the queue is full, the images that are already queued are simply replaced with the
+        //			newer ones. This mode can be used to render frames as fast as possible while still avoiding tearing,
+        //			resulting in fewer latency issues than standard vertical sync. This is commonly known as "triple buffering",
+        //			although the existence of three buffers alone does not necessarily mean that the framerate is unlocked.
+
+        for desired in [
+            vk::PresentModeKHR::MAILBOX,
+            vk::PresentModeKHR::IMMEDIATE, // screen tearing
+            vk::PresentModeKHR::FIFO_RELAXED, // Vsync but slightly better
+            vk::PresentModeKHR::FIFO, // Vsync creates massive input lag
+        ] {
+            if available_present_modes.contains(&desired) {
+                return desired;
             }
         }
 
-        vk::PresentModeKHR::FIFO
+        unreachable!()
     }
 
     fn choose_swapchain_extent(

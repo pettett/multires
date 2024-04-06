@@ -1,8 +1,9 @@
 use std::sync::Arc;
 
-use winit::event::{ElementState, Event, KeyEvent,  WindowEvent};
+use winit::event::{ElementState, Event, KeyEvent, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::keyboard::{KeyCode, PhysicalKey};
+use winit::window::Fullscreen;
 
 use super::app::App;
 use super::benchmarker::Benchmarker;
@@ -42,82 +43,109 @@ impl ProgramProc {
 
     pub fn main_loop(self, mut vulkan_app: App) {
         self.event_loop
-            .run(move |event,  control_flow| match event {
-                Event::WindowEvent { event, .. } => {
-                    vulkan_app.input( &event);
+            .run(move |event, control_flow| {
+                match event {
+                    Event::WindowEvent { event, .. } => {
+                        vulkan_app.input(&event);
 
-                    match event {
-                        WindowEvent::CloseRequested => {
-                            vulkan_app.renderer().core.device.wait_device_idle();
-                            control_flow.exit();
-                        }
-                        WindowEvent::KeyboardInput { event, .. } => match event {
-                            KeyEvent {
-                                physical_key : PhysicalKey::Code(key_code),
-                                state,
-                                ..
-                            } => match (key_code, state) {
-                                (KeyCode::Escape, ElementState::Pressed) => {
-                                    vulkan_app.renderer().core.device.wait_device_idle();
-                                    control_flow.exit();
-                                }
-                                (KeyCode::F1, ElementState::Pressed) => {
-                                    vulkan_app.world.send_event(SceneEvent::AddInstances(20));
-                                }
-                                (KeyCode::F5, ElementState::Pressed) => {
-                                    // FIXME: release mode fucks the UI
-                                    vulkan_app
-                                        .world
-                                        .send_event(MeshDrawingPipelineType::DrawLOD);
-                                }
-                                (KeyCode::F6, ElementState::Pressed) => {
-                                    vulkan_app
-                                        .world
-                                        .send_event(MeshDrawingPipelineType::DrawIndirect);
-                                }
-                                (KeyCode::F7, ElementState::Pressed) => {
-                                    vulkan_app
-                                        .world
-                                        .send_event(MeshDrawingPipelineType::IndirectTasks);
-                                }
-                                (KeyCode::F8, ElementState::Pressed) => {
-                                    vulkan_app.world.send_event(
-                                        MeshDrawingPipelineType::ExpandingComputeCulledMesh,
-                                    );
-                                }
-                                (KeyCode::F9, ElementState::Pressed) => {
-                                    vulkan_app.world.insert_resource(Benchmarker::default());
-                                }
+                        match event {
+                            WindowEvent::CloseRequested => {
+                                vulkan_app.renderer().core.device.wait_device_idle();
+                                control_flow.exit();
+                            }
+                            WindowEvent::KeyboardInput { event, .. } => match event {
+                                KeyEvent {
+                                    physical_key: PhysicalKey::Code(key_code),
+                                    state,
+                                    ..
+                                } => match (key_code, state) {
+                                    (KeyCode::Escape, ElementState::Pressed) => {
+                                        vulkan_app.renderer().core.device.wait_device_idle();
+                                        control_flow.exit();
+                                    }
+                                    (KeyCode::F1, ElementState::Pressed) => {
+                                        vulkan_app.world.send_event(SceneEvent::AddInstances(20));
+                                    }
+                                    (KeyCode::F5, ElementState::Pressed) => {
+                                        vulkan_app
+                                            .world
+                                            .send_event(MeshDrawingPipelineType::DrawLOD);
+                                    }
+                                    (KeyCode::F6, ElementState::Pressed) => {
+                                        vulkan_app
+                                            .world
+                                            .send_event(MeshDrawingPipelineType::DrawIndirect);
+                                    }
+                                    (KeyCode::F7, ElementState::Pressed) => {
+                                        vulkan_app
+                                            .world
+                                            .send_event(MeshDrawingPipelineType::IndirectTasks);
+                                    }
+                                    (KeyCode::F8, ElementState::Pressed) => {
+                                        vulkan_app.world.send_event(
+                                            MeshDrawingPipelineType::ExpandingComputeCulledMesh,
+                                        );
+                                    }
+                                    (KeyCode::F9, ElementState::Pressed) => {
+                                        vulkan_app.world.insert_resource(Benchmarker::default());
+                                    }
+                                    (KeyCode::F11, ElementState::Pressed) => {
+                                        match vulkan_app.renderer().window().fullscreen() {
+                                            Some(_) => {
+                                                vulkan_app.renderer().window().set_fullscreen(None)
+                                            }
+                                            None => {
+                                                let window = vulkan_app.renderer().window();
+                                                let monitor =
+                                                    window.current_monitor().unwrap_or_else(|| {
+                                                        window.primary_monitor().unwrap()
+                                                    });
+                                                // First is probably best, ey?
+                                                let video_mode =
+                                                    monitor.video_modes().next().unwrap();
+                                                println!(
+                                                    "Enabling fullscreen with {:?}",
+                                                    video_mode
+                                                );
+
+                                                window.set_fullscreen(Some(Fullscreen::Exclusive(
+                                                    video_mode,
+                                                )));
+                                            }
+                                        }
+                                    }
+                                    _ => {}
+                                },
                                 _ => {}
                             },
-							_ => {}
-                        },
-                        WindowEvent::Resized(_new_size) => {
-                            vulkan_app.renderer().core.device.wait_device_idle();
-                            vulkan_app
-                                .world
-                                .get_resource_mut::<Renderer>()
-                                .unwrap()
-                                .resize_framebuffer();
-                        },
-						WindowEvent::RedrawRequested => {
-							vulkan_app.draw_schedule.run(&mut vulkan_app.world);
-						}
-                        _ => {}
-                    };
-                }
-                Event::AboutToWait => {
-                    vulkan_app.schedule.run(&mut vulkan_app.world);
+                            WindowEvent::Resized(_new_size) => {
+                                vulkan_app.renderer().core.device.wait_device_idle();
+                                vulkan_app
+                                    .world
+                                    .get_resource_mut::<Renderer>()
+                                    .unwrap()
+                                    .resize_framebuffer();
+                            }
+                            WindowEvent::RedrawRequested => {
+                                vulkan_app.draw_schedule.run(&mut vulkan_app.world);
+                            }
+                            _ => {}
+                        };
+                    }
+                    Event::AboutToWait => {
+                        vulkan_app.schedule.run(&mut vulkan_app.world);
 
-                    //    vulkan_app.renderer().update_pipeline();
+                        control_flow.set_control_flow(ControlFlow::Poll);
 
-                    vulkan_app.renderer().window_ref().request_redraw();
+                        vulkan_app.renderer().window().request_redraw();
+                    }
+
+                    Event::LoopExiting => {
+                        vulkan_app.renderer().core.device.wait_device_idle();
+                    }
+                    _ => (),
                 }
-    
-                Event::LoopExiting => {
-                    vulkan_app.renderer().core.device.wait_device_idle();
-                }
-                _ => (),
-            }).unwrap()
+            })
+            .unwrap()
     }
 }
