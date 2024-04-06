@@ -38,8 +38,8 @@ pub trait AsBuffer: VkHandle<VkItem = vk::Buffer> {
         descriptor_type: vk::DescriptorType,
         info: &'a [vk::DescriptorBufferInfo; 1],
         dst_binding: u32,
-    ) -> vk::WriteDescriptorSetBuilder<'a> {
-        vk::WriteDescriptorSet::builder()
+    ) -> vk::WriteDescriptorSet<'a> {
+        vk::WriteDescriptorSet::default()
             .dst_set(dst_set)
             .dst_binding(dst_binding)
             .dst_array_element(0)

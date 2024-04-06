@@ -27,7 +27,8 @@ pub struct Core {
     pub queue_family: QueueFamilyIndices,
     pub command_pool: Arc<CommandPool>,
 
-    debug_utils_loader: ash::extensions::ext::DebugUtils,
+    debug_utils_instance: ash::ext::debug_utils::Instance,
+    debug_utils_device: ash::ext::debug_utils::Device,
     debug_messenger: vk::DebugUtilsMessengerEXT,
 }
 impl Core {
@@ -40,8 +41,7 @@ impl Core {
         println!("linking vulkan");
         let entry = ash::Entry::linked();
 
-        let required_instance_extensions =
-            Extensions::new(vec![ash::extensions::ext::DebugUtils::name()]);
+        let required_instance_extensions = Extensions::new(vec![ash::ext::debug_utils::NAME]);
 
         let instance = Instance::new(
             &entry,
@@ -61,16 +61,14 @@ impl Core {
             WINDOW_HEIGHT,
         );
 
-        let (debug_utils_loader, debug_messenger) =
-            setup_debug_utils(VALIDATION.is_enable, &entry, &instance);
-
+    
         let required_extensions = Extensions::new(vec![
-            ash::extensions::khr::BufferDeviceAddress::name(),
-            ash::extensions::khr::Swapchain::name(),
-            vk::KhrShaderNonSemanticInfoFn::name(), // Only needed for vulkan 1.2 debugprintfext
+            ash::khr::buffer_device_address::NAME,
+            ash::khr::swapchain::NAME,
+            ash::khr::shader_non_semantic_info::NAME, // Only needed for vulkan 1.2 debugprintfext
         ]);
 
-        let optional_extensions = Extensions::new(vec![ash::extensions::ext::MeshShader::name()]);
+        let optional_extensions = Extensions::new(vec![ash::ext::mesh_shader::NAME]);
 
         let physical_device =
             instance.pick_physical_device(&surface, &required_extensions, &optional_extensions);
@@ -85,6 +83,10 @@ impl Core {
             &VALIDATION,
             &surface,
         );
+
+		let (debug_utils_instance, debug_utils_device, debug_messenger) =
+		setup_debug_utils(VALIDATION.is_enable, &entry, &instance, &device);
+
 
         // Features required for subgroupMax to work in task shader
         assert!(TASK_GROUP_SIZE <= physical_device_subgroup_properties.subgroup_size);
@@ -107,7 +109,8 @@ impl Core {
             surface,
             queue_family,
             command_pool,
-            debug_utils_loader,
+            debug_utils_instance,
+			debug_utils_device,
             debug_messenger,
         })
     }
@@ -115,25 +118,18 @@ impl Core {
     /// Name the object, if a debug util loader is attached
     /// Otherwise this function will do nothing
     pub fn name_object<T: Handle + Default>(&self, name: &str, object: T) {
-        if self.debug_messenger == vk::DebugUtilsMessengerEXT::null() {
-            return;
-        }
-
-        let raw = object.as_raw();
-        if raw == T::default().as_raw() {
-            // Null pointer
+        if self.debug_messenger.is_null() {
             return;
         }
 
         let name_c = ffi::CString::new(name).unwrap();
 
-        let object_name_info = vk::DebugUtilsObjectNameInfoEXT::builder()
-            .object_type(T::TYPE)
-            .object_handle(raw)
+        let object_name_info = vk::DebugUtilsObjectNameInfoEXT::default()
+            .object_handle(object)
             .object_name(&name_c);
         unsafe {
-            self.debug_utils_loader
-                .set_debug_utils_object_name(self.device.handle(), &object_name_info)
+            self.debug_utils_device
+                .set_debug_utils_object_name(&object_name_info)
                 .unwrap();
         }
     }
@@ -142,7 +138,7 @@ impl Drop for Core {
     fn drop(&mut self) {
         unsafe {
             if VALIDATION.is_enable {
-                self.debug_utils_loader
+                self.debug_utils_instance
                     .destroy_debug_utils_messenger(self.debug_messenger, None);
             }
         }

@@ -120,26 +120,26 @@ def def_fig(
 ):
     fig, ax = plt.subplots(1, 1, layout="constrained")
 
-    plot_data(ax, a, ["ExpandingComputeCulledMesh", "IndirectTasks", "DrawLOD"], *s)
+    plot_data(ax, a, ["ExpandingComputeCulledMesh", "IndirectTasks"], *s)
 
     ax.set_xlabel("Relative Camera Distance")
     ax.set_ylabel("Frame time (ms)")
 
-    box = ax.get_position()
-    prop = 0.7
-    ax.set_position(
-        [
-            box.x0,
-            box.y0 + box.height * (1 - prop + 0.1),
-            box.width,
-            box.height * (prop),
-        ]
-    )
+    # box = ax.get_position()
+    # prop = 0.7
+    # ax.set_position(
+    #     [
+    #         box.x0,
+    #         box.y0 + box.height * (1 - prop + 0.1),
+    #         box.width,
+    #         box.height * (prop),
+    #     ]
+    # )
 
     # Put a legend below current axis
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.25), fancybox=True, ncol=2)
+    ax.legend( fancybox=True, ncol=2)
 
-    fig.set_size_inches(4, 3)
+    fig.set_size_inches(8, 3)
 
     fig.savefig(f"../diss/figures/eval/mesh_benchmark{None if a else s}.svg")
 

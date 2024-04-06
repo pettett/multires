@@ -1,6 +1,6 @@
 use std::{ptr, sync::Arc};
 
-use ash::{vk};
+use ash::vk;
 
 use crate::VkHandle;
 
@@ -23,14 +23,19 @@ pub struct PhysicalDeviceSubgroupProperties {
 }
 
 #[derive(Default)]
-pub struct PhysicalRelevantFeatureSupport {
-    pub device: vk::PhysicalDeviceFeatures2,
-    buffer_device_address: vk::PhysicalDeviceBufferDeviceAddressFeatures,
-    maintenance4: vk::PhysicalDeviceMaintenance4Features,
-    mesh_shader: vk::PhysicalDeviceMeshShaderFeaturesEXT,
-    shader_draw_param: vk::PhysicalDeviceShaderDrawParametersFeatures,
-    sync2: vk::PhysicalDeviceSynchronization2Features,
-    storage8bit: vk::PhysicalDevice8BitStorageFeatures,
+pub struct PhysicalRelevantExtensionFeatureSupport {
+    buffer_device_address: vk::PhysicalDeviceBufferDeviceAddressFeatures<'static>,
+    maintenance4: vk::PhysicalDeviceMaintenance4Features<'static>,
+    mesh_shader: vk::PhysicalDeviceMeshShaderFeaturesEXT<'static>,
+    shader_draw_param: vk::PhysicalDeviceShaderDrawParametersFeatures<'static>,
+    sync2: vk::PhysicalDeviceSynchronization2Features<'static>,
+    storage8bit: vk::PhysicalDevice8BitStorageFeatures<'static>,
+}
+
+#[derive(Default)]
+pub struct PhysicalRelevantFeatureSupport<'a> {
+    device: vk::PhysicalDeviceFeatures2<'a>,
+    extensions: Box<PhysicalRelevantExtensionFeatureSupport>,
 }
 
 #[derive(Debug)]
@@ -44,7 +49,17 @@ pub struct DeviceFeatureSet {
     pub buffer_device_address: bool,
 }
 
-impl PhysicalRelevantFeatureSupport {
+impl<'a> PhysicalRelevantFeatureSupport<'a> {
+    pub fn feature_set(&self) -> DeviceFeatureSet {
+        self.extensions.feature_set()
+    }
+
+    pub fn device(&'a mut self) -> vk::PhysicalDeviceFeatures2<'a> {
+        self.extensions.push_features(self.device)
+    }
+}
+
+impl PhysicalRelevantExtensionFeatureSupport {
     pub fn feature_set(&self) -> DeviceFeatureSet {
         DeviceFeatureSet {
             mesh_shader: self.mesh_shader.mesh_shader > 0,
@@ -58,24 +73,23 @@ impl PhysicalRelevantFeatureSupport {
         }
     }
 
-    pub fn init() -> Box<Self> {
-        let mut relevant_features = Box::<PhysicalRelevantFeatureSupport>::default();
-
+    fn push_features<'a>(
+        &'a mut self,
+        features: vk::PhysicalDeviceFeatures2<'a>,
+    ) -> vk::PhysicalDeviceFeatures2<'a> {
         // Get support info on all the features we want
-        relevant_features.device = vk::PhysicalDeviceFeatures2::builder()
-            .push_next(&mut relevant_features.buffer_device_address)
-            .push_next(&mut relevant_features.mesh_shader)
-            .push_next(&mut relevant_features.maintenance4)
-            .push_next(&mut relevant_features.sync2)
-            .push_next(&mut relevant_features.shader_draw_param)
-            .push_next(&mut relevant_features.storage8bit)
-            .build();
-        relevant_features
+        features
+            .push_next(&mut self.buffer_device_address)
+            .push_next(&mut self.mesh_shader)
+            .push_next(&mut self.maintenance4)
+            .push_next(&mut self.sync2)
+            .push_next(&mut self.shader_draw_param)
+            .push_next(&mut self.storage8bit)
     }
 }
 
-impl From<PhysicalRelevantFeatureSupport> for DeviceFeatureSet {
-    fn from(val: PhysicalRelevantFeatureSupport) -> Self {
+impl From<PhysicalRelevantExtensionFeatureSupport> for DeviceFeatureSet {
+    fn from(val: PhysicalRelevantExtensionFeatureSupport) -> Self {
         val.feature_set()
     }
 }
@@ -127,38 +141,43 @@ impl PhysicalDevice {
         }
     }
 
-    pub fn get_features(&self) -> Box<PhysicalRelevantFeatureSupport> {
-        let mut all_f = PhysicalRelevantFeatureSupport::init();
+    pub fn get_features(&self) -> PhysicalRelevantFeatureSupport {
+        let mut all_f = PhysicalRelevantExtensionFeatureSupport::default();
+        let mut device_features = all_f.push_features(vk::PhysicalDeviceFeatures2::default());
 
         unsafe {
             self.instance
-                .get_physical_device_features2(self.handle, &mut all_f.device)
+                .get_physical_device_features2(self.handle, &mut device_features)
         };
+
+        let mut device = vk::PhysicalDeviceFeatures2::default();
+
+        device.features.multi_draw_indirect = device_features.features.multi_draw_indirect;
+
+        device.features.pipeline_statistics_query =
+            device_features.features.pipeline_statistics_query;
+
+        device.features.shader_int16 = device_features.features.shader_int16;
 
         // Disable everything we don't need
 
-        let mut f = PhysicalRelevantFeatureSupport::init();
+        let mut extensions = Box::new(PhysicalRelevantExtensionFeatureSupport::default());
 
-        f.mesh_shader.mesh_shader = all_f.mesh_shader.mesh_shader;
-        f.mesh_shader.task_shader = all_f.mesh_shader.task_shader;
-        f.mesh_shader.mesh_shader_queries = all_f.mesh_shader.mesh_shader_queries;
+        extensions.mesh_shader.mesh_shader = all_f.mesh_shader.mesh_shader;
+        extensions.mesh_shader.task_shader = all_f.mesh_shader.task_shader;
+        extensions.mesh_shader.mesh_shader_queries = all_f.mesh_shader.mesh_shader_queries;
 
-        f.sync2.synchronization2 = all_f.sync2.synchronization2;
-        f.buffer_device_address.buffer_device_address =
+        extensions.sync2.synchronization2 = all_f.sync2.synchronization2;
+        extensions.buffer_device_address.buffer_device_address =
             all_f.buffer_device_address.buffer_device_address;
 
-        f.maintenance4.maintenance4 = all_f.maintenance4.maintenance4;
-        f.shader_draw_param.shader_draw_parameters = all_f.shader_draw_param.shader_draw_parameters;
+        extensions.maintenance4.maintenance4 = all_f.maintenance4.maintenance4;
+        extensions.shader_draw_param.shader_draw_parameters =
+            all_f.shader_draw_param.shader_draw_parameters;
 
-        f.storage8bit.storage_buffer8_bit_access = all_f.storage8bit.storage_buffer8_bit_access;
+        extensions.storage8bit.storage_buffer8_bit_access =
+            all_f.storage8bit.storage_buffer8_bit_access;
 
-        f.device.features.multi_draw_indirect = all_f.device.features.multi_draw_indirect;
-
-        f.device.features.pipeline_statistics_query =
-            all_f.device.features.pipeline_statistics_query;
-
-        f.device.features.shader_int16 = all_f.device.features.shader_int16;
-
-        f
+        PhysicalRelevantFeatureSupport { device, extensions }
     }
 }

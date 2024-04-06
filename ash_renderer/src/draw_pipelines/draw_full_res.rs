@@ -144,7 +144,7 @@ impl ScreenData {
         );
 
         for (i, mut command_buffer) in command_buffers.iter_to_fill().enumerate() {
-            let render_pass_begin_info = vk::RenderPassBeginInfo::builder()
+            let render_pass_begin_info = vk::RenderPassBeginInfo::default()
                 .render_pass(render_pass.handle())
                 .framebuffer(screen.swapchain_framebuffers[i].handle())
                 .render_area(vk::Rect2D {

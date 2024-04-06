@@ -54,7 +54,7 @@ vk_device_owned_wrapper!(CommandPool, destroy_command_pool);
 
 impl CommandPool {
     pub fn new(device: Arc<Device>, queue_family_index: u32) -> Arc<Self> {
-        let command_pool_create_info = vk::CommandPoolCreateInfo::builder()
+        let command_pool_create_info = vk::CommandPoolCreateInfo::default()
             .queue_family_index(queue_family_index)
             .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER);
 
@@ -87,7 +87,7 @@ impl CommandPool {
                 .expect("Failed to allocate Command Buffers!")
         }[0];
 
-        let command_buffer_begin_info = vk::CommandBufferBeginInfo::builder()
+        let command_buffer_begin_info = vk::CommandBufferBeginInfo::default()
             .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
 
         unsafe {

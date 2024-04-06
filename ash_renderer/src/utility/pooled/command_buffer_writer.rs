@@ -21,7 +21,7 @@ impl<'a> CommandBufferWriter<'a> {
         handle: vk::CommandBuffer,
         flags: vk::CommandBufferUsageFlags,
     ) -> Self {
-        let command_buffer_begin_info = vk::CommandBufferBeginInfo::builder().flags(flags);
+        let command_buffer_begin_info = vk::CommandBufferBeginInfo::default().flags(flags);
 
         unsafe {
             device

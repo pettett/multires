@@ -3,6 +3,9 @@ const uint MAX_CHILDREN = 5;
 // Use minimim of co_parent errors. Causes weirdness otherwise for some reason
 #define MIN_ERROR
 
+
+const float LARGE_ERROR = 100000000000000000.0;
+
 // Define INVOKE_PER_CLUSTER to say that workgroup count corresponds to maximum cluster being evaluated
 // #define INVOKE_PER_CLUSTER
 
@@ -36,6 +39,30 @@ float cluster_error(uint idx, vec3 local_cam_pos) {
 		// return clusters[idx].error;
 	}
 }
+
+
+// float cluster_error(uint idx, vec3 local_cam_pos) {
+// 	bool out_of_range = idx >= max_cluster();
+// 	if (out_of_range) {
+// 		return LARGE_ERROR;
+// 	} else {
+// 		vec3 center = clusters[idx].center;
+// 		// vec3 cam =  ubo.camera_pos;
+// 		// vec3 center = (models[idy].model * vec4(clusters[idx].center, 1.0)).xyz ;
+// 		float radius = clusters[idx].radius;
+// 		// float radius = length((models[idy].model * vec4(normalize(vec3(1)) * clusters[idx].radius, 0.0)).xyz);
+// 		float error = clusters[idx].error;
+
+// 		vec3 dist_vec = center - local_cam_pos;
+// 		float sqr_center_distance = (dot(dist_vec, dist_vec));
+ 
+
+// 		return (radius * inversesqrt(sqr_center_distance)) / error;
+// 		// return clusters[idx].error;
+// 	}
+// }
+
+
 // Generate the parent error by taking the minimum or maximum of the cluster's parent error.
 float get_parent_error(uint cluster_index, vec3 local_cam_pos) {
 	// lots of zeros - clusters at the end are always avaliable to draw

@@ -35,23 +35,9 @@ layout(binding = 3) readonly uniform CameraUniformBufferObject {
 	CameraUniformObject ubo;
 };
 
-const float LARGE_ERROR = 100000000000000000.0;
 
-float cluster_error(uint idx, uint idy) {
-	bool out_of_range = false;
-	if (out_of_range) {
-		return LARGE_ERROR;
-	} else {
-		vec3 cam = (models[idy].inv_model * vec4(ubo.camera_pos, 1.0)).xyz;
-		vec3 center = clusters[idx].center;
-		float radius = clusters[idx].radius;
-		float error = clusters[idx].error;
-
-		vec3 vec = center - cam;
-		float inv_center_distance = 1 / (dot(vec, vec));
-		return error * error * radius * radius * inv_center_distance;
-	}
-}
+#include "util\culling.glsl"
+#include "util\cluster.glsl"
 
 const uint LOCAL_SIZE_X = 1;
 
@@ -59,41 +45,21 @@ layout(local_size_x = LOCAL_SIZE_X, local_size_y = 1, local_size_z = 1) in;
 
 void main() {
 	uvec3 id = gl_GlobalInvocationID;
-	uint i = id.x;
-	uint instance = id.y;
-	// uint len = indices.result.length();
+	uint cluster_index = id.x;
+	uint instance_index = id.y;
 
-	// if (i == 0) {
-	//     should_draw.result[offset + 0] = len;
-	// }
 
-	// if (i >= len) {
-	//     return;
-	// }
-	// should_draw[i] = i32(clusters[i].index_offset);
+	vec3 local_cam_pos;
+	bool high_error;
+	bool draw = cluster_can_draw(cluster_index, instance_index, local_cam_pos, high_error);
 
-	// uint start = clusters[i].index_offset;
-	// uint end = start + clusters[i].index_count;
+	mat4 MVP = ubo.culling_view_proj * models[instance_index].model;
+	// Generate object space clipping planes
 
-	// Calculate if this cluster should be drawn:
-	// draw_error >= min(self.error, self.co-parent.error)
-	// draw_error < min(parent0.error, parent1.error)
+	vec4 planes[6] = planes_from_mat(MVP);
 
-	// lots of negative zeros
-	float this_error = -LARGE_ERROR;
+	bool in_clip = sphere_inside_planes(planes, clusters[cluster_index].tight_sphere);
 
-	if (clusters[i].co_parent >= 0) {
-		this_error = min(cluster_error(i, instance), cluster_error(clusters[i].co_parent, instance));
-	}
 
-	// lots of zeros
-	float parent_error = LARGE_ERROR;
-
-	if (clusters[i].parent0 >= 0) { // If we have one parent, we are guarenteed to have another.
-		parent_error = min(cluster_error(clusters[i].parent0, instance), cluster_error(clusters[i].parent1, instance));
-	}
-	float error = ubo.target_error * ubo.target_error;
-	bool cull = error >= this_error && error < parent_error;
-
-	should_draw[i] = cull ? i + 1 : 0;
+	should_draw[cluster_index] = draw && in_clip  ? cluster_index + 1 : 0;
 }

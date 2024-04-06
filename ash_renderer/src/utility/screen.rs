@@ -42,7 +42,7 @@ impl Framebuffer {
         let handle = unsafe {
             device
                 .create_framebuffer(
-                    &vk::FramebufferCreateInfo::builder()
+                    &vk::FramebufferCreateInfo::default()
                         .render_pass(render_pass.handle())
                         .attachments(attachments)
                         .width(physical_width)
@@ -198,7 +198,7 @@ fn create_framebuffers(
     for image_view in image_views.iter() {
         let attachments = [image_view.handle(), depth_image_view.handle()];
 
-        let framebuffer_create_info = vk::FramebufferCreateInfo::builder()
+        let framebuffer_create_info = vk::FramebufferCreateInfo::default()
             .render_pass(render_pass.handle())
             .attachments(&attachments)
             .width(swapchain_extent.width)

@@ -90,6 +90,7 @@ impl MeshCluster {
 
     pub fn error(&self) -> f32 {
         self.error
+		// self.index_count() as f32 * 0.0001
     }
 
     pub fn group_index(&self) -> usize {

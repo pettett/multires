@@ -18,22 +18,22 @@ pollster.workspace = true
 bevy_ecs.workspace = true
 common.workspace = true
 common_renderer.workspace = true
-ash = { version = "0.37", default-features = false, features = [
+ash = { version = "0.38", default-features = false, features = [
 	"linked",
 	"debug",
 ] }
-ash-window = "0.12"
-raw-window-handle = "0.5"
+ash-window = "0.13"
+raw-window-handle = "0.6"
 memoffset = "0.9"
 num = "0.4"
 rand = "0.8"
 image = "0.22"
-egui = "0.24"
-egui_plot = "0.24"
-egui-winit = { version = "0.24", default-features = false }
-gpu-allocator = { version = "0.25", default-features = false, features = [
+egui = "0.26"
+egui_plot = "0.26"
+egui-winit = { version = "0.26", default-features = false }
+gpu-allocator = { git = "https://github.com/Traverse-Research/gpu-allocator", branch = "ash-0.38", default-features = false, features = [
 	"vulkan",
-	"visualizer",
+	# "visualizer",
 ] }
 # egui-winit-ash-integration = { version = "0.6.0" }
 anyhow.workspace = true

@@ -153,7 +153,7 @@ pub fn draw_gui(
         .show(ctx, |ui| {
             {
                 ui.checkbox(&mut scene.freeze_pos, "Freeze");
-                ui.add(egui::Slider::new(&mut scene.target_error, 0.0..=10.0).text("Target Error"));
+                ui.add(egui::Slider::new(&mut scene.target_error, 0.0..=100000.0).logarithmic(true).text("Target Error"));
                 ui.add(egui::Slider::new(&mut scene.dist_pow, 0.001..=3.0).text("Distance Power"));
             }
 
@@ -356,7 +356,7 @@ pub fn draw_frame(
         &temp2
     };
 
-    let submit_infos = [*vk::SubmitInfo::builder()
+    let submit_infos = [vk::SubmitInfo::default()
         .command_buffers(command_buffers)
         .wait_dst_stage_mask(&wait_stages)
         .wait_semaphores(&wait_semaphores)
@@ -385,7 +385,7 @@ pub fn draw_frame(
     let swapchains = [renderer.screen.swapchain().handle];
     let image_indices = [image_index as u32];
 
-    let present_info = vk::PresentInfoKHR::builder()
+    let present_info = vk::PresentInfoKHR::default()
         .swapchains(&swapchains)
         .wait_semaphores(&signal_semaphores)
         .image_indices(&image_indices);

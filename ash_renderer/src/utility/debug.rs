@@ -39,10 +39,12 @@ pub fn check_validation_layer_support(
 ) -> bool {
     // if support validation layer, then return true
 
-    let layer_properties = entry
-        .enumerate_instance_layer_properties()
-        .expect("Failed to enumerate Instance Layers Properties");
-
+    let layer_properties = unsafe {
+        entry
+            .enumerate_instance_layer_properties()
+            .expect("Failed to enumerate Instance Layers Properties")
+    };
+	
     if layer_properties.len() == 0 {
         eprintln!("No available layers.");
         return false;
@@ -71,25 +73,27 @@ pub fn setup_debug_utils(
     is_enable_debug: bool,
     entry: &ash::Entry,
     instance: &ash::Instance,
-) -> (ash::extensions::ext::DebugUtils, vk::DebugUtilsMessengerEXT) {
-    let debug_utils_loader = ash::extensions::ext::DebugUtils::new(entry, instance);
+    device: &ash::Device,
+) -> (ash::ext::debug_utils::Instance,ash::ext::debug_utils::Device, vk::DebugUtilsMessengerEXT) {
+    let debug_utils_instance = ash::ext::debug_utils::Instance::new(entry, instance);
+    let debug_utils_device = ash::ext::debug_utils::Device::new(instance, device);
 
     if !is_enable_debug {
-        (debug_utils_loader, ash::vk::DebugUtilsMessengerEXT::null())
+        (debug_utils_instance,debug_utils_device, ash::vk::DebugUtilsMessengerEXT::null())
     } else {
         let messenger_ci = populate_debug_messenger_create_info();
 
         let utils_messenger = unsafe {
-            debug_utils_loader
+            debug_utils_instance
                 .create_debug_utils_messenger(&messenger_ci, None)
                 .expect("Debug Utils Callback")
         };
 
-        (debug_utils_loader, utils_messenger)
+        (debug_utils_instance,debug_utils_device, utils_messenger)
     }
 }
 
-pub fn populate_debug_messenger_create_info() -> vk::DebugUtilsMessengerCreateInfoEXT {
+pub fn populate_debug_messenger_create_info() -> vk::DebugUtilsMessengerCreateInfoEXT<'static> {
     vk::DebugUtilsMessengerCreateInfoEXT {
         message_severity: vk::DebugUtilsMessageSeverityFlagsEXT::WARNING |
             // vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE |

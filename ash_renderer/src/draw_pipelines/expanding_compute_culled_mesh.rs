@@ -203,47 +203,47 @@ impl ScreenData {
         for (i, mut command_buffer) in command_buffers.iter_to_fill().enumerate() {
             let descriptor_sets_to_bind = [*core_draw.descriptor_sets[i]];
 
-            // let compute_to_compute_barriers = [vk::BufferMemoryBarrier2::builder()
+            // let compute_to_compute_barriers = [vk::BufferMemoryBarrier2::default()
             //     .buffer(core_draw.range_buffer.handle())
             //     .src_access_mask(vk::AccessFlags2::SHADER_STORAGE_WRITE)
             //     .dst_access_mask(vk::AccessFlags2::SHADER_STORAGE_READ)
             //     .src_stage_mask(vk::PipelineStageFlags2::COMPUTE_SHADER)
             //     .dst_stage_mask(vk::PipelineStageFlags2::COMPUTE_SHADER)
             //     .size(vk::WHOLE_SIZE)
-            //     .build()];
+            //     ];
 
             // let compute_to_compute_dependency_info =
-            //     vk::DependencyInfo::builder().buffer_memory_barriers(&compute_to_compute_barriers);
+            //     vk::DependencyInfo::default().buffer_memory_barriers(&compute_to_compute_barriers);
 
             let compute_to_task_barriers = [
-                vk::BufferMemoryBarrier2::builder()
+                vk::BufferMemoryBarrier2::default()
                     .buffer(core_draw.indirect_task_buffer.handle())
                     .src_access_mask(vk::AccessFlags2::SHADER_STORAGE_WRITE)
                     .dst_access_mask(vk::AccessFlags2::INDIRECT_COMMAND_READ)
                     .src_stage_mask(vk::PipelineStageFlags2::COMPUTE_SHADER)
                     .dst_stage_mask(vk::PipelineStageFlags2::DRAW_INDIRECT)
                     .size(vk::WHOLE_SIZE)
-                    .build(),
-                vk::BufferMemoryBarrier2::builder()
+                    ,
+                vk::BufferMemoryBarrier2::default()
                     .buffer(core_draw.cluster_draw_buffer.handle())
                     .src_access_mask(vk::AccessFlags2::SHADER_STORAGE_WRITE)
                     .dst_access_mask(vk::AccessFlags2::SHADER_STORAGE_READ)
                     .src_stage_mask(vk::PipelineStageFlags2::COMPUTE_SHADER)
                     .dst_stage_mask(vk::PipelineStageFlags2::TASK_SHADER_EXT)
                     .size(vk::WHOLE_SIZE)
-                    .build(),
-                vk::BufferMemoryBarrier2::builder()
+                    ,
+                vk::BufferMemoryBarrier2::default()
                     .buffer(core_draw.range_buffer.handle())
                     .src_access_mask(vk::AccessFlags2::SHADER_STORAGE_WRITE)
                     .dst_access_mask(vk::AccessFlags2::SHADER_STORAGE_READ)
                     .src_stage_mask(vk::PipelineStageFlags2::COMPUTE_SHADER)
                     .dst_stage_mask(vk::PipelineStageFlags2::TASK_SHADER_EXT)
                     .size(vk::WHOLE_SIZE)
-                    .build(),
+                    ,
             ];
 
             let compute_to_task_dependency_info =
-                vk::DependencyInfo::builder().buffer_memory_barriers(&compute_to_task_barriers);
+                vk::DependencyInfo::default().buffer_memory_barriers(&compute_to_task_barriers);
 
             unsafe {
                 // core_draw

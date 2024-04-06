@@ -69,12 +69,14 @@ impl App {
     }
 
     pub fn input(&mut self, event: &WindowEvent) -> bool {
+		let core = self.renderer().core.clone();
+
         if self
             .world
             .get_non_send_resource_mut::<Gui>()
             .as_mut()
             .unwrap()
-            .handle_event(event)
+            .handle_event(&core.window, event)
         {
             return true;
         }
@@ -83,7 +85,7 @@ impl App {
             WindowEvent::MouseInput { state, button, .. } => {
                 self.world.send_event(MouseIn(*state, *button))
             }
-            WindowEvent::KeyboardInput { input, .. } => self.world.send_event(KeyIn(*input)),
+            WindowEvent::KeyboardInput { event, .. } => self.world.send_event(KeyIn(event.clone())),
             WindowEvent::CursorMoved { position, .. } => {
                 self.world.send_event(MouseMv(*position));
             }

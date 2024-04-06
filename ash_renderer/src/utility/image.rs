@@ -6,7 +6,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use ash::vk::{self, SamplerCreateInfoBuilder};
+use ash::vk;
 use gpu_allocator::{
     vulkan::{Allocation, AllocationCreateDesc, AllocationScheme, Allocator},
     MemoryLocation,
@@ -85,7 +85,7 @@ impl ImageView {
 
 impl Sampler {
     pub fn new_linear(device: Arc<Device>) -> Self {
-        let sampler_create_info = vk::SamplerCreateInfo::builder()
+        let sampler_create_info = vk::SamplerCreateInfo::default()
             .mag_filter(vk::Filter::LINEAR)
             .min_filter(vk::Filter::LINEAR)
             .address_mode_u(vk::SamplerAddressMode::REPEAT)
@@ -103,7 +103,7 @@ impl Sampler {
     }
 
     pub fn new_egui(device: Arc<Device>) -> Self {
-        let sampler_create_info = vk::SamplerCreateInfo::builder()
+        let sampler_create_info = vk::SamplerCreateInfo::default()
             .address_mode_u(vk::SamplerAddressMode::CLAMP_TO_EDGE)
             .address_mode_v(vk::SamplerAddressMode::CLAMP_TO_EDGE)
             .address_mode_w(vk::SamplerAddressMode::CLAMP_TO_EDGE)
@@ -117,7 +117,7 @@ impl Sampler {
         Self::new(device, sampler_create_info)
     }
 
-    pub fn new(device: Arc<Device>, sampler_create_info: SamplerCreateInfoBuilder<'_>) -> Self {
+    pub fn new(device: Arc<Device>, sampler_create_info: vk::SamplerCreateInfo<'_>) -> Self {
         let handle = unsafe {
             device
                 .create_sampler(&sampler_create_info, None)
@@ -172,27 +172,21 @@ impl Image {
         name: &str,
     ) -> Image {
         let initial_layout = vk::ImageLayout::UNDEFINED;
-        let image_create_info = vk::ImageCreateInfo {
-            s_type: vk::StructureType::IMAGE_CREATE_INFO,
-            p_next: ptr::null(),
-            flags: vk::ImageCreateFlags::empty(),
-            image_type: vk::ImageType::TYPE_2D,
-            format,
-            mip_levels,
-            array_layers: 1,
-            samples: num_samples,
-            tiling,
-            usage,
-            sharing_mode: vk::SharingMode::EXCLUSIVE,
-            queue_family_index_count: 0,
-            p_queue_family_indices: ptr::null(),
-            initial_layout,
-            extent: vk::Extent3D {
+        let image_create_info = vk::ImageCreateInfo::default()
+            .image_type(vk::ImageType::TYPE_2D)
+            .format(format)
+            .mip_levels(mip_levels)
+            .samples(num_samples)
+            .tiling(tiling)
+            .usage(usage)
+            .sharing_mode(vk::SharingMode::EXCLUSIVE)
+            .array_layers(1)
+            .initial_layout(initial_layout)
+            .extent(vk::Extent3D {
                 width,
                 height,
                 depth: 1,
-            },
-        };
+            });
 
         let image = unsafe {
             core.device

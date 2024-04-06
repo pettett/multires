@@ -5,7 +5,7 @@ use std::{
 };
 
 use ash::vk;
-use raw_window_handle::HasRawDisplayHandle;
+use raw_window_handle::{HasDisplayHandle, HasRawDisplayHandle};
 
 use crate::{
     utility::{
@@ -22,7 +22,7 @@ use super::{
 
 pub struct Instance {
     handle: ash::Instance,
-    pub fn_surface: ash::extensions::khr::Surface,
+    pub fn_surface: ash::khr::surface::Instance,
 }
 
 impl std::ops::Deref for Instance {
@@ -67,7 +67,7 @@ impl Instance {
         let mut extension_names = required_instance_extensions.get_extensions_raw_names();
 
         extension_names.extend_from_slice(
-            ash_window::enumerate_required_extensions(window.raw_display_handle()).unwrap(),
+            ash_window::enumerate_required_extensions(window.raw_display_handle().unwrap()).unwrap(),
         );
 
         let requred_validation_layer_raw_names: Vec<CString> = required_validation_layers
@@ -103,16 +103,16 @@ impl Instance {
         };
 
         println!("Creating instance");
-        let instance: ash::Instance = unsafe {
+        let handle: ash::Instance = unsafe {
             entry
                 .create_instance(&create_info, None)
                 .expect("Failed to create instance!")
         };
 
-        let fn_surface = ash::extensions::khr::Surface::new(entry, &instance);
+        let fn_surface = ash::khr::surface::Instance::new(entry, &handle);
 
         Arc::new(Self {
-            handle: instance,
+            handle,
             fn_surface,
         })
     }

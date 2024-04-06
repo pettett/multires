@@ -157,7 +157,7 @@ impl ScreenData {
         );
 
         for (i, command_buffer) in command_buffers.iter_to_fill().enumerate() {
-            let render_pass_begin_info = vk::RenderPassBeginInfo::builder()
+            let render_pass_begin_info = vk::RenderPassBeginInfo::default()
                 .render_pass(render_pass.handle())
                 .framebuffer(screen.swapchain_framebuffers[i].handle())
                 .render_area(vk::Rect2D {
@@ -294,15 +294,15 @@ fn create_graphics_pipeline(
     let main_function_name = CString::new("main").unwrap(); // the beginning function name in shader code.
 
     let shader_stages = [
-        *vk::PipelineShaderStageCreateInfo::builder()
+        vk::PipelineShaderStageCreateInfo::default()
             .module(task_shader_module.handle())
             .name(&main_function_name)
             .stage(vk::ShaderStageFlags::TASK_EXT),
-        *vk::PipelineShaderStageCreateInfo::builder()
+        vk::PipelineShaderStageCreateInfo::default()
             .module(mesh_shader_module.handle())
             .name(&main_function_name)
             .stage(vk::ShaderStageFlags::MESH_EXT),
-        *vk::PipelineShaderStageCreateInfo::builder()
+        vk::PipelineShaderStageCreateInfo::default()
             .module(frag_shader_module.handle())
             .name(&main_function_name)
             .stage(vk::ShaderStageFlags::FRAGMENT),
@@ -342,7 +342,7 @@ fn create_graphics_pipeline(
         extent: swapchain_extent,
     }];
 
-    let viewport_state_create_info = vk::PipelineViewportStateCreateInfo::builder()
+    let viewport_state_create_info = vk::PipelineViewportStateCreateInfo::default()
         .scissors(&scissors)
         .viewports(&viewports);
 
@@ -354,18 +354,18 @@ fn create_graphics_pipeline(
 
     let color_blend_attachment_states = init_color_blend_attachment_states();
 
-    let color_blend_state = vk::PipelineColorBlendStateCreateInfo::builder()
+    let color_blend_state = vk::PipelineColorBlendStateCreateInfo::default()
         .attachments(&color_blend_attachment_states)
         .logic_op_enable(false)
         .logic_op(vk::LogicOp::COPY)
         .blend_constants([0.0, 0.0, 0.0, 0.0]);
 
-    let dynamic_state_info = vk::PipelineDynamicStateCreateInfo::builder()
+    let dynamic_state_info = vk::PipelineDynamicStateCreateInfo::default()
         .dynamic_states(&[vk::DynamicState::SCISSOR, vk::DynamicState::VIEWPORT]);
 
     let pipeline_layout = PipelineLayout::new(device.clone(), ubo_set_layout);
 
-    let graphic_pipeline_create_info = vk::GraphicsPipelineCreateInfo::builder()
+    let graphic_pipeline_create_info = vk::GraphicsPipelineCreateInfo::default()
         .stages(&shader_stages)
         .rasterization_state(&rasterization_statue_create_info)
         .viewport_state(&viewport_state_create_info)

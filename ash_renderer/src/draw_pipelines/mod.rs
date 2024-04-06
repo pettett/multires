@@ -41,8 +41,8 @@ pub trait DrawPipeline {
     fn cleanup(&mut self, commands: &mut Commands) {}
 }
 
-pub fn init_rasterization_statue_create_info() -> vk::PipelineRasterizationStateCreateInfo {
-    *vk::PipelineRasterizationStateCreateInfo::builder()
+pub fn init_rasterization_statue_create_info() -> vk::PipelineRasterizationStateCreateInfo<'static> {
+    vk::PipelineRasterizationStateCreateInfo::default()
         .depth_clamp_enable(false)
         .cull_mode(vk::CullModeFlags::BACK)
         .front_face(vk::FrontFace::CLOCKWISE)
@@ -51,15 +51,11 @@ pub fn init_rasterization_statue_create_info() -> vk::PipelineRasterizationState
         .rasterizer_discard_enable(false)
         .depth_bias_enable(false)
 }
-pub fn init_multisample_state_create_info() -> vk::PipelineMultisampleStateCreateInfo {
-    vk::PipelineMultisampleStateCreateInfo {
-        rasterization_samples: vk::SampleCountFlags::TYPE_1,
-        sample_shading_enable: vk::FALSE,
-        min_sample_shading: 0.0,
-        alpha_to_one_enable: vk::FALSE,
-        alpha_to_coverage_enable: vk::FALSE,
-        ..Default::default()
-    }
+pub fn init_multisample_state_create_info() -> vk::PipelineMultisampleStateCreateInfo<'static> {
+    vk::PipelineMultisampleStateCreateInfo::default()
+        .rasterization_samples(vk::SampleCountFlags::TYPE_1)
+        .sample_shading_enable(false)
+        .min_sample_shading(0.0)
 }
 pub fn init_stencil_op_state() -> vk::StencilOpState {
     vk::StencilOpState {
@@ -74,22 +70,19 @@ pub fn init_stencil_op_state() -> vk::StencilOpState {
     }
 }
 
-pub fn init_depth_state_create_info() -> vk::PipelineDepthStencilStateCreateInfo {
+pub fn init_depth_state_create_info() -> vk::PipelineDepthStencilStateCreateInfo<'static> {
     let stencil_state = init_stencil_op_state();
 
-    vk::PipelineDepthStencilStateCreateInfo {
-        flags: vk::PipelineDepthStencilStateCreateFlags::empty(),
-        depth_test_enable: vk::TRUE,
-        depth_write_enable: vk::TRUE,
-        depth_compare_op: vk::CompareOp::LESS,
-        depth_bounds_test_enable: vk::FALSE,
-        stencil_test_enable: vk::FALSE,
-        front: stencil_state,
-        back: stencil_state,
-        max_depth_bounds: 1.0,
-        min_depth_bounds: 0.0,
-        ..Default::default()
-    }
+    vk::PipelineDepthStencilStateCreateInfo::default()
+        .depth_test_enable(true)
+        .depth_write_enable(true)
+        .depth_compare_op(vk::CompareOp::LESS)
+        .depth_bounds_test_enable(false)
+        .stencil_test_enable(false)
+        .front(stencil_state)
+        .back(stencil_state)
+        .max_depth_bounds(1.0)
+        .min_depth_bounds(1.0)
 }
 
 pub fn init_color_blend_attachment_states() -> [vk::PipelineColorBlendAttachmentState; 1] {

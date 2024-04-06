@@ -32,7 +32,7 @@ impl SyncObjects {
         let semaphore_create_info = vk::SemaphoreCreateInfo::default();
 
         let fence_create_info =
-            vk::FenceCreateInfo::builder().flags(vk::FenceCreateFlags::SIGNALED);
+            vk::FenceCreateInfo::default().flags(vk::FenceCreateFlags::SIGNALED);
 
         for _ in 0..max_frame_in_flight {
             unsafe {

@@ -102,7 +102,7 @@ impl MultiResData for MultiResMesh {
             clusters.push(ClusterData {
                 index_offset: index_sum,
                 index_count,
-                error: cluster.error(),
+                error:  cluster.error(),
                 center: cluster.saturated_bound.center().into(),
 
                 parent0: -1,

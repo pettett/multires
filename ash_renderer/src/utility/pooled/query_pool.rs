@@ -31,11 +31,11 @@ where
     R: bytemuck::Zeroable + Copy + QueryResult,
 {
     pub fn new(device: Arc<Device>, query_count: u32) -> Arc<Self> {
-        let create_info = vk::QueryPoolCreateInfo::builder()
+        let create_info = vk::QueryPoolCreateInfo::default()
             .query_type(vk::QueryType::PIPELINE_STATISTICS)
             .pipeline_statistics(R::flags())
             .query_count(query_count)
-            .build();
+            ;
 
         let handle = unsafe {
             device
@@ -63,8 +63,7 @@ where
             self.device
                 .get_query_pool_results(
                     self.handle,
-                    i,
-                    1,
+                    i, 
                     &mut results,
                     vk::QueryResultFlags::WITH_AVAILABILITY,
                 )

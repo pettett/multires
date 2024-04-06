@@ -88,7 +88,7 @@ impl DescriptorPool {
         pool_sizes: &[vk::DescriptorPoolSize],
         max_sets: u32,
     ) -> Arc<DescriptorPool> {
-        let descriptor_pool_create_info = vk::DescriptorPoolCreateInfo::builder()
+        let descriptor_pool_create_info = vk::DescriptorPoolCreateInfo::default()
             .pool_sizes(&pool_sizes)
             .max_sets(max_sets)
             .flags(vk::DescriptorPoolCreateFlags::FREE_DESCRIPTOR_SET);
@@ -110,7 +110,7 @@ impl DescriptorPool {
     ) -> Vec<DescriptorSet> {
         let layouts = vec![descriptor_set_layout.handle(); count];
 
-        let descriptor_set_allocate_info = vk::DescriptorSetAllocateInfo::builder()
+        let descriptor_set_allocate_info = vk::DescriptorSetAllocateInfo::default()
             .descriptor_pool(self.handle())
             .set_layouts(&layouts);
 
@@ -157,7 +157,7 @@ impl DescriptorSet {
             .enumerate()
             .filter_map(|(i, w)| match w {
                 DescriptorWriteData::Image { view, sampler } => Some(
-                    *vk::DescriptorImageInfo::builder()
+                    vk::DescriptorImageInfo::default()
                         .image_view(*view)
                         .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
                         .sampler(*sampler),
@@ -198,7 +198,7 @@ impl DescriptorSet {
                     ))
                 }
                 DescriptorWriteData::Image { .. } => {
-                    let dsc_writes = vk::WriteDescriptorSet::builder()
+                    let dsc_writes = vk::WriteDescriptorSet::default()
                         .dst_set(handle)
                         .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
                         .dst_array_element(0_u32)
@@ -213,8 +213,7 @@ impl DescriptorSet {
             .collect();
 
         unsafe {
-            let descriptor_writes: Vec<_> = descriptor_write_sets.into_iter().map(|x| *x).collect();
-            device.update_descriptor_sets(&descriptor_writes, &[]);
+            device.update_descriptor_sets(&descriptor_write_sets, &[]);
         }
 
         let buffers: Vec<_> = buffers
@@ -275,7 +274,7 @@ impl DescriptorSetLayout {
         let handle = unsafe {
             core.device
                 .create_descriptor_set_layout(
-                    &DescriptorSetLayoutCreateInfo::builder().bindings(&bindings),
+                    &DescriptorSetLayoutCreateInfo::default().bindings(&bindings),
                     None,
                 )
                 .expect("Failed to create Descriptor Set Layout!")
@@ -310,62 +309,36 @@ mod tests {
     #[test]
     fn test_binding_struct() {
         let ubo_layout_bindings = [
-            vk::DescriptorSetLayoutBinding {
-                // transform uniform
-                binding: 0,
-                descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
-                descriptor_count: 1,
-                stage_flags: vk::ShaderStageFlags::MESH_EXT | vk::ShaderStageFlags::TASK_EXT,
-                p_immutable_samplers: ptr::null(),
-            },
-            // vk::DescriptorSetLayoutBinding {
-            //     // sampler uniform
-            //     binding: 1,
-            //     descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-            //     descriptor_count: 1,
-            //     stage_flags: vk::ShaderStageFlags::FRAGMENT,
-            //     p_immutable_samplers: ptr::null(),
-            // },
-            vk::DescriptorSetLayoutBinding {
-                // sampler uniform
-                binding: 2,
-                descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
-                descriptor_count: 1,
-                stage_flags: vk::ShaderStageFlags::TASK_EXT,
-                p_immutable_samplers: ptr::null(),
-            },
-            vk::DescriptorSetLayoutBinding {
-                // camera uniform
-                binding: 3,
-                descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
-                descriptor_count: 1,
-                stage_flags: vk::ShaderStageFlags::MESH_EXT | vk::ShaderStageFlags::TASK_EXT,
-                p_immutable_samplers: ptr::null(),
-            },
-            vk::DescriptorSetLayoutBinding {
-                // verts buffer
-                binding: 4,
-                descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
-                descriptor_count: 1,
-                stage_flags: vk::ShaderStageFlags::MESH_EXT,
-                p_immutable_samplers: ptr::null(),
-            },
-            vk::DescriptorSetLayoutBinding {
-                // meshlet buffer
-                binding: 5,
-                descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
-                descriptor_count: 1,
-                stage_flags: vk::ShaderStageFlags::MESH_EXT,
-                p_immutable_samplers: ptr::null(),
-            },
-            vk::DescriptorSetLayoutBinding {
-                // indirect draw params buffer array
-                binding: 6,
-                descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
-                descriptor_count: 1,
-                stage_flags: vk::ShaderStageFlags::TASK_EXT,
-                p_immutable_samplers: ptr::null(),
-            },
+            vk::DescriptorSetLayoutBinding::default()
+                .binding(0)
+                .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                .descriptor_count(1)
+                .stage_flags(vk::ShaderStageFlags::MESH_EXT | vk::ShaderStageFlags::TASK_EXT),
+            vk::DescriptorSetLayoutBinding::default()
+                .binding(2)
+                .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                .descriptor_count(1)
+                .stage_flags(vk::ShaderStageFlags::TASK_EXT),
+            vk::DescriptorSetLayoutBinding::default()
+                .binding(3)
+                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                .descriptor_count(1)
+                .stage_flags(vk::ShaderStageFlags::MESH_EXT | vk::ShaderStageFlags::TASK_EXT),
+            vk::DescriptorSetLayoutBinding::default()
+                .binding(4)
+                .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                .descriptor_count(1)
+                .stage_flags(vk::ShaderStageFlags::MESH_EXT),
+            vk::DescriptorSetLayoutBinding::default()
+                .binding(5)
+                .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                .descriptor_count(1)
+                .stage_flags(vk::ShaderStageFlags::MESH_EXT),
+            vk::DescriptorSetLayoutBinding::default()
+                .binding(6)
+                .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                .descriptor_count(1)
+                .stage_flags(vk::ShaderStageFlags::TASK_EXT),
         ];
 
         let bindings = [

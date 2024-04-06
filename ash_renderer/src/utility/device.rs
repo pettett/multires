@@ -16,8 +16,8 @@ pub struct Device {
     physical_device: Arc<PhysicalDevice>,
 
     pub features: DeviceFeatureSet,
-    pub fn_mesh_shader: ash::extensions::ext::MeshShader,
-    pub fn_swapchain: ash::extensions::khr::Swapchain,
+    pub fn_mesh_shader: ash::ext::mesh_shader::Device,
+    pub fn_swapchain: ash::khr::swapchain::Device,
     handle: ash::Device,
 }
 
@@ -71,21 +71,16 @@ impl Device {
             queue_create_infos.push(queue_create_info);
         }
 
-        let requred_validation_layer_raw_names: Vec<ffi::CString> = validation
+        let required_validation_layer_raw_names: Vec<ffi::CString> = validation
             .required_validation_layers
             .iter()
             .map(|layer_name| ffi::CString::new(*layer_name).unwrap())
             .collect();
-        let _enable_layer_names: Vec<*const ffi::c_char> = requred_validation_layer_raw_names
-            .iter()
-            .map(|layer_name| layer_name.as_ptr())
-            .collect();
-
         // Just go ahead and enable everything we have
-        let mut physical_device_features = physical_device.get_features();
+        let mut device_features = physical_device.get_features();
         // FIXME: Do these on a case by case basis for each pipeline
 
-        let feature_set = physical_device_features.feature_set();
+        let feature_set = device_features.feature_set();
 
         assert!(feature_set.maintenance4);
         assert!(feature_set.synchronization2);
@@ -101,8 +96,10 @@ impl Device {
 
         let enable_extension_names = physical_device.extensions.get_extensions_raw_names();
 
-        let device_create_info = vk::DeviceCreateInfo::builder()
-            .push_next(&mut physical_device_features.device) // The rest will already have been pushed on
+        let mut device_features = device_features.device();
+
+        let device_create_info = vk::DeviceCreateInfo::default()
+            .push_next(&mut device_features) // The rest will already have been pushed on
             .queue_create_infos(&queue_create_infos)
             .enabled_extension_names(&enable_extension_names);
 
@@ -112,8 +109,8 @@ impl Device {
                 .expect("Failed to create logical Device!")
         };
 
-        let fn_mesh_shader = ash::extensions::ext::MeshShader::new(&instance, &device);
-        let fn_swapchain = ash::extensions::khr::Swapchain::new(&instance, &device);
+        let fn_mesh_shader = ash::ext::mesh_shader::Device::new(&instance, &device);
+        let fn_swapchain = ash::khr::swapchain::Device::new(&instance, &device);
 
         (
             Arc::new(Self {

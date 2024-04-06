@@ -33,7 +33,7 @@ impl PipelineLayout {
     ) -> Arc<Self> {
         let set_layouts = [descriptor_set_layout.handle()];
 
-        let pipeline_layout_create_info = vk::PipelineLayoutCreateInfo::builder()
+        let pipeline_layout_create_info = vk::PipelineLayoutCreateInfo::default()
             .set_layouts(&set_layouts)
             .push_constant_ranges(push_constant_ranges);
 
@@ -78,12 +78,15 @@ impl<const T: bool> Pipeline<T> {
 impl GraphicsPipeline {
     pub fn new(
         device: Arc<Device>,
-        pipeline_create_info: vk::GraphicsPipelineCreateInfoBuilder<'_>,
+        pipeline_create_info: vk::GraphicsPipelineCreateInfo<'_>,
         layout: Arc<PipelineLayout>,
     ) -> Self {
         let handle = unsafe {
-            let infos = [*pipeline_create_info];
-            device.create_graphics_pipelines(vk::PipelineCache::null(), &infos, None)
+            device.create_graphics_pipelines(
+                vk::PipelineCache::null(),
+                &[pipeline_create_info],
+                None,
+            )
         }
         .expect("Failed to create graphics pipeline")[0];
 
@@ -107,19 +110,19 @@ impl ComputePipeline {
 
         let main_function_name = CString::new("main").unwrap(); // the beginning function name in shader code.
 
-        let shader_stage = vk::PipelineShaderStageCreateInfo::builder()
+        let shader_stage = vk::PipelineShaderStageCreateInfo::default()
             .module(comp_shader_module.handle())
             .name(&main_function_name)
-            .stage(vk::ShaderStageFlags::COMPUTE)
-            .build();
+            .stage(vk::ShaderStageFlags::COMPUTE);
 
         let pipeline_layout = PipelineLayout::new(core.device.clone(), ubo_layout);
 
-        let pipeline_create_infos = [vk::ComputePipelineCreateInfo::builder()
-            .stage(shader_stage)
-            .layout(pipeline_layout.handle())
-            .flags(vk::PipelineCreateFlags::DISPATCH_BASE) // Allow non-0 bases, for applying this to instances
-            .build()];
+        let pipeline_create_infos = [
+            vk::ComputePipelineCreateInfo::default()
+                .stage(shader_stage)
+                .layout(pipeline_layout.handle())
+                .flags(vk::PipelineCreateFlags::DISPATCH_BASE), // Allow non-0 bases, for applying this to instances
+        ];
 
         let compute_pipelines = unsafe {
             core.device
@@ -155,15 +158,14 @@ impl ShaderModule {
         // This ensures vectors are aligned to u32, but is fast
         bytemuck::cast_slice_mut(&mut new_code[..]).copy_from_slice(code);
 
-        let shader_module_create_info = vk::ShaderModuleCreateInfo::builder().code(&new_code);
+        let shader_module_create_info = vk::ShaderModuleCreateInfo::default().code(&new_code);
 
-        ShaderModule {
-            handle: unsafe {
-                device
-                    .create_shader_module(&shader_module_create_info, None)
-                    .expect("Failed to create Shader Module!")
-            },
-            device,
-        }
+        let handle = unsafe {
+            device
+                .create_shader_module(&shader_module_create_info, None)
+                .expect("Failed to create Shader Module!")
+        };
+
+        ShaderModule { handle, device }
     }
 }

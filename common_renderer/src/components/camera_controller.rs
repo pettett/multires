@@ -1,10 +1,15 @@
 use crate::{components::transform::Transform, resources::time::Time};
 use bevy_ecs::prelude::*;
-use glam::{Vec2};
+use glam::Vec2;
+use winit::event::KeyEvent;
+use winit::event::WindowEvent::KeyboardInput;
+use winit::keyboard::{Key, KeyCode, PhysicalKey};
 use winit::{
     dpi::PhysicalPosition,
-    event::{ElementState, KeyboardInput, MouseButton, VirtualKeyCode},
+    event::{ElementState, MouseButton},
+    keyboard::NamedKey,
 };
+
 #[derive(Component)]
 pub struct CameraController {
     speed: f32,
@@ -19,7 +24,7 @@ pub struct CameraController {
     mouse_delta: Vec2,
 }
 #[derive(Event)]
-pub struct KeyIn(pub KeyboardInput);
+pub struct KeyIn(pub KeyEvent);
 #[derive(Event)]
 pub struct MouseIn(pub ElementState, pub MouseButton);
 
@@ -33,9 +38,9 @@ pub fn camera_handle_input(
     mut ev_mousemv: EventReader<MouseMv>,
 ) {
     for KeyIn(input) in ev_keyin.read() {
-        let KeyboardInput {
+        let KeyEvent {
             state,
-            virtual_keycode: Some(keycode),
+            physical_key: PhysicalKey::Code(keycode),
             ..
         } = input
         else {
@@ -45,12 +50,12 @@ pub fn camera_handle_input(
         for (mut c,) in controllers.iter_mut() {
             let is_pressed = *state == ElementState::Pressed;
             match keycode {
-                VirtualKeyCode::W | VirtualKeyCode::Up => c.is_forward_pressed = is_pressed,
-                VirtualKeyCode::A | VirtualKeyCode::Left => c.is_left_pressed = is_pressed,
-                VirtualKeyCode::S | VirtualKeyCode::Down => c.is_backward_pressed = is_pressed,
-                VirtualKeyCode::D | VirtualKeyCode::Right => c.is_right_pressed = is_pressed,
-                VirtualKeyCode::E => c.is_up_pressed = is_pressed,
-                VirtualKeyCode::Q => c.is_down_pressed = is_pressed,
+                KeyCode::KeyW | KeyCode::ArrowUp => c.is_forward_pressed = is_pressed,
+                KeyCode::KeyA | KeyCode::ArrowLeft => c.is_left_pressed = is_pressed,
+                KeyCode::KeyS | KeyCode::ArrowDown => c.is_backward_pressed = is_pressed,
+                KeyCode::KeyD | KeyCode::ArrowRight => c.is_right_pressed = is_pressed,
+                KeyCode::KeyE => c.is_up_pressed = is_pressed,
+                KeyCode::KeyQ => c.is_down_pressed = is_pressed,
                 _ => (),
             }
         }

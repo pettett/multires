@@ -56,8 +56,6 @@ layout(std430, binding = 7) buffer RangeBuffer {
 	Range ranges[];
 };
 
-const float LARGE_ERROR = 100000000000000000.0;
-
 #include "util\cluster.glsl"
 #include "util\culling.glsl"
 

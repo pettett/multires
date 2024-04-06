@@ -13,7 +13,6 @@
 #include "structs\mesh_task_payload.glsl"
 #include "structs\model.glsl"
 
-const float LARGE_ERROR = 100000000000000000.0;
 
 // Bindings and layout
 

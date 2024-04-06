@@ -18,7 +18,7 @@ use crate::{
     VkHandle,
 };
 use ::gpu_allocator::vulkan::Allocator;
-use ash::{extensions::khr::Swapchain, vk};
+use ash::vk;
 use bytemuck::bytes_of;
 use egui::{
     epaint::{ahash::AHashMap, ImageDelta},
@@ -26,7 +26,7 @@ use egui::{
 };
 use egui_winit::{winit::window::Window, EventResponse};
 use gpu_allocator::{vulkan::*, MemoryLocation};
-use raw_window_handle::HasRawDisplayHandle;
+use raw_window_handle::{HasDisplayHandle, HasRawDisplayHandle};
 use std::{
     ffi::{self, CString},
     sync::{Arc, Mutex},
@@ -39,15 +39,12 @@ use super::{utils::insert_image_memory_barrier, *};
 /// egui integration with winit and ash.
 pub struct Integration {
     physical_width: u32,
-    physical_height: u32,
-    scale_factor: f32,
-    context: Context,
+    physical_height: u32, 
     egui_winit: egui_winit::State,
     core: Arc<Core>,
     allocator: Arc<Mutex<Allocator>>,
     qfi: u32,
     queue: vk::Queue,
-    swapchain_loader: Swapchain,
     descriptor_pool: Arc<DescriptorPool>,
     descriptor_set_layout: Arc<DescriptorSetLayout>,
     pipeline_layout: Arc<PipelineLayout>,
@@ -65,7 +62,7 @@ pub struct Integration {
 }
 impl Integration {
     /// Create an instance of the integration.
-    pub fn new<H: HasRawDisplayHandle>(
+    pub fn new<H: HasDisplayHandle >(
         display_target: &H,
         physical_width: u32,
         physical_height: u32,
@@ -76,7 +73,6 @@ impl Integration {
         allocator: Arc<Mutex<Allocator>>,
         qfi: u32,
         queue: vk::Queue,
-        swapchain_loader: Swapchain,
         swapchain: vk::SwapchainKHR,
         surface_format: vk::SurfaceFormatKHR,
     ) -> Self {
@@ -85,8 +81,11 @@ impl Integration {
         context.set_fonts(font_definitions);
         context.set_style(style);
 
+		let id = context.viewport_id();
+
         let egui_winit = egui_winit::State::new(
-            context.viewport_id(),
+            context,
+            id,
             display_target,
             Some(scale_factor),
             None,
@@ -94,7 +93,8 @@ impl Integration {
 
         // Get swap_images to get len of swapchain images and to create framebuffers
         let swap_images = unsafe {
-            swapchain_loader
+            core.device
+                .fn_swapchain
                 .get_swapchain_images(swapchain)
                 .expect("Failed to get swapchain images.")
         };
@@ -102,7 +102,7 @@ impl Integration {
         // Create DescriptorPool
         let descriptor_pool = DescriptorPool::new_sized(
             core.device.clone(),
-            &[*vk::DescriptorPoolSize::builder()
+            &[vk::DescriptorPoolSize::default()
                 .ty(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
                 .descriptor_count(1024)],
             1024,
@@ -124,11 +124,12 @@ impl Integration {
         let pipeline_layout = PipelineLayout::new_push_constants(
             core.device.clone(),
             descriptor_set_layout.clone(),
-            &[vk::PushConstantRange::builder()
-                .stage_flags(vk::ShaderStageFlags::VERTEX)
-                .offset(0)
-                .size(std::mem::size_of::<f32>() as u32 * 2) // screen size
-                .build()],
+            &[
+                vk::PushConstantRange::default()
+                    .stage_flags(vk::ShaderStageFlags::VERTEX)
+                    .offset(0)
+                    .size(std::mem::size_of::<f32>() as u32 * 2), // screen size
+            ],
         );
 
         // Create Pipeline
@@ -186,16 +187,13 @@ impl Integration {
 
         Self {
             physical_width,
-            physical_height,
-            scale_factor,
-            context,
+            physical_height, 
             egui_winit,
 
             core,
             allocator,
             qfi,
             queue,
-            swapchain_loader,
             descriptor_pool,
             descriptor_set_layout,
             pipeline_layout,
@@ -226,33 +224,31 @@ impl Integration {
     /// handling winit event.
     pub fn handle_window_event(
         &mut self,
-        winit_event: &egui_winit::winit::event::WindowEvent,
+        window: &winit::window::Window,
+        winit_event: &winit::event::WindowEvent,
     ) -> EventResponse {
-        self.egui_winit.on_window_event(&self.context, winit_event)
+        self.egui_winit.on_window_event(window, winit_event)
     }
 
     /// begin frame.
     pub fn begin_frame(&mut self, window: &Window) {
         let raw_input = self.egui_winit.take_egui_input(window);
-        self.context.begin_frame(raw_input);
+        self.context().begin_frame(raw_input);
     }
 
     /// end frame.
     pub fn end_frame(&mut self, window: &Window) -> egui::FullOutput {
-        let output = self.context.end_frame();
+        let output = self.context().end_frame();
 
-        self.egui_winit.handle_platform_output(
-            window,
-            &self.context,
-            output.platform_output.clone(),
-        );
+        self.egui_winit
+            .handle_platform_output(window, output.platform_output.clone());
 
         output
     }
 
     /// Get [`egui::Context`].
     pub fn context(&self) -> &Context {
-        &self.context
+        &self.egui_winit.egui_ctx()
     }
 
     /// Record paint commands.
@@ -290,16 +286,15 @@ impl Integration {
         unsafe {
             self.core.device.cmd_begin_render_pass(
                 command_buffer,
-                &vk::RenderPassBeginInfo::builder()
+                &vk::RenderPassBeginInfo::default()
                     .render_pass(self.render_pass.handle())
                     .framebuffer(self.framebuffers[index].handle())
                     .clear_values(&[])
                     .render_area(
-                        *vk::Rect2D::builder().extent(
-                            vk::Extent2D::builder()
+                        vk::Rect2D::default().extent(
+                            vk::Extent2D::default()
                                 .width(self.physical_width)
-                                .height(self.physical_height)
-                                .build(),
+                                .height(self.physical_height),
                         ),
                     ),
                 vk::SubpassContents::INLINE,
@@ -328,17 +323,16 @@ impl Integration {
             self.core.device.cmd_set_viewport(
                 command_buffer,
                 0,
-                &[vk::Viewport::builder()
+                &[vk::Viewport::default()
                     .x(0.0)
                     .y(0.0)
                     .width(self.physical_width as f32)
                     .height(self.physical_height as f32)
                     .min_depth(0.0)
-                    .max_depth(1.0)
-                    .build()],
+                    .max_depth(1.0)],
             );
-            let width_points = self.physical_width as f32 / self.scale_factor;
-            let height_points = self.physical_height as f32 / self.scale_factor;
+            let width_points = self.physical_width as f32 / self.context().pixels_per_point();
+            let height_points = self.physical_height as f32 / self.context().pixels_per_point();
             self.core.device.cmd_push_constants(
                 command_buffer,
                 self.pipeline_layout.handle(),
@@ -432,8 +426,8 @@ impl Integration {
             unsafe {
                 let min = clip_rect.min;
                 let min = egui::Pos2 {
-                    x: min.x * self.scale_factor,
-                    y: min.y * self.scale_factor,
+                    x: min.x * self.context().pixels_per_point(),
+                    y: min.y * self.context().pixels_per_point(),
                 };
                 let min = egui::Pos2 {
                     x: f32::clamp(min.x, 0.0, self.physical_width as f32),
@@ -441,8 +435,8 @@ impl Integration {
                 };
                 let max = clip_rect.max;
                 let max = egui::Pos2 {
-                    x: max.x * self.scale_factor,
-                    y: max.y * self.scale_factor,
+                    x: max.x * self.context().pixels_per_point(),
+                    y: max.y * self.context().pixels_per_point(),
                 };
                 let max = egui::Pos2 {
                     x: f32::clamp(max.x, min.x, self.physical_width as f32),
@@ -451,20 +445,17 @@ impl Integration {
                 self.core.device.cmd_set_scissor(
                     command_buffer,
                     0,
-                    &[vk::Rect2D::builder()
+                    &[vk::Rect2D::default()
                         .offset(
-                            vk::Offset2D::builder()
+                            vk::Offset2D::default()
                                 .x(min.x.round() as i32)
-                                .y(min.y.round() as i32)
-                                .build(),
+                                .y(min.y.round() as i32),
                         )
                         .extent(
-                            vk::Extent2D::builder()
+                            vk::Extent2D::default()
                                 .width((max.x.round() - min.x) as u32)
-                                .height((max.y.round() - min.y) as u32)
-                                .build(),
-                        )
-                        .build()],
+                                .height((max.y.round() - min.y) as u32),
+                        )],
                 );
                 self.core.device.cmd_draw_indexed(
                     command_buffer,
@@ -512,9 +503,7 @@ impl Integration {
                 .collect(),
         };
         let cmd_pool = {
-            let cmd_pool_info = vk::CommandPoolCreateInfo::builder()
-                .queue_family_index(self.qfi)
-                .build();
+            let cmd_pool_info = vk::CommandPoolCreateInfo::default().queue_family_index(self.qfi);
             unsafe {
                 self.core
                     .device
@@ -523,11 +512,10 @@ impl Integration {
             }
         };
         let cmd_buff = {
-            let cmd_buff_alloc_info = vk::CommandBufferAllocateInfo::builder()
+            let cmd_buff_alloc_info = vk::CommandBufferAllocateInfo::default()
                 .command_buffer_count(1u32)
                 .command_pool(cmd_pool)
-                .level(vk::CommandBufferLevel::PRIMARY)
-                .build();
+                .level(vk::CommandBufferLevel::PRIMARY);
             unsafe {
                 self.core
                     .device
@@ -535,12 +523,12 @@ impl Integration {
                     .unwrap()[0]
             }
         };
-        let fence_info = vk::FenceCreateInfo::builder().build();
+        let fence_info = vk::FenceCreateInfo::default();
         let cmd_buff_fence = unsafe { self.core.device.create_fence(&fence_info, None).unwrap() };
 
         let (staging_buffer, staging_allocation) = {
             let buffer_size = data.len() as vk::DeviceSize;
-            let buffer_info = vk::BufferCreateInfo::builder()
+            let buffer_info = vk::BufferCreateInfo::default()
                 .size(buffer_size)
                 .usage(vk::BufferUsageFlags::TRANSFER_SRC);
             let texture_buffer =
@@ -592,58 +580,10 @@ impl Integration {
         )
         .create_image_view(vk::Format::R8G8B8A8_UNORM, vk::ImageAspectFlags::COLOR, 1);
 
-        // let (texture_image, info, texture_allocation) = {
-        //     let extent = vk::Extent3D {
-        //         width: delta.image.width() as u32,
-        //         height: delta.image.height() as u32,
-        //         depth: 1,
-        //     };
-        //     let create_info = vk::ImageCreateInfo::builder()
-        //         .array_layers(1)
-        //         .extent(extent)
-        //         .flags(vk::ImageCreateFlags::empty())
-        //         .format(vk::Format::R8G8B8A8_UNORM)
-        //         .image_type(vk::ImageType::TYPE_2D)
-        //         .initial_layout(vk::ImageLayout::UNDEFINED)
-        //         .mip_levels(1)
-        //         .samples(vk::SampleCountFlags::TYPE_1)
-        //         .sharing_mode(vk::SharingMode::EXCLUSIVE)
-        //         .tiling(vk::ImageTiling::OPTIMAL)
-        //         .usage(
-        //             vk::ImageUsageFlags::SAMPLED
-        //                 | vk::ImageUsageFlags::TRANSFER_DST
-        //                 | vk::ImageUsageFlags::TRANSFER_SRC,
-        //         )
-        //         .build();
-        //     let handle = unsafe { self.core.device.create_image(&create_info, None) }.unwrap();
-        //     let requirements = unsafe { self.core.device.get_image_memory_requirements(handle) };
-        //     let allocation = self
-        //         .allocator
-        //         .lock()
-        //         .unwrap()
-        //         .allocate(&AllocationCreateDesc {
-        //             requirements,
-        //             location: MemoryLocation::GpuOnly,
-        //             linear: false,
-        //             name: "EGUI texture",
-        //             allocation_scheme: AllocationScheme::GpuAllocatorManaged,
-        //         })
-        //         .unwrap();
-        //     unsafe {
-        //         self.core
-        //             .device
-        //             .bind_image_memory(handle, allocation.memory(), allocation.offset())
-        //             .unwrap()
-        //     };
-        //     (handle, create_info, allocation)
-        // };
-        // self.texture_image_infos.insert(texture_id, info);
-
         // begin cmd buff
         unsafe {
-            let cmd_buff_begin_info = vk::CommandBufferBeginInfo::builder()
-                .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT)
-                .build();
+            let cmd_buff_begin_info = vk::CommandBufferBeginInfo::default()
+                .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
             self.core
                 .device
                 .begin_command_buffer(cmd_buff, &cmd_buff_begin_info)
@@ -661,33 +601,30 @@ impl Integration {
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
             vk::PipelineStageFlags2::HOST,
             vk::PipelineStageFlags2::TRANSFER,
-            vk::ImageSubresourceRange::builder()
+            vk::ImageSubresourceRange::default()
                 .aspect_mask(vk::ImageAspectFlags::COLOR)
                 .base_array_layer(0u32)
                 .layer_count(1u32)
                 .base_mip_level(0u32)
-                .level_count(1u32)
-                .build(),
+                .level_count(1u32),
         );
-        let region = vk::BufferImageCopy::builder()
+        let region = vk::BufferImageCopy::default()
             .buffer_offset(0)
             .buffer_row_length(delta.image.width() as u32)
             .buffer_image_height(delta.image.height() as u32)
             .image_subresource(
-                vk::ImageSubresourceLayers::builder()
+                vk::ImageSubresourceLayers::default()
                     .aspect_mask(vk::ImageAspectFlags::COLOR)
                     .base_array_layer(0)
                     .layer_count(1)
-                    .mip_level(0)
-                    .build(),
+                    .mip_level(0),
             )
             .image_offset(vk::Offset3D { x: 0, y: 0, z: 0 })
             .image_extent(vk::Extent3D {
                 width: delta.image.width() as u32,
                 height: delta.image.height() as u32,
                 depth: 1,
-            })
-            .build();
+            });
         unsafe {
             self.core.device.cmd_copy_buffer_to_image(
                 cmd_buff,
@@ -708,22 +645,19 @@ impl Integration {
             vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
             vk::PipelineStageFlags2::TRANSFER,
             vk::PipelineStageFlags2::VERTEX_SHADER,
-            vk::ImageSubresourceRange::builder()
+            vk::ImageSubresourceRange::default()
                 .aspect_mask(vk::ImageAspectFlags::COLOR)
                 .base_array_layer(0u32)
                 .layer_count(1u32)
                 .base_mip_level(0u32)
-                .level_count(1u32)
-                .build(),
+                .level_count(1u32),
         );
 
         unsafe {
             self.core.device.end_command_buffer(cmd_buff).unwrap();
         }
         let cmd_buffs = [cmd_buff];
-        let submit_infos = [vk::SubmitInfo::builder()
-            .command_buffers(&cmd_buffs)
-            .build()];
+        let submit_infos = [vk::SubmitInfo::default().command_buffers(&cmd_buffs)];
         unsafe {
             self.core
                 .device
@@ -748,9 +682,8 @@ impl Integration {
                         .unwrap();
                     self.core.device.reset_fences(&[cmd_buff_fence]).unwrap();
                     // begin cmd buff
-                    let cmd_buff_begin_info = vk::CommandBufferBeginInfo::builder()
-                        .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT)
-                        .build();
+                    let cmd_buff_begin_info = vk::CommandBufferBeginInfo::default()
+                        .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
                     self.core
                         .device
                         .begin_command_buffer(cmd_buff, &cmd_buff_begin_info)
@@ -768,13 +701,12 @@ impl Integration {
                         vk::ImageLayout::TRANSFER_DST_OPTIMAL,
                         vk::PipelineStageFlags2::FRAGMENT_SHADER,
                         vk::PipelineStageFlags2::TRANSFER,
-                        vk::ImageSubresourceRange::builder()
+                        vk::ImageSubresourceRange::default()
                             .aspect_mask(vk::ImageAspectFlags::COLOR)
                             .base_array_layer(0u32)
                             .layer_count(1u32)
                             .base_mip_level(0u32)
-                            .level_count(1u32)
-                            .build(),
+                            .level_count(1u32),
                     );
                     // Transition new image for transfer src
                     insert_image_memory_barrier(
@@ -788,13 +720,12 @@ impl Integration {
                         vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
                         vk::PipelineStageFlags2::FRAGMENT_SHADER,
                         vk::PipelineStageFlags2::TRANSFER,
-                        vk::ImageSubresourceRange::builder()
+                        vk::ImageSubresourceRange::default()
                             .aspect_mask(vk::ImageAspectFlags::COLOR)
                             .base_array_layer(0u32)
                             .layer_count(1u32)
                             .base_mip_level(0u32)
-                            .level_count(1u32)
-                            .build(),
+                            .level_count(1u32),
                     );
                     let top_left = vk::Offset3D {
                         x: pos[0] as i32,
@@ -852,19 +783,16 @@ impl Integration {
                         vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                         vk::PipelineStageFlags2::TRANSFER,
                         vk::PipelineStageFlags2::FRAGMENT_SHADER,
-                        vk::ImageSubresourceRange::builder()
+                        vk::ImageSubresourceRange::default()
                             .aspect_mask(vk::ImageAspectFlags::COLOR)
                             .base_array_layer(0u32)
                             .layer_count(1u32)
                             .base_mip_level(0u32)
-                            .level_count(1u32)
-                            .build(),
+                            .level_count(1u32),
                     );
                     self.core.device.end_command_buffer(cmd_buff).unwrap();
                     let cmd_buffs = [cmd_buff];
-                    let submit_infos = [vk::SubmitInfo::builder()
-                        .command_buffers(&cmd_buffs)
-                        .build()];
+                    let submit_infos = [vk::SubmitInfo::default().command_buffers(&cmd_buffs)];
                     self.core
                         .device
                         .queue_submit(self.queue, &submit_infos, cmd_buff_fence)
@@ -932,8 +860,13 @@ impl Integration {
         self.physical_height = physical_height;
 
         // swap images
-        let swap_images = unsafe { self.swapchain_loader.get_swapchain_images(swapchain) }
-            .expect("Failed to get swapchain images.");
+        let swap_images = unsafe {
+            self.core
+                .device
+                .fn_swapchain
+                .get_swapchain_images(swapchain)
+        }
+        .expect("Failed to get swapchain images.");
 
         // Recreate render pass for update surface format
         self.render_pass = RenderPass::new_color(self.core.device.clone(), surface_format.format);
@@ -1009,7 +942,7 @@ impl Integration {
         let layouts = [self.descriptor_set_layout.handle()];
         let descriptor_set = unsafe {
             self.core.device.allocate_descriptor_sets(
-                &vk::DescriptorSetAllocateInfo::builder()
+                &vk::DescriptorSetAllocateInfo::default()
                     .descriptor_pool(self.descriptor_pool.handle())
                     .set_layouts(&layouts),
             )
@@ -1017,16 +950,14 @@ impl Integration {
         .expect("Failed to create descriptor sets.")[0];
         unsafe {
             self.core.device.update_descriptor_sets(
-                &[vk::WriteDescriptorSet::builder()
+                &[vk::WriteDescriptorSet::default()
                     .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
                     .dst_set(descriptor_set)
-                    .image_info(&[vk::DescriptorImageInfo::builder()
+                    .image_info(&[vk::DescriptorImageInfo::default()
                         .image_view(image_view)
                         .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
-                        .sampler(sampler)
-                        .build()])
-                    .dst_binding(0)
-                    .build()],
+                        .sampler(sampler)])
+                    .dst_binding(0)],
                 &[],
             );
         }
@@ -1066,33 +997,29 @@ fn create_pipeline(
     pipeline_layout: Arc<PipelineLayout>,
     render_pass: &RenderPass,
 ) -> GraphicsPipeline {
-    let bindings = [vk::VertexInputBindingDescription::builder()
+    let bindings = [vk::VertexInputBindingDescription::default()
         .binding(0)
         .input_rate(vk::VertexInputRate::VERTEX)
-        .stride(5 * std::mem::size_of::<f32>() as u32)
-        .build()];
+        .stride(5 * std::mem::size_of::<f32>() as u32)];
     let attributes = [
         // position
-        vk::VertexInputAttributeDescription::builder()
+        vk::VertexInputAttributeDescription::default()
             .binding(0)
             .offset(0)
             .location(0)
-            .format(vk::Format::R32G32_SFLOAT)
-            .build(),
+            .format(vk::Format::R32G32_SFLOAT),
         // uv
-        vk::VertexInputAttributeDescription::builder()
+        vk::VertexInputAttributeDescription::default()
             .binding(0)
             .offset(8)
             .location(1)
-            .format(vk::Format::R32G32_SFLOAT)
-            .build(),
+            .format(vk::Format::R32G32_SFLOAT),
         // color
-        vk::VertexInputAttributeDescription::builder()
+        vk::VertexInputAttributeDescription::default()
             .binding(0)
             .offset(16)
             .location(2)
-            .format(vk::Format::R8G8B8A8_UNORM)
-            .build(),
+            .format(vk::Format::R8G8B8A8_UNORM),
     ];
 
     let vertex_shader_module = ShaderModule::new(
@@ -1107,24 +1034,22 @@ fn create_pipeline(
 
     let main_function_name = ffi::CString::new("main").unwrap();
     let pipeline_shader_stages = [
-        vk::PipelineShaderStageCreateInfo::builder()
+        vk::PipelineShaderStageCreateInfo::default()
             .stage(vk::ShaderStageFlags::VERTEX)
             .module(vertex_shader_module.handle())
-            .name(&main_function_name)
-            .build(),
-        vk::PipelineShaderStageCreateInfo::builder()
+            .name(&main_function_name),
+        vk::PipelineShaderStageCreateInfo::default()
             .stage(vk::ShaderStageFlags::FRAGMENT)
             .module(fragment_shader_module.handle())
-            .name(&main_function_name)
-            .build(),
+            .name(&main_function_name),
     ];
 
-    let input_assembly_info = vk::PipelineInputAssemblyStateCreateInfo::builder()
+    let input_assembly_info = vk::PipelineInputAssemblyStateCreateInfo::default()
         .topology(vk::PrimitiveTopology::TRIANGLE_LIST);
-    let viewport_info = vk::PipelineViewportStateCreateInfo::builder()
+    let viewport_info = vk::PipelineViewportStateCreateInfo::default()
         .viewport_count(1)
         .scissor_count(1);
-    let rasterization_info = vk::PipelineRasterizationStateCreateInfo::builder()
+    let rasterization_info = vk::PipelineRasterizationStateCreateInfo::default()
         .depth_clamp_enable(false)
         .rasterizer_discard_enable(false)
         .polygon_mode(vk::PolygonMode::FILL)
@@ -1132,12 +1057,11 @@ fn create_pipeline(
         .front_face(vk::FrontFace::COUNTER_CLOCKWISE)
         .depth_bias_enable(false)
         .line_width(1.0);
-    let stencil_op = vk::StencilOpState::builder()
+    let stencil_op = vk::StencilOpState::default()
         .fail_op(vk::StencilOp::KEEP)
         .pass_op(vk::StencilOp::KEEP)
-        .compare_op(vk::CompareOp::ALWAYS)
-        .build();
-    let depth_stencil_info = vk::PipelineDepthStencilStateCreateInfo::builder()
+        .compare_op(vk::CompareOp::ALWAYS);
+    let depth_stencil_info = vk::PipelineDepthStencilStateCreateInfo::default()
         .depth_test_enable(true)
         .depth_write_enable(true)
         .depth_compare_op(vk::CompareOp::LESS_OR_EQUAL)
@@ -1145,24 +1069,23 @@ fn create_pipeline(
         .stencil_test_enable(false)
         .front(stencil_op)
         .back(stencil_op);
-    let color_blend_attachments = [vk::PipelineColorBlendAttachmentState::builder()
+    let color_blend_attachments = [vk::PipelineColorBlendAttachmentState::default()
         .color_write_mask(vk::ColorComponentFlags::RGBA)
         .blend_enable(true)
         .src_color_blend_factor(vk::BlendFactor::ONE)
-        .dst_color_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA)
-        .build()];
+        .dst_color_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA)];
     let color_blend_info =
-        vk::PipelineColorBlendStateCreateInfo::builder().attachments(&color_blend_attachments);
+        vk::PipelineColorBlendStateCreateInfo::default().attachments(&color_blend_attachments);
     let dynamic_states = [vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR];
     let dynamic_state_info =
-        vk::PipelineDynamicStateCreateInfo::builder().dynamic_states(&dynamic_states);
-    let vertex_input_state = vk::PipelineVertexInputStateCreateInfo::builder()
+        vk::PipelineDynamicStateCreateInfo::default().dynamic_states(&dynamic_states);
+    let vertex_input_state = vk::PipelineVertexInputStateCreateInfo::default()
         .vertex_attribute_descriptions(&attributes)
         .vertex_binding_descriptions(&bindings);
-    let multisample_info = vk::PipelineMultisampleStateCreateInfo::builder()
+    let multisample_info = vk::PipelineMultisampleStateCreateInfo::default()
         .rasterization_samples(vk::SampleCountFlags::TYPE_1);
 
-    let pipeline_create_info = vk::GraphicsPipelineCreateInfo::builder()
+    let pipeline_create_info = vk::GraphicsPipelineCreateInfo::default()
         .stages(&pipeline_shader_stages)
         .vertex_input_state(&vertex_input_state)
         .input_assembly_state(&input_assembly_info)

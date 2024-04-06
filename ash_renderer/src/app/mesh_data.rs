@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use ash::vk;
 use bevy_ecs::system::Resource;
-use common::{Asset, MeshVert, MultiResMesh};
+use common::{Asset, MeshCluster, MeshVert, MultiResMesh};
 use common_renderer::components::gpu_mesh_util::{ClusterData, MultiResData};
 use glam::Vec3;
 use gpu_allocator::vulkan::Allocator;
@@ -17,6 +17,7 @@ use crate::{
 pub struct LODChainLevel {
     pub index_buffer: Arc<TBuffer<u32>>,
     pub error: f32,
+    pub radius: f32,
 }
 
 #[derive(Resource)]
@@ -30,6 +31,7 @@ pub struct MeshData {
     pub meshlet_index_buffer: Arc<TBuffer<u32>>,
     pub lod_chain: Vec<LODChainLevel>,
 }
+
 
 impl MeshData {
     pub fn new(
@@ -46,16 +48,40 @@ impl MeshData {
 
         let levels = cluster_order[0].lod + 1;
         let mut indices = vec![Vec::new(); levels];
+        let mut sum_errors = vec![10000.0; levels];
+        let mut sum_rads = vec![0.0; levels];
+        // let mut sums = vec![0.0; levels];
 
         for c in &cluster_order {
             for m in c.meshlets() {
                 m.calc_indices_to_vec(&mut indices[c.lod]);
             }
+			
+			// sum_errors[c.lod] += c.error();
+			// sum_rads[c.lod] += c.saturated_bound.radius();
+			// sums[c.lod] += 1.0;
+
+			if sum_errors[c.lod] > c.error() {
+                sum_errors[c.lod] = c.error();
+                sum_rads[c.lod] = c.saturated_bound.radius();
+            }
+ 
         }
+
+		// for l in 0..levels{
+		// 	sum_errors[l] /= sums[l] ;
+		// 	sum_rads[l] /= sums[l] ;
+		// }
+
+		
+
 
         let mut lod_chain = Vec::new();
 
-        for l in indices {
+        for (l, (error, radius)) in indices
+            .into_iter()
+            .zip(sum_errors.into_iter().zip(sum_rads.into_iter()))
+        {
             let index_buffer = TBuffer::new_filled(
                 core,
                 allocator.clone(),
@@ -65,7 +91,7 @@ impl MeshData {
                 &l,
                 "Indices Buffer",
             );
-            let error = 500025.0 / l.len() as f32;
+            // let error = 500025.0 / l.len() as f32;
             // measure edge lengths
             // for t in l.chunks(3) {
             //     let [t1, t2, t3] = t else { unreachable!() };
@@ -81,6 +107,7 @@ impl MeshData {
             lod_chain.push(LODChainLevel {
                 index_buffer,
                 error,
+                radius,
             })
         }
 

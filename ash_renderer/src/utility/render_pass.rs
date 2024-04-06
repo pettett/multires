@@ -12,8 +12,8 @@ impl RenderPass {
     pub fn new_color(device: Arc<Device>, surface_format: vk::Format) -> RenderPass {
         let handle = unsafe {
             device.create_render_pass(
-                &vk::RenderPassCreateInfo::builder()
-                    .attachments(&[vk::AttachmentDescription::builder()
+                &vk::RenderPassCreateInfo::default()
+                    .attachments(&[vk::AttachmentDescription::default()
                         .format(surface_format)
                         .samples(vk::SampleCountFlags::TYPE_1)
                         .load_op(vk::AttachmentLoadOp::LOAD)
@@ -22,22 +22,22 @@ impl RenderPass {
                         .stencil_store_op(vk::AttachmentStoreOp::DONT_CARE)
                         .initial_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
                         .final_layout(vk::ImageLayout::PRESENT_SRC_KHR)
-                        .build()])
-                    .subpasses(&[vk::SubpassDescription::builder()
+                        ])
+                    .subpasses(&[vk::SubpassDescription::default()
                         .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
-                        .color_attachments(&[vk::AttachmentReference::builder()
+                        .color_attachments(&[vk::AttachmentReference::default()
                             .attachment(0)
                             .layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
-                            .build()])
-                        .build()])
-                    .dependencies(&[vk::SubpassDependency::builder()
+                            ])
+                        ])
+                    .dependencies(&[vk::SubpassDependency::default()
                         .src_subpass(vk::SUBPASS_EXTERNAL)
                         .dst_subpass(0)
                         .src_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_WRITE)
                         .dst_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_WRITE)
                         .src_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
                         .dst_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
-                        .build()]),
+                        ]),
                 None,
             )
         }
@@ -79,27 +79,19 @@ impl RenderPass {
 
         let render_pass_attachments = [color_attachment, depth_attachment];
 
-        let color_attachment_ref = vk::AttachmentReference {
+        let color_attachment_ref = [vk::AttachmentReference {
             attachment: 0,
             layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-        };
+        }];
         let depth_attachment_ref = vk::AttachmentReference {
             attachment: 1,
             layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
         };
 
-        let subpasses = [vk::SubpassDescription {
-            color_attachment_count: 1,
-            p_color_attachments: &color_attachment_ref,
-            p_depth_stencil_attachment: &depth_attachment_ref,
-            flags: vk::SubpassDescriptionFlags::empty(),
-            pipeline_bind_point: vk::PipelineBindPoint::GRAPHICS,
-            input_attachment_count: 0,
-            p_input_attachments: ptr::null(),
-            p_resolve_attachments: ptr::null(),
-            preserve_attachment_count: 0,
-            p_preserve_attachments: ptr::null(),
-        }];
+        let subpasses = [vk::SubpassDescription::default()
+            .color_attachments(&color_attachment_ref)
+            .depth_stencil_attachment(&depth_attachment_ref)
+            .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)];
 
         let subpass_dependencies = [vk::SubpassDependency {
             src_subpass: vk::SUBPASS_EXTERNAL,
@@ -112,7 +104,7 @@ impl RenderPass {
             dependency_flags: vk::DependencyFlags::empty(),
         }];
 
-        let renderpass_create_info = vk::RenderPassCreateInfo::builder()
+        let renderpass_create_info = vk::RenderPassCreateInfo::default()
             .attachments(&render_pass_attachments)
             .subpasses(&subpasses)
             .dependencies(&subpass_dependencies);
@@ -122,11 +114,11 @@ impl RenderPass {
 
     fn new(
         device: Arc<Device>,
-        renderpass_create_info: vk::RenderPassCreateInfoBuilder<'_>,
+        render_pass_create_info: vk::RenderPassCreateInfo<'_>,
     ) -> Self {
         let handle = unsafe {
             device
-                .create_render_pass(&renderpass_create_info, None)
+                .create_render_pass(&render_pass_create_info, None)
                 .expect("Failed to create render pass!")
         };
         Self { device, handle }

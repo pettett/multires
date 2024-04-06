@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use ash::vk;
 
 use gpu_allocator::vulkan::Allocator;
-use raw_window_handle::HasRawDisplayHandle;
+use raw_window_handle::{HasDisplayHandle, HasRawDisplayHandle};
 
 use crate::{
     core::Core,
@@ -30,7 +30,7 @@ impl Gui {
     pub fn new(
         core: Arc<Core>,
         window: Arc<winit::window::Window>,
-        target: &impl HasRawDisplayHandle,
+        target: &impl HasDisplayHandle,
         allocator: Arc<Mutex<Allocator>>,
         command_pool: &Arc<CommandPool>,
         queue_family: &QueueFamilyIndices,
@@ -44,14 +44,13 @@ impl Gui {
             target,
             swapchain.extent.width,
             swapchain.extent.height,
-            1.0,
+            window.scale_factor() as _,
             egui::FontDefinitions::default(),
             egui::Style::default(),
             core.clone(),
             allocator.clone(),
             queue_family.graphics_family.unwrap(),
             graphics_queue,
-            core.device.fn_swapchain.clone(),
             swapchain.handle,
             swapchain.surface_format,
         );
@@ -85,7 +84,7 @@ impl Gui {
 
         let cmd = self.ui_command_buffers.get(image_index);
 
-        let command_buffer_begin_info = vk::CommandBufferBeginInfo::builder()
+        let command_buffer_begin_info = vk::CommandBufferBeginInfo::default()
             .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
 
         unsafe {
@@ -106,8 +105,8 @@ impl Gui {
         cmd
     }
 
-    pub fn handle_event(&mut self, winit_event: &winit::event::WindowEvent<'_>) -> bool {
-        self.integration.handle_window_event(winit_event).consumed
+    pub fn handle_event(&mut self, window: &winit::window::Window, winit_event: &winit::event::WindowEvent) -> bool {
+        self.integration.handle_window_event(window, winit_event).consumed
     }
     pub fn update_swapchain(&mut self, swapchain: &Swapchain) {
         self.integration.update_swapchain(

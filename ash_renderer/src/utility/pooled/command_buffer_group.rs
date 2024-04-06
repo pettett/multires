@@ -16,7 +16,7 @@ pub struct CommandBufferGroup {
 
 impl CommandBufferGroup {
     pub fn new(command_pool: Arc<CommandPool>, group_count: usize) -> Self {
-        let command_buffer_allocate_info = vk::CommandBufferAllocateInfo::builder()
+        let command_buffer_allocate_info = vk::CommandBufferAllocateInfo::default()
             .command_buffer_count(group_count as _)
             .level(vk::CommandBufferLevel::PRIMARY)
             .command_pool(**command_pool);

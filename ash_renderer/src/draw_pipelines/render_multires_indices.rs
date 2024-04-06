@@ -97,14 +97,14 @@ impl RenderMultiresIndices {
         cluster_count: usize,
     ) {
         let result_indices_buffer_barriers = [
-            *vk::BufferMemoryBarrier2::builder()
+            vk::BufferMemoryBarrier2::default()
                 .buffer(self.result_indices_buffer.handle())
                 .src_access_mask(vk::AccessFlags2::SHADER_STORAGE_WRITE)
                 .dst_access_mask(vk::AccessFlags2::INDEX_READ)
                 .src_stage_mask(vk::PipelineStageFlags2::COMPUTE_SHADER)
                 .dst_stage_mask(vk::PipelineStageFlags2::INDEX_INPUT)
                 .size(vk::WHOLE_SIZE),
-            *vk::BufferMemoryBarrier2::builder()
+            vk::BufferMemoryBarrier2::default()
                 .buffer(self.draw_indexed_indirect_buffer.handle())
                 .src_access_mask(vk::AccessFlags2::SHADER_STORAGE_WRITE)
                 .dst_access_mask(vk::AccessFlags2::INDIRECT_COMMAND_READ)
@@ -114,7 +114,7 @@ impl RenderMultiresIndices {
         ];
 
         let result_indices_dependency_info =
-            vk::DependencyInfo::builder().buffer_memory_barriers(&result_indices_buffer_barriers);
+            vk::DependencyInfo::default().buffer_memory_barriers(&result_indices_buffer_barriers);
 
         unsafe {
             device.cmd_bind_pipeline(
@@ -151,7 +151,7 @@ impl RenderMultires for RenderMultiresIndices {
     ) {
         let descriptor_sets_to_bind = [self.descriptor_sets[frame].handle()];
 
-        let render_pass_begin_info = vk::RenderPassBeginInfo::builder()
+        let render_pass_begin_info = vk::RenderPassBeginInfo::default()
             .render_pass(render_pass.handle())
             .framebuffer(screen.swapchain_framebuffers[frame].handle())
             .render_area(vk::Rect2D {
@@ -235,22 +235,20 @@ pub fn create_traditional_graphics_pipeline(
     let main_function_name = ffi::CString::new("main").unwrap(); // the beginning function name in shader code.
 
     let shader_stages = [
-        vk::PipelineShaderStageCreateInfo::builder()
+        vk::PipelineShaderStageCreateInfo::default()
             .module(vert_shader_module.handle())
             .name(&main_function_name)
-            .stage(vk::ShaderStageFlags::VERTEX)
-            .build(),
-        vk::PipelineShaderStageCreateInfo::builder()
+            .stage(vk::ShaderStageFlags::VERTEX),
+        vk::PipelineShaderStageCreateInfo::default()
             .module(frag_shader_module.handle())
             .name(&main_function_name)
-            .stage(vk::ShaderStageFlags::FRAGMENT)
-            .build(),
+            .stage(vk::ShaderStageFlags::FRAGMENT),
     ];
 
     let binding_description = MeshVert::get_binding_descriptions();
     let attribute_description = MeshVert::get_attribute_descriptions();
 
-    let vertex_input_state_create_info = vk::PipelineVertexInputStateCreateInfo::builder()
+    let vertex_input_state_create_info = vk::PipelineVertexInputStateCreateInfo::default()
         .vertex_binding_descriptions(&binding_description)
         .vertex_attribute_descriptions(&attribute_description);
 
@@ -274,10 +272,9 @@ pub fn create_traditional_graphics_pipeline(
         extent: swapchain_extent,
     }];
 
-    let viewport_state_create_info = vk::PipelineViewportStateCreateInfo::builder()
+    let viewport_state_create_info = vk::PipelineViewportStateCreateInfo::default()
         .scissors(&scissors)
-        .viewports(&viewports)
-        .build();
+        .viewports(&viewports);
 
     let rasterization_statue_create_info = init_rasterization_statue_create_info();
 
@@ -287,18 +284,18 @@ pub fn create_traditional_graphics_pipeline(
 
     let color_blend_attachment_states = init_color_blend_attachment_states();
 
-    let color_blend_state = vk::PipelineColorBlendStateCreateInfo::builder()
+    let color_blend_state = vk::PipelineColorBlendStateCreateInfo::default()
         .attachments(&color_blend_attachment_states)
         .logic_op_enable(false)
         .logic_op(vk::LogicOp::COPY)
         .blend_constants([0.0, 0.0, 0.0, 0.0]);
 
-    let dynamic_state_info = vk::PipelineDynamicStateCreateInfo::builder()
+    let dynamic_state_info = vk::PipelineDynamicStateCreateInfo::default()
         .dynamic_states(&[vk::DynamicState::SCISSOR, vk::DynamicState::VIEWPORT]);
 
     let pipeline_layout = PipelineLayout::new(core.device.clone(), ubo_set_layout);
 
-    let graphic_pipeline_create_infos = [vk::GraphicsPipelineCreateInfo::builder()
+    let graphic_pipeline_create_infos = [vk::GraphicsPipelineCreateInfo::default()
         .stages(&shader_stages)
         .rasterization_state(&rasterization_statue_create_info)
         .viewport_state(&viewport_state_create_info)
@@ -309,8 +306,7 @@ pub fn create_traditional_graphics_pipeline(
         .vertex_input_state(&vertex_input_state_create_info)
         .input_assembly_state(&vertex_input_assembly_state_info)
         .layout(pipeline_layout.handle())
-        .render_pass(render_pass.handle())
-        .build()];
+        .render_pass(render_pass.handle())];
 
     let graphics_pipelines = unsafe {
         core.device

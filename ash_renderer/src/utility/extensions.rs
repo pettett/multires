@@ -80,12 +80,12 @@ mod tests {
     #[test]
     fn test_equality() {
         let e1 = Extensions::new(vec![
-            ash::extensions::khr::BufferDeviceAddress::name(),
-            ash::extensions::khr::Swapchain::name(),
+            ash::khr::buffer_device_address::NAME,
+            ash::khr::swapchain::NAME,
         ]);
         let e2 = Extensions::new(vec![
-            ash::extensions::khr::Swapchain::name(),
-            ash::extensions::khr::BufferDeviceAddress::name(),
+            ash::khr::swapchain::NAME,
+            ash::khr::buffer_device_address::NAME,
         ]);
 
         assert_eq!(e1, e2)

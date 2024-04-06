@@ -112,7 +112,7 @@ pub fn create_lod_command_buffer(
             draw.command_buffers.push(cmd);
         }
 
-        let render_pass_begin_info = vk::RenderPassBeginInfo::builder()
+        let render_pass_begin_info = vk::RenderPassBeginInfo::default()
             .render_pass(renderer.render_pass.handle())
             .framebuffer(renderer.screen.swapchain_framebuffers[renderer.image_index].handle())
             .render_area(vk::Rect2D {
@@ -171,9 +171,8 @@ pub fn create_lod_command_buffer(
                         //let center = *transform.get_pos();
                         // vec3 cam =  ubo.camera_pos;
                         // vec3 center = (models[idy].model * vec4(clusters[idx].center, 1.0)).xyz ;
-                        let radius = mesh_data.size;
 
-                        let sphere = glam::Vec3A::ZERO.extend(radius);
+                        let sphere = glam::Vec3A::ZERO.extend(mesh_data.size);
 
                         if !sphere_inside_planes(&planes, sphere) {
                             return None;
@@ -190,11 +189,14 @@ pub fn create_lod_command_buffer(
                             && level < mesh_data.lod_chain.len()
                         {
                             // center is zero - model space
-                            let inv_distance = local_cam_pos.length_recip();
+                            // Offset distance by average position of a cluster
+                            let distance = (local_cam_pos.length() - mesh_data.size * 0.5).max(0.0);
 
-                            let err_radius = mesh_data.lod_chain[level].error * radius;
+                            let err_radius = mesh_data.lod_chain[level].error
+                                + mesh_data.lod_chain[level].radius;
 
-                            current_error = err_radius * inv_distance;
+                            // current_error =   ( mesh_data.lod_chain[level].radius * inv_distance) / mesh_data.lod_chain[level].error;
+                            current_error = err_radius * err_radius / distance;
 
                             level += 1;
                         }
@@ -308,5 +310,110 @@ impl DrawPipeline for DrawLODChain {
 
     fn cleanup(&mut self, commands: &mut Commands) {
         commands.remove_resource::<DrawLODChainData>()
+    }
+}
+#[cfg(test)]
+mod tests {
+    use common::{Asset, MeshCluster, MultiResMesh};
+    use common_renderer::components::gpu_mesh_util::MultiResData;
+    use glam::Vec3;
+
+    pub fn make_lod_chain(cluster_order: &[&MeshCluster]) -> Vec<(f32, f32)> {
+        let levels = cluster_order[0].lod + 1;
+
+        let mut sum_errors = vec![100000.0; levels];
+        let mut sum_rads = vec![0.0; levels];
+        let mut sums = vec![0.0; levels];
+
+        for c in cluster_order {
+            if sum_errors[c.lod] > c.error() {
+                sum_errors[c.lod] = c.error();
+                sum_rads[c.lod] = c.saturated_bound.radius();
+            }
+            // sums[c.lod] += 1.0;
+        }
+
+        // for l in 0..levels {
+        //     sum_errors[l] /= sums[l];
+        //     sum_rads[l] /= sums[l];
+        // }
+
+        let mut lod_chain = Vec::new();
+
+        for (error, radius) in sum_errors.into_iter().zip(sum_rads.into_iter()) {
+            println!("Size: {}, Error: {}", radius, error);
+            lod_chain.push((error, radius))
+        }
+        lod_chain
+    }
+
+    fn calc_error(dist: f32, size: f32, error: f32) -> f32 {
+        let err_radius = error + size;
+
+        err_radius * err_radius / dist
+    }
+
+    #[test]
+    fn test_lod_function() {
+        let data = MultiResMesh::load("../assets/dragon_high.glb.bin").unwrap();
+        // let data = MultiResMesh::load("assets/lucy.glb.bin").unwrap();
+
+        let (cluster_order, cluster_groups) = data.order_clusters();
+        let cluster_data = data.generate_cluster_data(&cluster_order, &cluster_groups);
+        let lod_chain = make_lod_chain(&cluster_order);
+
+        let size = cluster_data[0].radius;
+        let target_error = 0.5;
+
+        for local_cam_pos in [Vec3::ZERO, Vec3::ONE, Vec3::ONE * 3.0, Vec3::ONE * 5.0] {
+            let mut level = 0;
+            let mut current_error = 0.0;
+            while current_error <= target_error && level < lod_chain.len() {
+                // center is zero - model space
+                // Offset distance by average position of a cluster
+                let distance = (local_cam_pos.length() - size * 0.5).max(0.0);
+
+                // current_error =   ( mesh_data.lod_chain[level].radius * inv_distance) / mesh_data.lod_chain[level].error;
+                current_error = calc_error(distance, lod_chain[level].0, lod_chain[level].1) ;
+
+                level += 1;
+            }
+            // rust doesn't have do-while
+            level -= 1;
+
+            let mut drawn_cluster_levels = Vec::new();
+
+            for c in 0..cluster_data.len() {
+                let distance = local_cam_pos.distance(cluster_data[c].center.into());
+
+                let error = calc_error(distance, cluster_data[c].radius, cluster_data[c].error);
+                let p = cluster_data[c].parent0;
+                let parent_error = if p == -1 {
+                    -100000.0
+                } else {
+                    calc_error(
+                        distance,
+                        cluster_data[p as usize].radius,
+                        cluster_data[p as usize].error,
+                    )
+                };
+
+                let draw = target_error >= error && target_error < parent_error;
+
+                if draw {
+                    drawn_cluster_levels.push(cluster_data[c].layer);
+                }
+            }
+
+            println!(
+                "We agree on {}/{} clusters",
+                drawn_cluster_levels
+                    .iter()
+                    .filter(|&&l| l == level as u32)
+                    .count(),
+                drawn_cluster_levels.len()
+            );
+            println!("{} - {:?}", level, drawn_cluster_levels);
+        }
     }
 }

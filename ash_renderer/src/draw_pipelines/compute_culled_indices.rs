@@ -31,8 +31,7 @@ pub struct ComputeCulledIndices {
     should_draw_pipeline: ComputePipeline,
     descriptor_sets: Vec<DescriptorSet>,
     screen: Option<ScreenData>,
-    should_cull_buffer: Arc<TBuffer<u32>>,
-    result_indices_buffer: Arc<TBuffer<u32>>,
+    should_cull_buffer: Arc<TBuffer<u32>>, 
     draw_indexed_indirect_buffer: Arc<TBuffer<vk::DrawIndexedIndirectCommand>>,
     render_indices: RenderMultiresIndices,
 }
@@ -129,8 +128,7 @@ impl ComputeCulledIndices {
             descriptor_sets,
             screen: None,
             should_cull_buffer,
-            should_draw_pipeline,
-            result_indices_buffer,
+            should_draw_pipeline, 
             draw_indexed_indirect_buffer,
             render_indices,
         }
@@ -185,14 +183,14 @@ impl ScreenData {
             let descriptor_sets_to_bind = [core_draw.descriptor_sets[i].handle()];
 
             let should_draw_buffer_barriers = [
-                *vk::BufferMemoryBarrier2::builder()
+                vk::BufferMemoryBarrier2::default()
                     .buffer(core_draw.should_cull_buffer.handle())
                     .src_access_mask(vk::AccessFlags2::SHADER_STORAGE_WRITE)
                     .dst_access_mask(vk::AccessFlags2::SHADER_STORAGE_READ)
                     .src_stage_mask(vk::PipelineStageFlags2::COMPUTE_SHADER)
                     .dst_stage_mask(vk::PipelineStageFlags2::COMPUTE_SHADER)
                     .size(vk::WHOLE_SIZE),
-                *vk::BufferMemoryBarrier2::builder()
+                vk::BufferMemoryBarrier2::default()
                     .buffer(core_draw.draw_indexed_indirect_buffer.handle())
                     .src_access_mask(vk::AccessFlags2::SHADER_STORAGE_WRITE)
                     .dst_access_mask(vk::AccessFlags2::SHADER_STORAGE_READ)
@@ -202,7 +200,7 @@ impl ScreenData {
             ];
 
             let should_draw_dependency_info =
-                vk::DependencyInfo::builder().buffer_memory_barriers(&should_draw_buffer_barriers);
+                vk::DependencyInfo::default().buffer_memory_barriers(&should_draw_buffer_barriers);
 
             unsafe {
                 device.cmd_bind_descriptor_sets(
