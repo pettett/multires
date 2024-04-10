@@ -4,7 +4,7 @@ use ash::vk;
 
 use crate::VkHandle;
 
-use super::{extensions::Extensions, instance::Instance, macros::vk_handle_wrapper};
+use super::{extensions::Extensions, instance::Instance, macros::vk_handle_wrapper, swapchain::SwapChainSupportDetail};
 
 pub struct PhysicalDevice {
     instance: Arc<Instance>,
@@ -98,6 +98,7 @@ impl PhysicalDevice {
     pub fn new(
         handle: vk::PhysicalDevice,
         instance: Arc<Instance>,
+        swapchain_support: SwapChainSupportDetail,
         extensions: Extensions,
     ) -> Self {
         println!("Attaching to device with extensions: {extensions:?}");

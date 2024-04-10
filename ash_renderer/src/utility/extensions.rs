@@ -2,8 +2,8 @@ use std::{collections::HashMap, ffi};
 
 use ash::vk;
 
-use super::instance::Instance;
-
+use super::{instance::Instance, physical_device::PhysicalDevice};
+use crate::VkHandle;
 /// Stores a sorted list of extensions
 #[derive(Debug)]
 pub struct Extensions {

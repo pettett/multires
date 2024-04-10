@@ -1,4 +1,7 @@
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::{
+    sync::{Arc, Mutex, MutexGuard},
+    time,
+};
 
 use ash::vk;
 use bevy_ecs::prelude::*;
@@ -10,7 +13,11 @@ use crate::{
     draw_pipelines::{indirect_tasks::MeshShaderMode, DrawPipeline},
     gui::{gui::Gui, window::GuiWindow},
     utility::{
-        pooled::{command_pool::CommandBuffer, descriptor_pool::DescriptorPool},
+        pooled::{
+            command_pool::CommandBuffer,
+            descriptor_pool::DescriptorPool,
+            query_pool::{PrimitivesQueryResults, QueryPool, TypelessQueryPool},
+        },
         render_pass::RenderPass,
         screen::Screen,
         sync::SyncObjects,
@@ -18,7 +25,7 @@ use crate::{
     },
 };
 
-use super::{mesh_data::MeshData, scene::Scene};
+use super::{frame_measure::RollingMeasure, mesh_data::MeshData, scene::Scene};
 #[derive(Debug, Clone, Copy, Event, PartialEq, Eq)]
 pub enum MeshDrawingPipelineType {
     IndirectTasks,
@@ -48,7 +55,13 @@ pub struct Renderer {
     pub current_pipeline: MeshDrawingPipelineType,
     pub mesh_mode: MeshShaderMode,
     pub sync_objects: SyncObjects,
+
+    // Evaluation data
+    pub last_sample: time::Instant,
+    pub primitives: RollingMeasure<u32, 60>,
+    pub query_primitives: QueryPool<PrimitivesQueryResults>,
     pub query: bool,
+
     pub render_gui: bool,
     pub current_frame: usize,
     pub image_index: usize,
@@ -111,5 +124,12 @@ impl Renderer {
     }
     pub fn get_allocator(&self) -> MutexGuard<Allocator> {
         self.allocator.lock().unwrap()
+    }
+
+    pub fn get_query(&self) -> Option<Arc<TypelessQueryPool>> {
+        self.query.then(|| self.query_primitives.typeless())
+    }
+    pub fn get_query_ref(&self) -> Option<&TypelessQueryPool> {
+        self.query.then(|| self.query_primitives.typeless_ref())
     }
 }

@@ -15,7 +15,7 @@ use crate::{
                 DescriptorPool, DescriptorSet, DescriptorSetLayout, DescriptorSetLayoutBinding,
                 DescriptorWriteData,
             },
-            query_pool::QueryPool,
+            query_pool::{QueryPool, TypelessQueryPool},
         },
         render_pass::RenderPass,
         screen::Screen,
@@ -25,8 +25,8 @@ use crate::{
 };
 
 use super::{
-    indirect_tasks::MeshInvocationsQueryResults, render_multires::RenderMultires,
-    render_multires_meshlets::RenderMultiresMeshlets, BufferRange, DrawPipeline,
+    render_multires::RenderMultires, render_multires_meshlets::RenderMultiresMeshlets, BufferRange,
+    DrawPipeline,
 };
 
 pub struct ExpandingComputeCulledMesh {
@@ -40,8 +40,7 @@ pub struct ExpandingComputeCulledMesh {
 
     last_sample: time::Instant,
     mesh_invocations: RollingMeasure<u32, 60>,
-    query_pool: Arc<QueryPool<MeshInvocationsQueryResults>>,
-    query: bool,
+    query_pool: Option<Arc<TypelessQueryPool>>,
     render_meshlets: RenderMultiresMeshlets,
 }
 
@@ -113,8 +112,6 @@ impl ExpandingComputeCulledMesh {
             screen.swapchain().images.len(),
         );
 
-        let query_pool = QueryPool::new(core.device.clone(), 1);
-
         let render_meshlets = RenderMultiresMeshlets::new(
             &core,
             renderer,
@@ -124,6 +121,7 @@ impl ExpandingComputeCulledMesh {
             indirect_task_buffer.clone(),
             range_buffer.clone(),
             cluster_draw_buffer.clone(),
+            renderer.get_query(),
         );
 
         Self {
@@ -134,8 +132,7 @@ impl ExpandingComputeCulledMesh {
             indirect_task_buffer,
             range_buffer,
             render_meshlets,
-            query_pool,
-            query: renderer.query,
+            query_pool: renderer.get_query(),
             last_sample: time::Instant::now(),
             mesh_invocations: Default::default(),
         }
@@ -162,21 +159,6 @@ impl DrawPipeline for ExpandingComputeCulledMesh {
             screen,
             render_pass,
         ));
-    }
-
-    fn stats_gui(&mut self, ui: &mut egui::Ui, image_index: usize) {
-        if image_index == 0 && self.last_sample.elapsed() > time::Duration::from_secs_f32(0.01) {
-            if let Some(results) = self.query_pool.get_results(0) {
-                assert!(results.avail > 0);
-
-                self.mesh_invocations.tick(results.mesh);
-            }
-
-            self.last_sample = time::Instant::now();
-        }
-
-        self.mesh_invocations.gui("Mesh Invocations", ui);
-        //self.task_invocations.gui("Task Invocations", ui);
     }
 }
 
@@ -222,24 +204,21 @@ impl ScreenData {
                     .dst_access_mask(vk::AccessFlags2::INDIRECT_COMMAND_READ)
                     .src_stage_mask(vk::PipelineStageFlags2::COMPUTE_SHADER)
                     .dst_stage_mask(vk::PipelineStageFlags2::DRAW_INDIRECT)
-                    .size(vk::WHOLE_SIZE)
-                    ,
+                    .size(vk::WHOLE_SIZE),
                 vk::BufferMemoryBarrier2::default()
                     .buffer(core_draw.cluster_draw_buffer.handle())
                     .src_access_mask(vk::AccessFlags2::SHADER_STORAGE_WRITE)
                     .dst_access_mask(vk::AccessFlags2::SHADER_STORAGE_READ)
                     .src_stage_mask(vk::PipelineStageFlags2::COMPUTE_SHADER)
                     .dst_stage_mask(vk::PipelineStageFlags2::TASK_SHADER_EXT)
-                    .size(vk::WHOLE_SIZE)
-                    ,
+                    .size(vk::WHOLE_SIZE),
                 vk::BufferMemoryBarrier2::default()
                     .buffer(core_draw.range_buffer.handle())
                     .src_access_mask(vk::AccessFlags2::SHADER_STORAGE_WRITE)
                     .dst_access_mask(vk::AccessFlags2::SHADER_STORAGE_READ)
                     .src_stage_mask(vk::PipelineStageFlags2::COMPUTE_SHADER)
                     .dst_stage_mask(vk::PipelineStageFlags2::TASK_SHADER_EXT)
-                    .size(vk::WHOLE_SIZE)
-                    ,
+                    .size(vk::WHOLE_SIZE),
             ];
 
             let compute_to_task_dependency_info =
@@ -250,12 +229,6 @@ impl ScreenData {
                 //     .cluster_draw_buffer
                 //     .get_buffer()
                 //     .fill(command_buffer, 0);
-
-                let q = i as _;
-                let query = core_draw.query && q == 0;
-                if query {
-                    core_draw.query_pool.reset(*command_buffer, q);
-                }
 
                 core_draw.range_buffer.get_buffer().fill(*command_buffer, 0);
 

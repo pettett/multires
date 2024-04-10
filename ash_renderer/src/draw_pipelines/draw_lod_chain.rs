@@ -134,111 +134,122 @@ pub fn create_lod_command_buffer(
 
                 command_buffer_writer.set_dynamic_screen(&renderer.screen);
 
+                let query = renderer.image_index == 0;
+
                 device.cmd_bind_pipeline(
                     *command_buffer_writer,
                     vk::PipelineBindPoint::GRAPHICS,
                     draw.graphics_pipeline.handle(),
                 );
 
-                let descriptor_sets_to_bind = [draw.descriptor_sets[renderer.image_index].handle()];
-                device.cmd_bind_descriptor_sets(
-                    *command_buffer_writer,
-                    vk::PipelineBindPoint::GRAPHICS,
-                    draw.graphics_pipeline.layout().handle(),
-                    0,
-                    &descriptor_sets_to_bind,
-                    &[],
-                );
+                {
+                    let _qry = query.then(|| {
+                        renderer
+                            .get_query_ref()
+                            .map(|pool| pool.begin_query(*command_buffer_writer, 0))
+                    });
 
-                device.cmd_bind_vertex_buffers(
-                    *command_buffer_writer,
-                    0,
-                    &[draw.vertex_buffer.handle()],
-                    &[0],
-                );
-
-                let mut prev_level = usize::MAX;
-
-                let (cam, cam_trans) = camera.single();
-
-                let draw = scene
-                    .uniform_transforms
-                    .par_iter()
-                    .map(|u| {
-                        let planes =
-                            planes_from_mat(scene.uniform_camera.culling_view_proj * u.model);
-                        // Calculate screen space error
-                        //let center = *transform.get_pos();
-                        // vec3 cam =  ubo.camera_pos;
-                        // vec3 center = (models[idy].model * vec4(clusters[idx].center, 1.0)).xyz ;
-
-                        let sphere = glam::Vec3A::ZERO.extend(mesh_data.size);
-
-                        if !sphere_inside_planes(&planes, sphere) {
-                            return None;
-                        }
-
-                        // float radius = length((models[idy].model * vec4(normalize(vec3(1)) * clusters[idx].radius, 0.0)).xyz);
-
-                        let mut level = 0;
-                        let mut current_error = 0.0;
-
-                        let local_cam_pos = u.inv_model.transform_point3a(*cam_trans.get_pos());
-
-                        while current_error <= scene.target_error
-                            && level < mesh_data.lod_chain.len()
-                        {
-                            // center is zero - model space
-                            // Offset distance by average position of a cluster
-                            let distance = (local_cam_pos.length() - mesh_data.size * 0.5).max(0.0);
-
-                            let err_radius = mesh_data.lod_chain[level].error
-                                + mesh_data.lod_chain[level].radius;
-
-                            // current_error =   ( mesh_data.lod_chain[level].radius * inv_distance) / mesh_data.lod_chain[level].error;
-                            current_error = err_radius * err_radius / distance;
-
-                            level += 1;
-                        }
-                        // rust doesn't have do-while
-                        level -= 1;
-
-                        Some(level)
-                    })
-                    .collect::<Vec<_>>();
-
-                for (transform, mesh) in meshes.iter() {
-                    if mesh.id >= scene.uniform_transforms.len() {
-                        continue;
-                    }
-
-                    let Some(level) = draw[mesh.id] else {
-                        continue;
-                    };
-
-                    // Draw
-
-                    if level != prev_level {
-                        device.cmd_bind_index_buffer(
-                            *command_buffer_writer,
-                            mesh_data.lod_chain[level].index_buffer.handle(),
-                            0,
-                            vk::IndexType::UINT32,
-                        );
-                        prev_level = level;
-                    }
-
-                    // Each instance has their own indirect drawing buffer, tracing out their position in the result buffer
-                    device.cmd_draw_indexed(
+                    let descriptor_sets_to_bind =
+                        [draw.descriptor_sets[renderer.image_index].handle()];
+                    device.cmd_bind_descriptor_sets(
                         *command_buffer_writer,
-                        mesh_data.lod_chain[level].index_buffer.len() as _,
-                        1,
+                        vk::PipelineBindPoint::GRAPHICS,
+                        draw.graphics_pipeline.layout().handle(),
                         0,
-                        0,
-                        mesh.id as _,
+                        &descriptor_sets_to_bind,
+                        &[],
                     );
-                }
 
+                    device.cmd_bind_vertex_buffers(
+                        *command_buffer_writer,
+                        0,
+                        &[draw.vertex_buffer.handle()],
+                        &[0],
+                    );
+
+                    let mut prev_level = usize::MAX;
+
+                    let (cam, cam_trans) = camera.single();
+
+                    let draw = scene
+                        .uniform_transforms
+                        .par_iter()
+                        .map(|u| {
+                            let planes =
+                                planes_from_mat(scene.uniform_camera.culling_view_proj * u.model);
+                            // Calculate screen space error
+                            //let center = *transform.get_pos();
+                            // vec3 cam =  ubo.camera_pos;
+                            // vec3 center = (models[idy].model * vec4(clusters[idx].center, 1.0)).xyz ;
+
+                            let sphere = glam::Vec3A::ZERO.extend(mesh_data.size);
+
+                            if !sphere_inside_planes(&planes, sphere) {
+                                return None;
+                            }
+
+                            // float radius = length((models[idy].model * vec4(normalize(vec3(1)) * clusters[idx].radius, 0.0)).xyz);
+
+                            let mut level = 0;
+                            let mut current_error = 0.0;
+
+                            let local_cam_pos = u.inv_model.transform_point3a(*cam_trans.get_pos());
+
+                            while current_error <= scene.target_error
+                                && level < mesh_data.lod_chain.len()
+                            {
+                                // center is zero - model space
+                                // Offset distance by average position of a cluster
+                                let distance =
+                                    (local_cam_pos.length() - mesh_data.size * 0.5).max(0.0);
+
+                                let err_radius = mesh_data.lod_chain[level].error
+                                    + mesh_data.lod_chain[level].radius;
+
+                                // current_error =   ( mesh_data.lod_chain[level].radius * inv_distance) / mesh_data.lod_chain[level].error;
+                                current_error = err_radius * err_radius / distance;
+
+                                level += 1;
+                            }
+                            // rust doesn't have do-while
+                            level -= 1;
+
+                            Some(level)
+                        })
+                        .collect::<Vec<_>>();
+
+                    for (transform, mesh) in meshes.iter() {
+                        if mesh.id >= scene.uniform_transforms.len() {
+                            continue;
+                        }
+
+                        let Some(level) = draw[mesh.id] else {
+                            continue;
+                        };
+
+                        // Draw
+
+                        if level != prev_level {
+                            device.cmd_bind_index_buffer(
+                                *command_buffer_writer,
+                                mesh_data.lod_chain[level].index_buffer.handle(),
+                                0,
+                                vk::IndexType::UINT32,
+                            );
+                            prev_level = level;
+                        }
+
+                        // Each instance has their own indirect drawing buffer, tracing out their position in the result buffer
+                        device.cmd_draw_indexed(
+                            *command_buffer_writer,
+                            mesh_data.lod_chain[level].index_buffer.len() as _,
+                            1,
+                            0,
+                            0,
+                            mesh.id as _,
+                        );
+                    }
+                }
                 device.cmd_end_render_pass(*command_buffer_writer);
             }
         }
@@ -306,8 +317,6 @@ impl DrawPipeline for DrawLODChain {
         // only ever top-up our commands - we dont need to reset on resize
     }
 
-    fn stats_gui(&mut self, _ui: &mut egui::Ui, _image_index: usize) {}
-
     fn cleanup(&mut self, commands: &mut Commands) {
         commands.remove_resource::<DrawLODChainData>()
     }
@@ -374,7 +383,7 @@ mod tests {
                 let distance = (local_cam_pos.length() - size * 0.5).max(0.0);
 
                 // current_error =   ( mesh_data.lod_chain[level].radius * inv_distance) / mesh_data.lod_chain[level].error;
-                current_error = calc_error(distance, lod_chain[level].0, lod_chain[level].1) ;
+                current_error = calc_error(distance, lod_chain[level].0, lod_chain[level].1);
 
                 level += 1;
             }

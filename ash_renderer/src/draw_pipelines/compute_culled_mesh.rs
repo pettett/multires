@@ -132,8 +132,6 @@ impl DrawPipeline for ComputeCulledMesh {
             render_pass,
         ));
     }
-
-    fn stats_gui(&mut self, _ui: &mut egui::Ui, _image_index: usize) {}
 }
 
 struct ScreenData {

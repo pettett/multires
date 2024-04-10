@@ -120,8 +120,6 @@ impl DrawPipeline for DrawFullRes {
             render_pass,
         ));
     }
-
-    fn stats_gui(&mut self, _ui: &mut egui::Ui, _image_index: usize) {}
 }
 
 struct ScreenData {

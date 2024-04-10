@@ -1,12 +1,19 @@
 use std::sync::Arc;
 
 use ash::vk;
-use raw_window_handle::{HasDisplayHandle, HasRawDisplayHandle, HasRawWindowHandle, HasWindowHandle};
+use raw_window_handle::{
+    HasDisplayHandle, HasRawDisplayHandle, HasRawWindowHandle, HasWindowHandle,
+};
 
-use super::{instance::Instance, macros::vk_handle_wrapper};
+use crate::VkHandle;
+
+use super::{
+    instance::Instance, macros::vk_handle_wrapper, physical_device::PhysicalDevice,
+    swapchain::SwapChainSupportDetail,
+};
 
 pub struct Surface {
-    pub instance: Arc<Instance>,
+    instance: Arc<Instance>,
     handle: vk::SurfaceKHR,
     screen_width: u32,
     screen_height: u32,
@@ -29,7 +36,7 @@ impl Surface {
         screen_width: u32,
         screen_height: u32,
     ) -> Arc<Surface> {
-        let surface = unsafe {
+        let handle = unsafe {
             ash_window::create_surface(
                 entry,
                 &instance,
@@ -42,9 +49,31 @@ impl Surface {
 
         Arc::new(Surface {
             instance,
-            handle: surface,
+            handle,
             screen_width,
             screen_height,
         })
+    }
+
+    pub fn swapchain_support(&self, physical_device: vk::PhysicalDevice) -> SwapChainSupportDetail {
+        unsafe {
+            let capabilities = self
+                .instance
+                .fn_surface
+                .get_physical_device_surface_capabilities(physical_device, self.handle())
+                .expect("Failed to query for surface capabilities.");
+            let formats = self
+                .instance
+                .fn_surface
+                .get_physical_device_surface_formats(physical_device, self.handle())
+                .expect("Failed to query for surface formats.");
+            let present_modes = self
+                .instance
+                .fn_surface
+                .get_physical_device_surface_present_modes(physical_device, self.handle())
+                .expect("Failed to query for surface present mode.");
+
+            SwapChainSupportDetail::new(capabilities, formats, present_modes)
+        }
     }
 }

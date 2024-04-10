@@ -31,7 +31,7 @@ pub struct ComputeCulledIndices {
     should_draw_pipeline: ComputePipeline,
     descriptor_sets: Vec<DescriptorSet>,
     screen: Option<ScreenData>,
-    should_cull_buffer: Arc<TBuffer<u32>>, 
+    should_cull_buffer: Arc<TBuffer<u32>>,
     draw_indexed_indirect_buffer: Arc<TBuffer<vk::DrawIndexedIndirectCommand>>,
     render_indices: RenderMultiresIndices,
 }
@@ -128,7 +128,7 @@ impl ComputeCulledIndices {
             descriptor_sets,
             screen: None,
             should_cull_buffer,
-            should_draw_pipeline, 
+            should_draw_pipeline,
             draw_indexed_indirect_buffer,
             render_indices,
         }
@@ -156,8 +156,6 @@ impl DrawPipeline for ComputeCulledIndices {
             render_pass,
         ));
     }
-
-    fn stats_gui(&mut self, _ui: &mut egui::Ui, _image_index: usize) {}
 }
 
 struct ScreenData {

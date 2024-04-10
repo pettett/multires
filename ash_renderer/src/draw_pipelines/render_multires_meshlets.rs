@@ -16,7 +16,7 @@ use crate::{
                 DescriptorPool, DescriptorSet, DescriptorSetLayout, DescriptorSetLayoutBinding,
                 DescriptorWriteData,
             },
-            query_pool::QueryPool,
+            query_pool::{MeshInvocationsQueryResults, QueryPool, TypelessQueryPool},
         },
         render_pass::RenderPass,
         screen::Screen,
@@ -26,9 +26,9 @@ use crate::{
 };
 
 use super::{
-    indirect_tasks::MeshInvocationsQueryResults, init_color_blend_attachment_states,
-    init_depth_state_create_info, init_multisample_state_create_info,
-    init_rasterization_statue_create_info, render_multires::RenderMultires, BufferRange,
+    init_color_blend_attachment_states, init_depth_state_create_info,
+    init_multisample_state_create_info, init_rasterization_statue_create_info,
+    render_multires::RenderMultires, BufferRange,
 };
 use crate::VkHandle;
 
@@ -37,8 +37,7 @@ pub struct RenderMultiresMeshlets {
     indirect_task_buffer: Arc<TBuffer<vk::DrawMeshTasksIndirectCommandEXT>>,
     range_buffer: Arc<TBuffer<BufferRange>>,
     descriptor_sets: Vec<DescriptorSet>,
-    query_pool: Arc<QueryPool<MeshInvocationsQueryResults>>,
-    query: bool,
+    query_pool: Option<Arc<TypelessQueryPool>>,
 }
 
 impl RenderMultiresMeshlets {
@@ -51,6 +50,7 @@ impl RenderMultiresMeshlets {
         indirect_task_buffer: Arc<TBuffer<vk::DrawMeshTasksIndirectCommandEXT>>,
         range_buffer: Arc<TBuffer<BufferRange>>,
         cluster_draw_buffer: Arc<TBuffer<u32>>,
+        query_pool: Option<Arc<TypelessQueryPool>>,
     ) -> Self {
         let ubo_layout = create_descriptor_set_layout(core);
 
@@ -73,20 +73,17 @@ impl RenderMultiresMeshlets {
             screen.swapchain().images.len(),
         );
 
-        let query_pool = QueryPool::new(core.device.clone(), 1);
-
         Self {
             graphics_pipeline,
             indirect_task_buffer,
             range_buffer,
             descriptor_sets,
             query_pool,
-            query: renderer.query,
         }
     }
 
-    pub fn query_pool(&self) -> &QueryPool<MeshInvocationsQueryResults> {
-        &self.query_pool
+    pub fn query_pool(&self) -> Option<&Arc<TypelessQueryPool>> {
+        self.query_pool.as_ref()
     }
 }
 
@@ -111,10 +108,7 @@ impl RenderMultires for RenderMultiresMeshlets {
         let descriptor_sets_to_bind = [*self.descriptor_sets[frame]];
 
         unsafe {
-            let query = self.query && frame == 0;
-            if query {
-                self.query_pool.reset(**cmd, frame as _);
-            }
+            let query = frame == 0;
 
             device.cmd_begin_render_pass(
                 **cmd,
@@ -131,7 +125,9 @@ impl RenderMultires for RenderMultiresMeshlets {
             );
             {
                 let _qry = if query {
-                    Some(self.query_pool.begin_query(**cmd, frame as _))
+                    self.query_pool
+                        .as_ref()
+                        .map(|pool| pool.begin_query(**cmd, frame as _))
                 } else {
                     None
                 };

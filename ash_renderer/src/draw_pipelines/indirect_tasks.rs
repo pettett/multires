@@ -21,7 +21,7 @@ use crate::{
                 DescriptorPool, DescriptorSet, DescriptorSetLayout, DescriptorSetLayoutBinding,
                 DescriptorWriteData,
             },
-            query_pool::{QueryPool, QueryResult},
+            query_pool::{QueryPool, QueryResult, TypelessQueryPool},
         },
         render_pass::RenderPass,
         screen::Screen,
@@ -34,17 +34,6 @@ use super::{
     init_color_blend_attachment_states, init_depth_state_create_info,
     init_multisample_state_create_info, init_rasterization_statue_create_info, DrawPipeline,
 };
-#[derive(bytemuck::Zeroable, Copy, Clone)]
-pub struct MeshInvocationsQueryResults {
-    pub mesh: u32,
-    pub avail: u32,
-}
-
-impl QueryResult for MeshInvocationsQueryResults {
-    fn flags() -> vk::QueryPipelineStatisticFlags {
-        vk::QueryPipelineStatisticFlags::MESH_SHADER_INVOCATIONS_EXT
-    }
-}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum MeshShaderMode {
@@ -60,12 +49,8 @@ pub struct IndirectTasks {
     core: Arc<Core>,
     indirect_task_buffer: Arc<TBuffer<vk::DrawMeshTasksIndirectCommandEXT>>,
 
-    // Evaluation data
-    last_sample: time::Instant,
-    mesh_invocations: RollingMeasure<u32, 60>,
     //task_invocations: RollingMeasure<u32, 60>,
-    query_pool: Arc<QueryPool<MeshInvocationsQueryResults>>,
-    query: bool,
+    query_pool: Option<Arc<TypelessQueryPool>>,
 }
 
 impl IndirectTasks {
@@ -124,19 +109,14 @@ impl IndirectTasks {
             screen.swapchain().images.len(),
         );
 
-        let query_pool = QueryPool::new(core.device.clone(), 1);
-
         Self {
             graphics_pipeline,
             descriptor_sets,
             descriptor_pool: renderer.descriptor_pool.clone(),
             screen: None,
             indirect_task_buffer,
-            query_pool,
-            query: renderer.query,
+            query_pool: renderer.get_query(),
             core,
-            last_sample: time::Instant::now(),
-            mesh_invocations: Default::default(),
             //task_invocations: Default::default(),
         }
     }
@@ -163,21 +143,6 @@ impl DrawPipeline for IndirectTasks {
             render_pass,
             &self.indirect_task_buffer,
         ));
-    }
-
-    fn stats_gui(&mut self, ui: &mut egui::Ui, image_index: usize) {
-        if image_index == 0 && self.last_sample.elapsed() > time::Duration::from_secs_f32(0.01) {
-            if let Some(results) = self.query_pool.get_results(0) {
-                assert!(results.avail > 0);
-
-                self.mesh_invocations.tick(results.mesh);
-            }
-
-            self.last_sample = time::Instant::now();
-        }
-
-        self.mesh_invocations.gui("Mesh Invocations", ui);
-        //self.task_invocations.gui("Task Invocations", ui);
     }
 }
 
@@ -212,11 +177,8 @@ impl ScreenData {
                 .clear_values(&CLEAR_VALUES);
 
             unsafe {
-                let q = i as _;
-                let query = core_draw.query && q == 0;
-                if query {
-                    core_draw.query_pool.reset(*command_buffer, q);
-                }
+                let q = i as u32;
+                let query = q == 0;
 
                 device.cmd_begin_render_pass(
                     *command_buffer,
@@ -228,7 +190,10 @@ impl ScreenData {
                 // ---------- Pipeline bound, use queries
                 {
                     let _qry = if query {
-                        Some(core_draw.query_pool.begin_query(*command_buffer, q))
+                        core_draw
+                            .query_pool
+                            .as_ref()
+                            .map(|pool| pool.begin_query(*command_buffer, i as _))
                     } else {
                         None
                     };
@@ -370,18 +335,15 @@ fn create_graphics_pipeline(
         vk::PipelineShaderStageCreateInfo::default()
             .module(task_shader_module.handle())
             .name(&main_function_name)
-            .stage(vk::ShaderStageFlags::TASK_EXT)
-            ,
+            .stage(vk::ShaderStageFlags::TASK_EXT),
         vk::PipelineShaderStageCreateInfo::default()
             .module(mesh_shader_module.handle())
             .name(&main_function_name)
-            .stage(vk::ShaderStageFlags::MESH_EXT)
-            ,
+            .stage(vk::ShaderStageFlags::MESH_EXT),
         vk::PipelineShaderStageCreateInfo::default()
             .module(frag_shader_module.handle())
             .name(&main_function_name)
-            .stage(vk::ShaderStageFlags::FRAGMENT)
-            ,
+            .stage(vk::ShaderStageFlags::FRAGMENT),
     ];
 
     // let binding_description = VertexV3::get_binding_descriptions();
@@ -420,8 +382,7 @@ fn create_graphics_pipeline(
 
     let viewport_state_create_info = vk::PipelineViewportStateCreateInfo::default()
         .scissors(&scissors)
-        .viewports(&viewports)
-        ;
+        .viewports(&viewports);
 
     let rasterization_statue_create_info = init_rasterization_statue_create_info();
 
@@ -451,8 +412,7 @@ fn create_graphics_pipeline(
         .color_blend_state(&color_blend_state)
         .dynamic_state(&dynamic_state_info)
         .layout(pipeline_layout.handle())
-        .render_pass(render_pass.handle())
-        ];
+        .render_pass(render_pass.handle())];
 
     let graphics_pipelines = unsafe {
         core.device

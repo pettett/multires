@@ -67,7 +67,8 @@ impl Instance {
         let mut extension_names = required_instance_extensions.get_extensions_raw_names();
 
         extension_names.extend_from_slice(
-            ash_window::enumerate_required_extensions(window.raw_display_handle().unwrap()).unwrap(),
+            ash_window::enumerate_required_extensions(window.raw_display_handle().unwrap())
+                .unwrap(),
         );
 
         let requred_validation_layer_raw_names: Vec<CString> = required_validation_layers
@@ -111,10 +112,7 @@ impl Instance {
 
         let fn_surface = ash::khr::surface::Instance::new(entry, &handle);
 
-        Arc::new(Self {
-            handle,
-            fn_surface,
-        })
+        Arc::new(Self { handle, fn_surface })
     }
 
     pub fn find_depth_format(&self, physical_device: vk::PhysicalDevice) -> vk::Format {
@@ -190,9 +188,10 @@ impl Instance {
         });
 
         match result {
-            Some((p_physical_device, supported_extensions)) => Arc::new(PhysicalDevice::new(
+            Some((p_physical_device, (swapchain_support, supported_extensions))) => Arc::new(PhysicalDevice::new(
                 *p_physical_device,
                 self.clone(),
+				swapchain_support,
                 supported_extensions,
             )),
             None => panic!("Failed to find a suitable GPU!"),
@@ -202,13 +201,13 @@ impl Instance {
     pub fn is_physical_device_suitable(
         &self,
         physical_device: vk::PhysicalDevice,
-        surface_stuff: &Surface,
+        surface: &Surface,
         required_device_extensions: &Extensions,
         optional_device_extensions: &Extensions,
-    ) -> Option<Extensions> {
+    ) -> Option<(SwapChainSupportDetail, Extensions)> {
         let device_features = unsafe { self.handle.get_physical_device_features(physical_device) };
 
-        let indices = self.find_queue_family(physical_device, surface_stuff);
+        let indices = self.find_queue_family(physical_device, surface);
 
         let is_queue_family_supported = indices.is_complete();
         let present_required_extensions =
@@ -216,19 +215,25 @@ impl Instance {
         let present_optional_extensions =
             optional_device_extensions.get_device_extension_support(physical_device, self);
 
-        let is_swapchain_supported = if present_required_extensions == *required_device_extensions {
-            let swapchain_support = SwapChainSupportDetail::query(physical_device, surface_stuff);
-            !swapchain_support.formats.is_empty() && !swapchain_support.present_modes.is_empty()
+        let supported_swapchain = if present_required_extensions == *required_device_extensions {
+            let swapchain_support = surface.swapchain_support(physical_device);
+            swapchain_support.supported().then(|| swapchain_support)
         } else {
-            false
+            None
         };
         let is_support_sampler_anisotropy = device_features.sampler_anisotropy == 1;
 
         (is_queue_family_supported
             && present_required_extensions == *required_device_extensions
-            && is_swapchain_supported
             && is_support_sampler_anisotropy)
-            .then(|| present_required_extensions.union(&present_optional_extensions))
+            .then(|| {
+                supported_swapchain.map(|s| {
+                    (
+                        s,
+                        present_required_extensions.union(&present_optional_extensions),
+                    )
+                })
+            }).flatten()
     }
 
     pub fn find_queue_family(

@@ -1,3 +1,5 @@
+use std::time;
+
 use ash::vk;
 use bevy_ecs::prelude::*;
 use common_renderer::{
@@ -153,7 +155,11 @@ pub fn draw_gui(
         .show(ctx, |ui| {
             {
                 ui.checkbox(&mut scene.freeze_pos, "Freeze");
-                ui.add(egui::Slider::new(&mut scene.target_error, 0.0..=100000.0).logarithmic(true).text("Target Error"));
+                ui.add(
+                    egui::Slider::new(&mut scene.target_error, 0.0..=100000.0)
+                        .logarithmic(true)
+                        .text("Target Error"),
+                );
                 ui.add(egui::Slider::new(&mut scene.dist_pow, 0.001..=3.0).text("Distance Power"));
             }
 
@@ -248,7 +254,17 @@ pub fn draw_gui(
             }
 
             if renderer.query {
-                renderer.draw_pipeline.stats_gui(ui, 0);
+                if renderer.last_sample.elapsed() > time::Duration::from_secs_f32(0.01) {
+                    if let Some(results) = renderer.query_primitives.get_results(0) {
+                        assert!(results.avail > 0);
+
+                        renderer.primitives.tick(results.clipping_primitives);
+                    }
+
+                    renderer.last_sample = time::Instant::now();
+                }
+
+                renderer.primitives.gui("Clipping Primitives", ui);
             }
         });
 

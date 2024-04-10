@@ -16,7 +16,7 @@ use crate::{
     utility::{
         // the mod define some fixed functions that have been learned before.
         constants::*,
-        pooled::descriptor_pool::DescriptorPool,
+        pooled::{descriptor_pool::DescriptorPool, query_pool::QueryPool},
         render_pass::RenderPass,
         screen::{find_depth_format, Screen},
         swapchain::SwapChainSupportDetail,
@@ -49,8 +49,8 @@ use common_renderer::{
 use glam::{Quat, Vec3A};
 use gpu_allocator::{vulkan::*, AllocationSizes, AllocatorDebugSettings};
 
-use std::sync::Arc;
-use std::sync::Mutex;
+use std::{default, sync::Arc};
+use std::{sync::Mutex, time};
 use winit::event::WindowEvent;
 
 pub struct App {
@@ -69,7 +69,7 @@ impl App {
     }
 
     pub fn input(&mut self, event: &WindowEvent) -> bool {
-		let core = self.renderer().core.clone();
+        let core = self.renderer().core.clone();
 
         if self
             .world
@@ -133,7 +133,7 @@ impl App {
 
         let mut screen = Screen::new(core.clone());
 
-        let swapchain_support = SwapChainSupportDetail::query(physical_device.handle(), surface);
+        let swapchain_support = surface.swapchain_support(physical_device.handle());
 
         let surface_format = swapchain_support.choose_swapchain_format().format;
         let depth_format = find_depth_format(&instance, physical_device);
@@ -292,12 +292,15 @@ impl App {
             is_framebuffer_resized: false,
             app_info_open: true,
             render_gui: true, // disable GUI during benchmarks
+            query_primitives: QueryPool::new(device.clone(), 1),
             core,
             screen,
             fragment: Fragment::Lit,
             hacky_command_buffer_passthrough: None,
             image_index: 0,
             is_suboptimal: false,
+            last_sample: time::Instant::now(),
+            primitives: Default::default(),
         });
         world.insert_non_send_resource(gui);
         world.insert_resource(mesh);

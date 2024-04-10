@@ -29,9 +29,6 @@ pub trait DrawPipeline {
 
     fn init_swapchain(&mut self, core: &Core, screen: &Screen, render_pass: &RenderPass);
 
-    /// Draw our stats UI
-    fn stats_gui(&mut self, ui: &mut egui::Ui, frame_index: usize);
-
     /// Notification that the scene has changed, so we need to rebind to model buffers / update for new instances
     fn on_scene_dirty(&mut self) {}
 
@@ -41,7 +38,8 @@ pub trait DrawPipeline {
     fn cleanup(&mut self, commands: &mut Commands) {}
 }
 
-pub fn init_rasterization_statue_create_info() -> vk::PipelineRasterizationStateCreateInfo<'static> {
+pub fn init_rasterization_statue_create_info() -> vk::PipelineRasterizationStateCreateInfo<'static>
+{
     vk::PipelineRasterizationStateCreateInfo::default()
         .depth_clamp_enable(false)
         .cull_mode(vk::CullModeFlags::BACK)

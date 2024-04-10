@@ -9,38 +9,21 @@ use super::{
     queue_family_indices::QueueFamilyIndices, surface::Surface,
 };
 pub struct SwapChainSupportDetail {
-    pub capabilities: vk::SurfaceCapabilitiesKHR,
-    pub formats: Vec<vk::SurfaceFormatKHR>,
-    pub present_modes: Vec<vk::PresentModeKHR>,
+    capabilities: vk::SurfaceCapabilitiesKHR,
+    formats: Vec<vk::SurfaceFormatKHR>,
+    present_modes: Vec<vk::PresentModeKHR>,
 }
 
 impl SwapChainSupportDetail {
-    pub fn query(physical_device: vk::PhysicalDevice, surface: &Surface) -> Self {
-        unsafe {
-            let capabilities = surface
-                .instance
-                .fn_surface
-                .get_physical_device_surface_capabilities(physical_device, surface.handle())
-                .expect("Failed to query for surface capabilities.");
-            let formats = surface
-                .instance
-                .fn_surface
-                .get_physical_device_surface_formats(physical_device, surface.handle())
-                .expect("Failed to query for surface formats.");
-            let present_modes = surface
-                .instance
-                .fn_surface
-                .get_physical_device_surface_present_modes(physical_device, surface.handle())
-                .expect("Failed to query for surface present mode.");
+    pub fn new(capabilities: vk::SurfaceCapabilitiesKHR, formats: Vec<vk::SurfaceFormatKHR>, present_modes: Vec<vk::PresentModeKHR>) -> Self {
+		Self { capabilities, formats, present_modes }
+	}
+	
+	pub fn supported(&self) -> bool {
+		!self.formats.is_empty() && !self.present_modes.is_empty()
+	}
 
-            Self {
-                capabilities,
-                formats,
-                present_modes,
-            }
-        }
-    }
-    pub fn choose_swapchain_format(&self) -> vk::SurfaceFormatKHR {
+	pub fn choose_swapchain_format(&self) -> vk::SurfaceFormatKHR {
         for available_format in &self.formats {
             if available_format.format == vk::Format::B8G8R8A8_SRGB
                 && available_format.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR
@@ -50,6 +33,73 @@ impl SwapChainSupportDetail {
         }
 
         return *self.formats.first().unwrap();
+    }
+
+    fn choose_swapchain_present_mode(&self) -> vk::PresentModeKHR {
+        println!("Available swapchain modes: {:?}", self.present_modes);
+
+        assert!(
+            self.present_modes.len() > 0,
+            "Swapchain has no viable modes"
+        );
+
+        // https://vulkan-tutorial.com/Drawing_a_triangle/Presentation/Swap_chain
+        // VK_PRESENT_MODE_IMMEDIATE_KHR: Images submitted by your application are transferred to the screen
+        //			right away, which may result in tearing.
+        // VK_PRESENT_MODE_FIFO_KHR: The swap chain is a queue where the display
+        // 			takes an image from the front of the queue when the display is refreshed
+        // 			and the program inserts rendered images at the back of the queue. If the queue
+        // 			is full then the program has to wait. This is most similar to vertical sync as
+        // 			found in modern games. The moment that the display is refreshed is known as "vertical blank".
+        // VK_PRESENT_MODE_FIFO_RELAXED_KHR: This mode only differs from the previous one if the
+        //			application is late and the queue was empty at the last vertical blank.
+        //			Instead of waiting for the next vertical blank, the image is transferred right
+        //			away when it finally arrives. This may result in visible tearing.
+        // VK_PRESENT_MODE_MAILBOX_KHR: This is another variation of the second mode. Instead of blocking the
+        // 			application when the queue is full, the images that are already queued are simply replaced with the
+        //			newer ones. This mode can be used to render frames as fast as possible while still avoiding tearing,
+        //			resulting in fewer latency issues than standard vertical sync. This is commonly known as "triple buffering",
+        //			although the existence of three buffers alone does not necessarily mean that the framerate is unlocked.
+
+        for desired in [
+            vk::PresentModeKHR::MAILBOX,      // Triple buffering
+            vk::PresentModeKHR::IMMEDIATE,    // screen tearing
+            vk::PresentModeKHR::FIFO_RELAXED, // Vsync but slightly better
+            vk::PresentModeKHR::FIFO,         // Vsync creates massive input lag
+        ] {
+            if self.present_modes.contains(&desired) {
+                return desired;
+            }
+        }
+
+        unreachable!()
+    }
+
+    fn choose_swapchain_extent(&self, window: &winit::window::Window) -> vk::Extent2D {
+        if self.capabilities.current_extent.width != u32::max_value() {
+            self.capabilities.current_extent
+        } else {
+            use num::clamp;
+
+            let window_size = window.inner_size();
+            println!(
+                "\t\tInner Window Size: ({}, {})",
+                window_size.width, window_size.height
+            );
+
+            vk::Extent2D {
+                width: clamp(
+                    window_size.width,
+                    self.capabilities.min_image_extent.width.max(1),
+                    self.capabilities.max_image_extent.width,
+                ),
+                height: clamp(
+                    window_size.height,
+                    self.capabilities.min_image_extent.height.max(1),
+                    self.capabilities.max_image_extent.height,
+                ),
+            }
+        }
     }
 }
 
@@ -84,11 +134,11 @@ impl Swapchain {
         queue_family: &QueueFamilyIndices,
         old_swapchain: Option<&Swapchain>,
     ) -> Swapchain {
-        let swapchain_support = SwapChainSupportDetail::query(physical_device.handle(), &surface);
+        let swapchain_support = surface.swapchain_support(physical_device.handle());
 
         let surface_format = swapchain_support.choose_swapchain_format();
-        let present_mode = Self::choose_swapchain_present_mode(&swapchain_support.present_modes);
-        let extent = Self::choose_swapchain_extent(&swapchain_support.capabilities, window);
+        let present_mode = swapchain_support.choose_swapchain_present_mode();
+        let extent = swapchain_support.choose_swapchain_extent(window);
 
         let image_count = swapchain_support.capabilities.min_image_count + 1;
         let image_count = if swapchain_support.capabilities.max_image_count > 0 {
@@ -154,78 +204,6 @@ impl Swapchain {
             surface_format,
             extent,
             images,
-        }
-    }
-
-    fn choose_swapchain_present_mode(
-        available_present_modes: &[vk::PresentModeKHR],
-    ) -> vk::PresentModeKHR {
-        println!("Available swapchain modes: {:?}", available_present_modes);
-
-        assert!(
-            available_present_modes.len() > 0,
-            "Swapchain has no viable modes"
-        );
-
-        // https://vulkan-tutorial.com/Drawing_a_triangle/Presentation/Swap_chain
-        // VK_PRESENT_MODE_IMMEDIATE_KHR: Images submitted by your application are transferred to the screen
-        //			right away, which may result in tearing.
-        // VK_PRESENT_MODE_FIFO_KHR: The swap chain is a queue where the display
-        // 			takes an image from the front of the queue when the display is refreshed
-        // 			and the program inserts rendered images at the back of the queue. If the queue
-        // 			is full then the program has to wait. This is most similar to vertical sync as
-        // 			found in modern games. The moment that the display is refreshed is known as "vertical blank".
-        // VK_PRESENT_MODE_FIFO_RELAXED_KHR: This mode only differs from the previous one if the
-        //			application is late and the queue was empty at the last vertical blank.
-        //			Instead of waiting for the next vertical blank, the image is transferred right
-        //			away when it finally arrives. This may result in visible tearing.
-        // VK_PRESENT_MODE_MAILBOX_KHR: This is another variation of the second mode. Instead of blocking the
-        // 			application when the queue is full, the images that are already queued are simply replaced with the
-        //			newer ones. This mode can be used to render frames as fast as possible while still avoiding tearing,
-        //			resulting in fewer latency issues than standard vertical sync. This is commonly known as "triple buffering",
-        //			although the existence of three buffers alone does not necessarily mean that the framerate is unlocked.
-
-        for desired in [
-            vk::PresentModeKHR::MAILBOX,
-            vk::PresentModeKHR::IMMEDIATE, // screen tearing
-            vk::PresentModeKHR::FIFO_RELAXED, // Vsync but slightly better
-            vk::PresentModeKHR::FIFO, // Vsync creates massive input lag
-        ] {
-            if available_present_modes.contains(&desired) {
-                return desired;
-            }
-        }
-
-        unreachable!()
-    }
-
-    fn choose_swapchain_extent(
-        capabilities: &vk::SurfaceCapabilitiesKHR,
-        window: &winit::window::Window,
-    ) -> vk::Extent2D {
-        if capabilities.current_extent.width != u32::max_value() {
-            capabilities.current_extent
-        } else {
-            use num::clamp;
-
-            let window_size = window.inner_size();
-            println!(
-                "\t\tInner Window Size: ({}, {})",
-                window_size.width, window_size.height
-            );
-
-            vk::Extent2D {
-                width: clamp(
-                    window_size.width,
-                    capabilities.min_image_extent.width.max(1),
-                    capabilities.max_image_extent.width,
-                ),
-                height: clamp(
-                    window_size.height,
-                    capabilities.min_image_extent.height.max(1),
-                    capabilities.max_image_extent.height,
-                ),
-            }
         }
     }
 }
