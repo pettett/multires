@@ -8,6 +8,7 @@ use common_renderer::components::{camera::Camera, transform::Transform};
 use crate::{spiral::Spiral, utility::buffer::TBuffer};
 
 use super::{
+    app::AssetLib,
     mesh_data::MeshData,
     renderer::{MeshDrawingPipelineType, Renderer},
 };
@@ -102,7 +103,7 @@ impl Scene {
 pub fn process_scene_events(
     mut scene: ResMut<Scene>,
     renderer: Res<Renderer>,
-    mesh_data: Res<MeshData>,
+    mesh_data: Res<AssetLib<MeshData>>,
     mut commands: Commands,
     mut event_read: EventReader<SceneEvent>,
     mut draw_write: EventWriter<MeshDrawingPipelineType>,
@@ -116,7 +117,8 @@ pub fn process_scene_events(
 
                     let mut transform = Transform::new_pos(p);
 
-                    *transform.scale_mut() = glam::Vec3A::ONE * 30.0 / mesh_data.size;
+                    *transform.scale_mut() =
+                        glam::Vec3A::ONE * 30.0 / mesh_data.get(&renderer.mesh).size;
 
                     commands.spawn((
                         transform,

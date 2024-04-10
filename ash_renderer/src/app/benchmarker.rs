@@ -4,7 +4,7 @@ use bevy_ecs::prelude::*;
 use common_renderer::components::{camera::Camera, transform::Transform};
 use glam::Vec3A;
 
-use crate::app::scene::SceneEvent;
+use crate::{app::scene::SceneEvent, Config};
 
 use super::{fps_limiter::FPSMeasure, renderer::Renderer};
 
@@ -28,7 +28,7 @@ pub struct Benchmarker {
 
     total_instances: usize,
 
-    results: Vec<(usize, Vec<(f32, f32)>)>,
+    results: Vec<(usize, Vec<(f32, f32, u32)>)>,
 }
 
 impl Benchmarker {
@@ -50,11 +50,15 @@ impl Benchmarker {
         }
     }
 
-    pub fn record(&self, renderer: &Renderer) {
+    pub fn record(&self, renderer: &Renderer, config: &Config) {
         // Output all results to files
 
         let t = chrono::offset::Local::now().format("%Y-%m-%d(%H-%M)");
-        let p = format!("benchmark/{:?}/{t}", renderer.current_pipeline);
+        let p = format!(
+            "benchmark/{:?}{}/{t}",
+            renderer.current_pipeline,
+            renderer.mesh.split('/').skip(1).next().unwrap()
+        );
 
         println!("Making dir  {:?}", p);
 
@@ -65,8 +69,8 @@ impl Benchmarker {
         for (i, r) in &self.results {
             let mut f =
                 fs::File::create(format!("{p}/{i}.txt")).expect("Failed to create log file");
-            for (t, dt) in r {
-                writeln!(&mut f, "{t}, {dt}").expect("Failed to write line in file");
+            for (t, dt, prims) in r {
+                writeln!(&mut f, "{t}, {dt}, {prims}").expect("Failed to write line in file");
             }
         }
     }
@@ -78,6 +82,7 @@ pub fn benchmark(
     mut commands: Commands,
     mut scene_events: EventWriter<SceneEvent>,
     mut renderer: ResMut<Renderer>,
+    config: Res<Config>,
     time: Res<FPSMeasure>,
 ) {
     if let Some(mut bench) = benchmarker {
@@ -93,7 +98,7 @@ pub fn benchmark(
                 bench.t = 0.0;
                 if i == bench.max_runs {
                     // cleanup
-                    bench.record(&renderer);
+                    bench.record(&renderer, &config);
                     renderer.render_gui = true;
                     commands.remove_resource::<Benchmarker>();
                 } else {
@@ -122,7 +127,11 @@ pub fn benchmark(
                 bench.t += time.delta_time() / bench.time;
                 // use longer running deltatime for recording
                 let t = bench.t;
-                bench.results[i].1.push((t, time.long_delta_time()));
+                bench.results[i].1.push((
+                    t,
+                    time.long_delta_time(),
+                    renderer.primitives.last_sample(),
+                ));
                 camera.set_pos(bench.start.lerp(bench.end, bench.t));
                 camera.look_at(Vec3A::ZERO);
                 if bench.t > 1.0 {

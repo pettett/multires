@@ -17,7 +17,7 @@ fn main() {
     let config: Config = toml::from_str(&contents).unwrap();
 
     let program_proc = ProgramProc::new();
-    let vulkan_app = App::new(&program_proc.event_loop, &config);
+    let vulkan_app = App::new(&program_proc.event_loop, config);
 
     program_proc.main_loop(vulkan_app);
 }

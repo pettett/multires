@@ -3,7 +3,6 @@ const uint MAX_CHILDREN = 5;
 // Use minimim of co_parent errors. Causes weirdness otherwise for some reason
 #define MIN_ERROR
 
-
 const float LARGE_ERROR = 100000000000000000.0;
 
 // Define INVOKE_PER_CLUSTER to say that workgroup count corresponds to maximum cluster being evaluated
@@ -18,28 +17,33 @@ uint max_cluster() {
 }
 
 // Calculate the error of a single cluster based on the local camera position.
-float cluster_error(uint idx, vec3 local_cam_pos) {
+float cluster_error(uint idx, uint instance_index, vec3 local_cam_pos) {
 	bool out_of_range = idx >= max_cluster();
 	if (out_of_range) {
 		return LARGE_ERROR;
 	} else {
-		vec3 center = clusters[idx].center;
+
+		float scale = max(max(length(models[instance_index].model[0]), length(models[instance_index].model[1])),
+						  length(models[instance_index].model[2]));
+
+		vec3 center = (models[instance_index].model * vec4(clusters[idx].center, 1.0)).xyz;
 		// vec3 cam =  ubo.camera_pos;
 		// vec3 center = (models[idy].model * vec4(clusters[idx].center, 1.0)).xyz ;
-		float radius = clusters[idx].radius;
+		float radius = clusters[idx].radius * scale;
 		// float radius = length((models[idy].model * vec4(normalize(vec3(1)) * clusters[idx].radius, 0.0)).xyz);
-		float error = clusters[idx].error;
+		float error = clusters[idx].error * scale;
 
 		vec3 dist_vec = center - local_cam_pos;
 		float sqr_center_distance = (dot(dist_vec, dist_vec));
 
-		float err_radius = error + radius;
+		// float err_radius = radius;
 
-		return (err_radius * err_radius) * inversesqrt(sqr_center_distance);
+		float screen_space_area = (radius * radius) / (sqr_center_distance);
+
+		return screen_space_area * error;
 		// return clusters[idx].error;
 	}
 }
-
 
 // float cluster_error(uint idx, vec3 local_cam_pos) {
 // 	bool out_of_range = idx >= max_cluster();
@@ -55,16 +59,14 @@ float cluster_error(uint idx, vec3 local_cam_pos) {
 
 // 		vec3 dist_vec = center - local_cam_pos;
 // 		float sqr_center_distance = (dot(dist_vec, dist_vec));
- 
 
 // 		return (radius * inversesqrt(sqr_center_distance)) / error;
 // 		// return clusters[idx].error;
 // 	}
 // }
 
-
 // Generate the parent error by taking the minimum or maximum of the cluster's parent error.
-float get_parent_error(uint cluster_index, vec3 local_cam_pos) {
+float get_parent_error(uint cluster_index, uint instance_index, vec3 local_cam_pos) {
 	// lots of zeros - clusters at the end are always avaliable to draw
 	float parent_error = LARGE_ERROR;
 
@@ -73,15 +75,17 @@ float get_parent_error(uint cluster_index, vec3 local_cam_pos) {
 
 	if (parent0 >= 0) { // If we have one parent, we are guarenteed to have another.
 #ifdef MIN_ERROR
-		parent_error = min(cluster_error(uint(parent0), local_cam_pos), cluster_error(uint(parent1), local_cam_pos));
+		parent_error = min(cluster_error(uint(parent0), instance_index, local_cam_pos),
+						   cluster_error(uint(parent1), instance_index, local_cam_pos));
 #else
-		parent_error = max(cluster_error(uint(parent0), local_cam_pos), cluster_error(uint(parent1), local_cam_pos));
+		parent_error = max(cluster_error(uint(parent0), instance_index, local_cam_pos),
+						   cluster_error(uint(parent1), instance_index, local_cam_pos));
 #endif
 	}
 	return parent_error;
 }
 // Generate this error by looking at the cluster error and its co parents error
-float get_this_error(uint cluster_index, vec3 local_cam_pos) {
+float get_this_error(uint cluster_index, uint instance_index, vec3 local_cam_pos) {
 	// lots of negative zeros - clusters at the base are always avaliable to draw
 	float this_error = -LARGE_ERROR;
 
@@ -89,9 +93,11 @@ float get_this_error(uint cluster_index, vec3 local_cam_pos) {
 
 	if (co_parent >= 0) {
 #ifdef MIN_ERROR
-		this_error = min(cluster_error(cluster_index, local_cam_pos), cluster_error(uint(co_parent), local_cam_pos));
+		this_error = min(cluster_error(cluster_index, instance_index, local_cam_pos),
+						 cluster_error(uint(co_parent), instance_index, local_cam_pos));
 #else
-		this_error = max(cluster_error(cluster_index, local_cam_pos), cluster_error(uint(co_parent), local_cam_pos));
+		this_error = max(cluster_error(cluster_index, instance_index, local_cam_pos),
+						 cluster_error(uint(co_parent), instance_index, local_cam_pos));
 #endif
 	}
 
@@ -120,14 +126,15 @@ float get_this_error(uint cluster_index, vec3 local_cam_pos) {
 // outputs the local camera position for further use and And high error if the reason that this cluster cannot be drawn
 // is because its error is too high.
 bool cluster_can_draw(uint cluster_index, uint instance_index, out vec3 local_cam_pos, out bool high_error) {
-	local_cam_pos = (models[instance_index].inv_model * vec4(ubo.camera_pos, 1.0)).xyz;
+	vec4 local_cam_pos_xyzw = (models[instance_index].inv_model * vec4(ubo.camera_pos, 1.0));
+	local_cam_pos = local_cam_pos_xyzw.xyz / local_cam_pos_xyzw.w;
 	// Calculate if this cluster should be drawn:
 	// draw_error >= min(self.error, self.co-parent.error)
 	// draw_error < min(parent0.error, parent1.error)
-	float parent_error = get_parent_error(cluster_index, local_cam_pos);
-	float this_error = get_this_error(cluster_index, local_cam_pos);
+	float parent_error = get_parent_error(cluster_index, instance_index, ubo.camera_pos);
+	float this_error = get_this_error(cluster_index, instance_index, ubo.camera_pos);
 
-	float error = ubo.target_error * ubo.target_error * ubo.target_error;
+	float error = ubo.target_error;
 
 	high_error = error < this_error;
 	bool draw = error >= this_error && error < parent_error;

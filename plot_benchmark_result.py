@@ -5,6 +5,12 @@ import os
 
 data: dict[str, dict[str, dict[str, np.ndarray]]] = {}
 
+FRAMETIME = 1
+PRIMS = 2
+metrics = {FRAMETIME: "Frame time (ms)", PRIMS: "Clipped Primitives"}
+scales = {FRAMETIME: 1000, PRIMS: 1}
+
+
 for d1 in os.listdir("benchmark/"):
     print(d1)
     data[d1] = {}
@@ -17,28 +23,31 @@ for d1 in os.listdir("benchmark/"):
     for f in os.listdir(f"benchmark/{d1}/{d2}"):
 
         print(f)
-        data[d1][d2][f.split(".")[0]] = np.loadtxt(
-            f"benchmark/{d1}/{d2}/{f}", delimiter=","
-        )
+
+        txt = np.loadtxt(f"benchmark/{d1}/{d2}/{f}", delimiter=",")
+        if txt.shape[1] >= 3:  # require PRIMS update
+            data[d1][d2][f.split(".")[0]] = txt
+
+dragon = "ExpandingComputeCulledMeshdragon_high.glb.bin"
+torrin = "ExpandingComputeCulledMeshtorrin_main.glb.bin"
 
 forms = {
     "ExpandingComputeCulledMesh": "-",
+    dragon: "-",
+    torrin: "-",
     "IndirectTasks": "-.",
     "DrawIndirect": "--",
     "DrawLOD": ":",
 }
 names = {
     "ExpandingComputeCulledMesh": "DAG Explore",
+    dragon: "1000K Tris",
+    torrin: "600K Tris",
     "IndirectTasks": "Task Select",
     "DrawIndirect": "Instanced Full Resolution",
     "DrawLOD": "LOD Chain",
 }
-alphas = {
-    "ExpandingComputeCulledMesh": 1.0,
-    "IndirectTasks": 1.0,
-    "DrawIndirect": 1.0,
-    "DrawLOD": 1.0,
-}
+
 
 cols = {
     "ExpandingComputeCulledMesh": {
@@ -47,6 +56,20 @@ cols = {
         "1500": "C4",
         "2000": "C6",
         "2500": "C8",
+    },
+    dragon: {
+        "500": "C0",
+        "1000": "C2",
+        "1500": "C4",
+        "2000": "C6",
+        "2500": "C8",
+    },
+    torrin: {
+        "500": "C1",
+        "1000": "C3",
+        "1500": "C5",
+        "2000": "C7",
+        "2500": "C9",
     },
     "IndirectTasks": {
         "500": "C1",
@@ -94,6 +117,7 @@ for (nm, ex), (nm2, ts), (nm3, lod) in zip(
 
 def plot_data(
     ax,
+    sample: int,
     a: bool,
     sets: set,
     *s: str,
@@ -105,25 +129,34 @@ def plot_data(
                 for name, values in set.items():
                     if name in s or a:
                         ax.plot(
-                            values[::5, 0],
-                            values[::5, 1] * 1000,
+                            values[:, 0],
+                            values[:, sample] * scales[sample],
                             forms[mode],
                             color=cols[mode][name],
-                            alpha=alphas[mode],
                             label=f"{names[mode]}-{name}",
                         )
 
 
 def def_fig(
+    sample: int,
     a: bool,
     *s: str,
 ):
     fig, ax = plt.subplots(1, 1, layout="constrained")
 
-    plot_data(ax, a, ["ExpandingComputeCulledMesh", "IndirectTasks"], *s)
+    # plot_data(
+    #     ax, sample, a, ["ExpandingComputeCulledMesh", "IndirectTasks", "DrawLOD"], *s
+    # )
+    plot_data(
+        ax,
+        sample,
+        a,
+        [dragon, torrin],
+        *s,
+    )
 
     ax.set_xlabel("Relative Camera Distance")
-    ax.set_ylabel("Frame time (ms)")
+    ax.set_ylabel(metrics[sample])
 
     # box = ax.get_position()
     # prop = 0.7
@@ -137,17 +170,19 @@ def def_fig(
     # )
 
     # Put a legend below current axis
-    ax.legend( fancybox=True, ncol=2)
+    ax.legend(fancybox=True, ncol=2)
 
     fig.set_size_inches(8, 3)
 
-    fig.savefig(f"../diss/figures/eval/mesh_benchmark{None if a else s}.svg")
+    fig.savefig(
+        f"../diss/figures/eval/mesh_benchmark_{metrics[sample]}_{None if a else s}.svg"
+    )
 
 
 # def_fig(False, "500")
 # def_fig(False, "1000")
 # def_fig(False, "2000")
-def_fig(False, "500", "1500", "2500")
+def_fig(PRIMS, False, "500", "1500", "2500")
 
 # # fig, [ax1, ax] = plt.subplots(2, sharex=True)
 

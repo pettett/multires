@@ -20,7 +20,6 @@ pub struct LODChainLevel {
     pub radius: f32,
 }
 
-#[derive(Resource)]
 pub struct MeshData {
     pub cluster_count: u32,
     pub size: f32,
@@ -32,15 +31,14 @@ pub struct MeshData {
     pub lod_chain: Vec<LODChainLevel>,
 }
 
-
 impl MeshData {
     pub fn new(
         core: &Core,
         allocator: &Arc<Mutex<Allocator>>,
         graphics_queue: vk::Queue,
-        config: &Config,
+        mesh_name: &str,
     ) -> Self {
-        let data = MultiResMesh::load(&config.mesh_name).unwrap();
+        let data = MultiResMesh::load(mesh_name).unwrap();
         // let data = MultiResMesh::load("assets/lucy.glb.bin").unwrap();
 
         let (cluster_order, cluster_groups) = data.order_clusters();
@@ -56,25 +54,21 @@ impl MeshData {
             for m in c.meshlets() {
                 m.calc_indices_to_vec(&mut indices[c.lod]);
             }
-			
-			// sum_errors[c.lod] += c.error();
-			// sum_rads[c.lod] += c.saturated_bound.radius();
-			// sums[c.lod] += 1.0;
 
-			if sum_errors[c.lod] > c.error() {
+            // sum_errors[c.lod] += c.error();
+            // sum_rads[c.lod] += c.saturated_bound.radius();
+            // sums[c.lod] += 1.0;
+
+            if sum_errors[c.lod] > c.error() {
                 sum_errors[c.lod] = c.error();
                 sum_rads[c.lod] = c.saturated_bound.radius();
             }
- 
         }
 
-		// for l in 0..levels{
-		// 	sum_errors[l] /= sums[l] ;
-		// 	sum_rads[l] /= sums[l] ;
-		// }
-
-		
-
+        // for l in 0..levels{
+        // 	sum_errors[l] /= sums[l] ;
+        // 	sum_rads[l] /= sums[l] ;
+        // }
 
         let mut lod_chain = Vec::new();
 

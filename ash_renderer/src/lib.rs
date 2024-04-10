@@ -31,11 +31,12 @@ const CLEAR_VALUES: [vk::ClearValue; 2] = [
     },
 ];
 
+use bevy_ecs::system::Resource;
 use serde::Deserialize;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Resource)]
 pub struct Config {
-    mesh_name: String,
+    mesh_names: Vec<String>,
     starting_error: f32,
 }
 

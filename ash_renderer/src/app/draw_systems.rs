@@ -21,10 +21,11 @@ use crate::{
     },
     gui::gui::Gui,
     utility::constants::MAX_FRAMES_IN_FLIGHT,
-    VkHandle,
+    Config, VkHandle,
 };
 
 use super::{
+    app::AssetLib,
     benchmarker::Benchmarker,
     fps_limiter::FPSMeasure,
     renderer::{Fragment, MeshDrawingPipelineType, Renderer},
@@ -35,7 +36,7 @@ pub fn update_pipeline(
     mut renderer: ResMut<Renderer>,
     scene: Res<Scene>,
     mut events: EventReader<MeshDrawingPipelineType>,
-    mesh_data: Res<MeshData>,
+    mesh_data: Res<AssetLib<MeshData>>,
     mut commands: Commands,
     transforms: Query<&Transform>,
 ) {
@@ -54,6 +55,8 @@ pub fn update_pipeline(
 
     renderer.hacky_command_buffer_passthrough = None;
     renderer.draw_pipeline = Box::new(Stub);
+
+    let mesh_data = mesh_data.get(&renderer.mesh);
 
     println!("Switching to {s:?}");
 
@@ -126,6 +129,19 @@ pub fn start_gui(mut gui: NonSendMut<Gui>, renderer: Res<Renderer>) {
     }
 }
 
+pub fn gather_queries(mut renderer: ResMut<Renderer>) {
+    if renderer.query {
+        if renderer.last_sample.elapsed() > time::Duration::from_secs_f32(0.01) {
+            if let Some(results) = renderer.query_primitives.get_results(0) {
+                assert!(results.avail > 0);
+
+                renderer.primitives.tick(results.clipping_primitives);
+            }
+
+            renderer.last_sample = time::Instant::now();
+        }
+    }
+}
 pub fn draw_gui(
     gui: NonSendMut<Gui>,
     mut renderer: ResMut<Renderer>,
@@ -134,6 +150,7 @@ pub fn draw_gui(
     mut scene_events: EventWriter<SceneEvent>,
     mut draw_events: EventWriter<MeshDrawingPipelineType>,
     fps: Res<FPSMeasure>,
+    config: Res<Config>,
     mut commands: Commands,
 ) {
     if !renderer.render_gui {
@@ -164,6 +181,20 @@ pub fn draw_gui(
             }
 
             ui.add(fps.as_ref());
+
+            if egui::ComboBox::from_label("Mesh")
+                .selected_text(format!("{:?}", renderer.mesh))
+                .show_ui(ui, |ui| {
+                    for mesh_name in &config.mesh_names {
+                        ui.selectable_value(&mut renderer.mesh, mesh_name.clone(), mesh_name);
+                    }
+                })
+                .response
+                .changed()
+            {
+                scene_events.send(SceneEvent::ResetScene);
+                draw_events.send(renderer.current_pipeline);
+            }
 
             ui.label(format!("Current Pipeline: {:?}", renderer.current_pipeline));
 
@@ -246,11 +277,7 @@ pub fn draw_gui(
 
             if ui.button("Begin Benchmarking").clicked() {
                 // Refresh render pipeline
-                commands.insert_resource(Benchmarker::new(
-                    glam::Vec3A::Z * 10.0,
-                    bench_end_pos,
-                    5.0,
-                ))
+                commands.insert_resource(Benchmarker::default())
             }
 
             if renderer.query {
@@ -283,10 +310,8 @@ pub fn draw_gui(
 
 pub fn acquire_swapchain(
     mut renderer: ResMut<Renderer>,
-    mut scene: ResMut<Scene>,
     mut camera: Query<(&mut Camera, &Transform)>,
     mut gui: NonSendMut<Gui>,
-    mesh_data: Res<MeshData>,
 ) {
     let wait_fences = [renderer.sync_objects.in_flight_fences[renderer.current_frame]];
 
@@ -312,7 +337,7 @@ pub fn acquire_swapchain(
             Ok(image_index) => image_index,
             Err(vk_result) => match vk_result {
                 vk::Result::ERROR_OUT_OF_DATE_KHR => {
-                    renderer.recreate_swapchain(&scene, &mesh_data, &mut gui, &mut cam);
+                    renderer.recreate_swapchain(&mut gui, &mut cam);
                     return;
                 }
                 _ => panic!("Failed to acquire Swap Chain Image!"),
@@ -328,7 +353,6 @@ pub fn draw_frame(
     mut scene: ResMut<Scene>,
     mut camera: Query<(&mut Camera, &Transform)>,
     mut gui: NonSendMut<Gui>,
-    mesh_data: Res<MeshData>,
 ) {
     let (mut cam, cam_trans) = camera.single_mut();
 
@@ -423,7 +447,7 @@ pub fn draw_frame(
     };
     if is_resized || renderer.is_suboptimal {
         renderer.is_framebuffer_resized = false;
-        renderer.recreate_swapchain(&scene, &mesh_data, &mut gui, &mut cam);
+        renderer.recreate_swapchain(&mut gui, &mut cam);
     }
 
     renderer.current_frame = (renderer.current_frame + 1) % MAX_FRAMES_IN_FLIGHT;

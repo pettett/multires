@@ -10,6 +10,7 @@ use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 
 use crate::{
     app::{
+        app::AssetLib,
         mesh_data::MeshData,
         renderer::{MeshDrawingPipelineType, Renderer},
         scene::{Mesh, Scene},
@@ -102,10 +103,12 @@ pub fn create_lod_command_buffer(
     camera: Query<(&Camera, &Transform)>,
     meshes: Query<(&Transform, &Mesh)>,
     draw: Option<ResMut<DrawLODChainData>>,
-    mesh_data: Res<MeshData>,
+    mesh_assets: Res<AssetLib<MeshData>>,
 ) {
     if let Some(mut draw) = draw {
         let device = draw.core.device.clone();
+
+        let mesh_data = mesh_assets.get(&renderer.mesh);
 
         while renderer.image_index >= draw.command_buffers.len() {
             let cmd = draw.core.command_pool.begin_one_shot_command();

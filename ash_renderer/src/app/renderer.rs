@@ -75,18 +75,14 @@ pub struct Renderer {
     pub fragment_colour: ShaderModule,
     pub fragment_lit: ShaderModule,
 
+    pub mesh: String,
+
     pub fragment: Fragment,
     pub hacky_command_buffer_passthrough: Option<vk::CommandBuffer>,
 }
 
 impl Renderer {
-    pub fn recreate_swapchain(
-        &mut self,
-        _scene: &Scene,
-        _mesh_data: &MeshData,
-        gui: &mut Gui,
-        cam: &mut Camera,
-    ) {
+    pub fn recreate_swapchain(&mut self, gui: &mut Gui, cam: &mut Camera) {
         self.core.device.wait_device_idle();
 
         let size = self.window().inner_size();

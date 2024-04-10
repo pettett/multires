@@ -2,7 +2,8 @@ use crate::{
     app::{
         benchmarker::benchmark,
         draw_systems::{
-            acquire_swapchain, draw_frame, draw_gui, start_gui, tick_clocks, update_pipeline,
+            acquire_swapchain, draw_frame, draw_gui, gather_queries, start_gui, tick_clocks,
+            update_pipeline,
         },
         mesh_data::MeshData,
         renderer::{Fragment, MeshDrawingPipelineType, Renderer},
@@ -31,6 +32,7 @@ use ash::vk;
 
 use bevy_ecs::prelude::*;
 use bytemuck::Zeroable;
+use egui::ahash::HashMap;
 
 use crate::draw_pipelines::stub::Stub;
 use crate::gui::gui::Gui;
@@ -58,6 +60,24 @@ pub struct App {
     pub schedule: bevy_ecs::schedule::Schedule,
     pub draw_schedule: bevy_ecs::schedule::Schedule,
     pub camera: Entity,
+}
+
+#[derive(Resource)]
+pub struct AssetLib<T> {
+    assets: HashMap<String, T>,
+}
+
+impl<T> Default for AssetLib<T> {
+    fn default() -> Self {
+        Self {
+            assets: Default::default(),
+        }
+    }
+}
+impl<T> AssetLib<T> {
+    pub fn get(&self, name: &str) -> &T {
+        &self.assets[name]
+    }
 }
 
 impl App {
@@ -95,7 +115,9 @@ impl App {
         false
     }
 
-    pub fn new(event_loop: &winit::event_loop::EventLoop<()>, config: &Config) -> App {
+    pub fn new(event_loop: &winit::event_loop::EventLoop<()>, config: Config) -> App {
+        assert!(config.mesh_names.len() >= 1);
+
         let core = Core::new(event_loop);
 
         let device = &core.device;
@@ -238,7 +260,12 @@ impl App {
             start_gui,
             acquire_swapchain,
             (
-                (draw_gui.after(start_gui), create_lod_command_buffer).before(draw_frame),
+                (
+                    gather_queries,
+                    draw_gui.after(start_gui).after(gather_queries),
+                    create_lod_command_buffer,
+                )
+                    .before(draw_frame),
                 draw_frame,
             )
                 .after(acquire_swapchain),
@@ -254,7 +281,15 @@ impl App {
             graphics_queue,
             screen.swapchain(),
         );
-        let mesh = MeshData::new(&core, &allocator, graphics_queue, config);
+
+        let mut meshes = AssetLib::default();
+
+        for n in &config.mesh_names {
+            meshes.assets.insert(
+                n.clone(),
+                MeshData::new(&core, &allocator, graphics_queue, n),
+            );
+        }
 
         world.insert_resource(Scene {
             uniform_transform_buffer,
@@ -295,6 +330,7 @@ impl App {
             query_primitives: QueryPool::new(device.clone(), 1),
             core,
             screen,
+            mesh: config.mesh_names[0].clone(),
             fragment: Fragment::Lit,
             hacky_command_buffer_passthrough: None,
             image_index: 0,
@@ -303,9 +339,9 @@ impl App {
             primitives: Default::default(),
         });
         world.insert_non_send_resource(gui);
-        world.insert_resource(mesh);
+        world.insert_resource(meshes);
         world.insert_resource(FPSMeasure::new());
-
+        world.insert_resource(config);
         // cleanup(); the 'drop' function will take care of it.
         App {
             world,
