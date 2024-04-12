@@ -117,8 +117,11 @@ pub fn process_scene_events(
 
                     let mut transform = Transform::new_pos(p);
 
-                    *transform.scale_mut() =
-                        glam::Vec3A::ONE * 30.0 / mesh_data.get(&renderer.mesh).size;
+                    let scale = 30.0 / mesh_data.get(&renderer.mesh).size;
+
+                    println!("{scale}");
+
+                    *transform.scale_mut() = glam::Vec3A::ONE * scale;
 
                     commands.spawn((
                         transform,

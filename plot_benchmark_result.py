@@ -30,11 +30,13 @@ for d1 in os.listdir("benchmark/"):
 
 dragon = "ExpandingComputeCulledMeshdragon_high.glb.bin"
 torrin = "ExpandingComputeCulledMeshtorrin_main.glb.bin"
+NANITE = "Nanite"
 
 forms = {
     "ExpandingComputeCulledMesh": "-",
     dragon: "-",
     torrin: "-",
+    NANITE: "-",
     "IndirectTasks": "-.",
     "DrawIndirect": "--",
     "DrawLOD": ":",
@@ -43,6 +45,7 @@ names = {
     "ExpandingComputeCulledMesh": "DAG Explore",
     dragon: "1000K Tris",
     torrin: "600K Tris",
+    NANITE: "1000K Tris (Nanite)",
     "IndirectTasks": "Task Select",
     "DrawIndirect": "Instanced Full Resolution",
     "DrawLOD": "LOD Chain",
@@ -65,6 +68,13 @@ cols = {
         "2500": "C8",
     },
     torrin: {
+        "500": "C1",
+        "1000": "C3",
+        "1500": "C5",
+        "2000": "C7",
+        "2500": "C9",
+    },
+    NANITE: {
         "500": "C1",
         "1000": "C3",
         "1500": "C5",
@@ -174,9 +184,10 @@ def def_fig(
 
     fig.set_size_inches(8, 3)
 
-    fig.savefig(
-        f"../diss/figures/eval/mesh_benchmark_{metrics[sample]}_{None if a else s}.svg"
-    )
+    # fig.savefig(
+    #     f"../diss/figures/eval/mesh_benchmark_{metrics[sample]}_{None if a else s}.svg"
+    # )
+    fig.savefig(f"../diss/figures/eval/mesh_benchmark_{metrics[sample]}.svg")
 
 
 # def_fig(False, "500")

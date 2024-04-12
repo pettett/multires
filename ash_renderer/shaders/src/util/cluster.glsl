@@ -38,7 +38,7 @@ float cluster_error(uint idx, uint instance_index, vec3 local_cam_pos) {
 
 		// float err_radius = radius;
 
-		float screen_space_area = (radius * radius) / (sqr_center_distance);
+		float screen_space_area = (radius)*inversesqrt(sqr_center_distance);
 
 		return screen_space_area * error;
 		// return clusters[idx].error;
