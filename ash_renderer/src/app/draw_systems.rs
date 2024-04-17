@@ -11,7 +11,6 @@ use crate::{
     app::mesh_data::MeshData,
     draw_pipelines::{
         compute_culled_indices::ComputeCulledIndices,
-        compute_culled_mesh::ComputeCulledMesh,
         draw_full_res::DrawFullRes,
         draw_lod_chain::DrawLODChain,
         expanding_compute_culled_mesh::ExpandingComputeCulledMesh,
@@ -69,20 +68,6 @@ pub fn update_pipeline(
             &mesh_data,
             scene.uniform_transform_buffer.clone(),
             &scene.uniform_camera_buffers,
-        )),
-
-        MeshDrawingPipelineType::ComputeCulledMesh => Box::new(ComputeCulledMesh::new(
-            renderer.core.clone(),
-            &renderer,
-            &renderer.screen,
-            &mesh_data,
-            renderer.allocator.clone(),
-            &renderer.render_pass,
-            renderer.graphics_queue,
-            renderer.descriptor_pool.clone(),
-            scene.uniform_transform_buffer.clone(),
-            &scene.uniform_camera_buffers,
-            mesh_data.cluster_count,
         )),
         MeshDrawingPipelineType::ExpandingComputeCulledMesh => {
             Box::new(ExpandingComputeCulledMesh::new(
@@ -276,8 +261,11 @@ pub fn draw_gui(
             }
 
             if ui.button("Begin Benchmarking").clicked() {
-                // Refresh render pipeline
                 commands.insert_resource(Benchmarker::default())
+            }
+
+            if ui.button("Begin Recorded Benchmark").clicked() {
+                commands.insert_resource(Benchmarker::new_record())
             }
 
             if renderer.query {

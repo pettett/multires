@@ -5,6 +5,8 @@
 #extension GL_ARB_shader_draw_parameters : require
 #extension GL_KHR_shader_subgroup_arithmetic : enable
 
+#extension GL_EXT_debug_printf : enable
+
 #include "structs\camera.glsl"
 #include "structs\cluster_data.glsl"
 #include "structs\model.glsl"
@@ -35,19 +37,29 @@ layout(binding = 3) readonly uniform CameraUniformBufferObject {
 	CameraUniformObject ubo;
 };
 
+#include "structs\indirect_dispatch_data.glsl"
+layout(binding = 4) buffer IndirectDispatchBuffer {
+	IndirectDispatchData indirect_dispatch[];
+};
 
-#include "util\culling.glsl"
+layout(push_constant) uniform constants {
+	uint instance_index;
+};
+
 #include "util\cluster.glsl"
+#include "util\culling.glsl"
 
-const uint LOCAL_SIZE_X = 1;
+const uint LOCAL_SIZE_X = 16;
 
 layout(local_size_x = LOCAL_SIZE_X, local_size_y = 1, local_size_z = 1) in;
 
 void main() {
 	uvec3 id = gl_GlobalInvocationID;
 	uint cluster_index = id.x;
-	uint instance_index = id.y;
 
+	if (cluster_index == 0) {
+		indirect_dispatch[instance_index].group_size_x -= 1;
+	}
 
 	vec3 local_cam_pos;
 	bool high_error;
@@ -58,8 +70,22 @@ void main() {
 
 	vec4 planes[6] = planes_from_mat(MVP);
 
+	uint max_needed_workgroups = calc_max_needed_workgroups(draw, cluster_index, high_error, LOCAL_SIZE_X);
+	uint subgroup_max_needed_workgroups = subgroupMax(max_needed_workgroups);
+
+	if (subgroupElect()) {
+		atomicMax(indirect_dispatch[instance_index].group_size_x, subgroup_max_needed_workgroups);
+	}
+
 	bool in_clip = sphere_inside_planes(planes, clusters[cluster_index].tight_sphere);
 
+	if (draw && in_clip) {
+		uint pos = atomicAdd(should_draw[0], 1);
 
-	should_draw[cluster_index] = draw && in_clip  ? cluster_index + 1 : 0;
+		// debugPrintfEXT("%u, ", pos);
+
+		should_draw[pos] = cluster_index + 1;
+	} else {
+		// should_draw[cluster_index + 1] = 0;
+	}
 }

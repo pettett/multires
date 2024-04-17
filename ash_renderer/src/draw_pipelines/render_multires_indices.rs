@@ -39,6 +39,8 @@ pub struct RenderMultiresIndices {
     vertex_buffer: Arc<TBuffer<MeshVert>>,
     result_indices_buffer: Arc<TBuffer<u32>>,
     draw_indexed_indirect_buffer: Arc<TBuffer<vk::DrawIndexedIndirectCommand>>,
+    /// Buffer that will control the number of compaction invocations
+    indirect_compute_buffer: Arc<TBuffer<vk::DispatchIndirectCommand>>,
     descriptor_sets: Vec<DescriptorSet>,
 }
 
@@ -50,6 +52,7 @@ impl RenderMultiresIndices {
         vertex_buffer: Arc<TBuffer<MeshVert>>,
         result_indices_buffer: Arc<TBuffer<u32>>,
         draw_indexed_indirect_buffer: Arc<TBuffer<vk::DrawIndexedIndirectCommand>>,
+        indirect_compute_buffer: Arc<TBuffer<vk::DispatchIndirectCommand>>,
         descriptor_pool: Arc<DescriptorPool>,
         scene: &Scene,
         compact_indices_pipeline: ComputePipeline,
@@ -85,6 +88,7 @@ impl RenderMultiresIndices {
             result_indices_buffer,
             draw_indexed_indirect_buffer,
             descriptor_sets,
+            indirect_compute_buffer,
             compact_indices_pipeline,
         }
     }
@@ -123,14 +127,18 @@ impl RenderMultiresIndices {
                 self.compact_indices_pipeline.handle(),
             );
 
-            device.cmd_dispatch_base(
+            device.cmd_push_constants(
                 cmd,
+                self.compact_indices_pipeline.layout().handle(),
+                vk::ShaderStageFlags::COMPUTE,
                 0,
-                instance as _,
-                0,
-                cluster_count.div_ceil(16) as _,
-                1,
-                1,
+                bytemuck::cast_slice(&[instance as u32]),
+            );
+
+            device.cmd_dispatch_indirect(
+                cmd,
+                self.indirect_compute_buffer.handle(),
+                (self.indirect_compute_buffer.stride() * instance) as _,
             );
 
             // Force result indices to be complete before continuing.

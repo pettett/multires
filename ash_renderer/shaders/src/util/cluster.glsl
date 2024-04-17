@@ -45,6 +45,19 @@ float cluster_error(uint idx, uint instance_index, vec3 local_cam_pos) {
 	}
 }
 
+uint calc_max_needed_workgroups(bool draw, uint cluster_index, bool high_error, uint group_size) {
+	return (draw ? cluster_index : // Perfect error, continue doing this
+				(high_error ? max(clusters[cluster_index].max_child_index, cluster_index)
+							: // Error is lower then ours, draw a child if we have one
+					 clusters[cluster_index].parent1 == -1
+					 ? cluster_index
+					 : clusters[cluster_index]
+						   .parent1 // Error is higher then ours, only need to draw the parent (parent1 > parent0)
+				 )) /
+			   group_size +
+		   2;
+}
+
 // float cluster_error(uint idx, vec3 local_cam_pos) {
 // 	bool out_of_range = idx >= max_cluster();
 // 	if (out_of_range) {

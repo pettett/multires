@@ -9,7 +9,7 @@
 #extension GL_EXT_shader_explicit_arithmetic_types_int16 : enable
 #extension GL_KHR_shader_subgroup_ballot : enable
 
-#define DEBUG
+// #define DEBUG
 
 #ifdef DEBUG
 #extension GL_EXT_debug_printf : enable
@@ -17,7 +17,7 @@
 
 #include "structs\camera.glsl"
 #include "structs\cluster_data.glsl"
-#include "structs\indirect_draw_data.glsl"
+#include "structs\indirect_dispatch_data.glsl"
 #include "structs\mesh_task_payload.glsl"
 #include "structs\model.glsl"
 #include "structs\range.glsl"
@@ -49,7 +49,7 @@ layout(binding = 3) readonly uniform CameraUniformBufferObject {
 };
 
 layout(std430, binding = 6) writeonly buffer IndirectDrawBuffer {
-	IndirectDrawData indirect_draw[];
+	IndirectDispatchData indirect_draw[];
 };
 
 layout(std430, binding = 7) buffer RangeBuffer {

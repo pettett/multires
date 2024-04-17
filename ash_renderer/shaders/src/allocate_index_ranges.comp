@@ -1,0 +1,52 @@
+#version 460
+
+#extension GL_ARB_separate_shader_objects : enable
+#extension GL_GOOGLE_include_directive : enable
+#extension GL_ARB_shader_draw_parameters : require
+
+#extension GL_KHR_shader_subgroup_arithmetic : enable
+#extension GL_KHR_shader_subgroup_vote : enable
+
+#extension GL_EXT_debug_printf : enable
+
+#include "structs\cluster_data.glsl"
+
+layout(binding = 1) readonly buffer ShouldDraw {
+	uint should_draw[];
+};
+
+layout(binding = 2) readonly buffer Clusters {
+	ClusterData clusters[];
+};
+
+layout(binding = 5) writeonly buffer ResultIndicies {
+	uint result_indicies[];
+};
+
+layout(binding = 7) buffer DrawIndexedIndirectData {
+	DrawIndexedIndirect indirect[];
+};
+
+layout(push_constant) uniform constants {
+	uint instance_index;
+};
+
+const uint LOCAL_SIZE_X = 16;
+
+layout(local_size_x = LOCAL_SIZE_X, local_size_y = 1, local_size_z = 1) in;
+
+void main() {
+	uvec3 id = gl_GlobalInvocationID;
+	uint lid = gl_LocalInvocationID.x;
+	uint gid = gl_WorkGroupID.x;
+
+	uint index_count = should_draw[1];
+
+	uint indices_start = atomicAdd(indirect[0].base_index, index_count);
+
+	// keep index count as 0, so it can be atomic added to allocate individual cluster index positions
+	indirect[instance_index].instance_count = 1;
+	indirect[instance_index].base_index = indices_start;
+	indirect[instance_index].base_vertex = 0;
+	indirect[instance_index].base_instance = instance_index;
+}

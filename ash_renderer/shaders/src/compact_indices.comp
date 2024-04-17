@@ -7,14 +7,16 @@
 #extension GL_KHR_shader_subgroup_arithmetic : enable
 #extension GL_KHR_shader_subgroup_vote : enable
 
-#include "structs\cluster_data.glsl"
+#extension GL_EXT_debug_printf : enable
 
-layout(binding = 2) readonly buffer Clusters {
-	ClusterData clusters[];
-};
+#include "structs\cluster_data.glsl"
 
 layout(binding = 1) readonly buffer ShouldDraw {
 	uint should_draw[];
+};
+
+layout(binding = 2) readonly buffer Clusters {
+	ClusterData clusters[];
 };
 
 layout(binding = 5) writeonly buffer ResultIndicies {
@@ -29,6 +31,10 @@ layout(binding = 7) buffer DrawIndexedIndirectData {
 	DrawIndexedIndirect indirect[];
 };
 
+layout(push_constant) uniform constants {
+	uint instance_index;
+};
+
 const uint LOCAL_SIZE_X = 16;
 
 layout(local_size_x = LOCAL_SIZE_X, local_size_y = 1, local_size_z = 1) in;
@@ -39,70 +45,34 @@ void main() {
 	uint gid = gl_WorkGroupID.x;
 
 	uint idx = id.x;
-	uint instance_index = id.y;
-	uint len = clusters.length();
 
-	// For workgroups outside of bounds
-	// if (subgroupAll(idx >= len)) {
-	//     return;
-	// }
-
-	// Add workgroups before this workgroup
-	uint thread_sum = 0;
-
-	for (uint group = 0; group < gid; group++) {
-		uint meshlet = group * LOCAL_SIZE_X + lid;
-		if (should_draw[meshlet] > 0) {
-			thread_sum += clusters[meshlet].index_count;
-		}
-	}
-
-	uint group_base = subgroupAdd(thread_sum);
-
-	// For the end workgroup
-	// if () {
-	//     return;
-	// }
+	uint len = should_draw[0];
+	// uint index_count = should_draw[1];
 
 	// Add things within this workgroup
-	bool draw = should_draw[idx] > 0 && idx < len;
+	bool draw = should_draw[idx + 1] > 0 && idx < len;
 
-	uint prev_instances_index_count =
+	uint indices_start =
 		instance_index == 0 ? 0 : indirect[instance_index - 1].base_index + indirect[instance_index - 1].index_count;
-	// const uint TEST = 5000000;
-	// uint prev_instances_index_count = instance_index * TEST;
 
-	uint contributed_indices = draw ? clusters[idx].index_count : 0;
-
-	uint destination_idx = prev_instances_index_count + group_base + subgroupExclusiveAdd(contributed_indices);
-
-	// Undo the starting addition to get our pack positions
-
-	// Scan should now look like [0,-,-,2,5,-,-]
 	if (draw) {
+		uint cluster_id = should_draw[idx + 1] - 1;
 
-		// var result_start: u32 = 0u;
+		uint destination_idx =
+			indices_start + atomicAdd(indirect[instance_index].index_count, clusters[cluster_id].index_count);
 
-		uint ind_start = clusters[idx].index_offset;
+		uint ind_start = clusters[cluster_id].index_offset;
 
 		// Ideally, compute this in a step after writing cull to a buffer and compacting it down
-		for (uint i = 0; i < clusters[idx].index_count; i++) {
+		for (uint i = 0; i < clusters[cluster_id].index_count; i++) {
 			result_indicies[destination_idx + i] = indices[ind_start + i];
 		}
 	}
 
-	// Last invocation or last cluster
-	if (idx == len - 1) {
-		// Just in case we are the last index, get the index of the final position
-		destination_idx += contributed_indices;
-
-		indirect[instance_index].index_count = (destination_idx - prev_instances_index_count);
-		indirect[instance_index].base_index = prev_instances_index_count;
+	if (idx == 0) {
+		indirect[instance_index].instance_count = 1;
+		indirect[instance_index].base_index = indices_start;
+		indirect[instance_index].base_vertex = 0;
+		indirect[instance_index].base_instance = instance_index;
 	}
-
-	// Fill the max index count from the final work item
-
-	// if (idx == should_draw[offset + 0] - 1) {
-	//     draw_indirect_params[id.y].index_count = idx_val;
-	// }
 }

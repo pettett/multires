@@ -31,7 +31,6 @@ pub enum MeshDrawingPipelineType {
     IndirectTasks,
     DrawIndirect,
     DrawLOD,
-    ComputeCulledMesh,
     ExpandingComputeCulledMesh,
     ComputeCulledIndices,
     None,

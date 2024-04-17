@@ -1,4 +1,4 @@
-use std::{ffi::CString, sync::Arc};
+use std::{ffi::CString, mem, sync::Arc};
 
 use ash::vk::{self, PushConstantRange};
 
@@ -23,6 +23,22 @@ impl PipelineLayout {
     /// Create a new pipeline layout with no push constants
     pub fn new(device: Arc<Device>, descriptor_set_layout: Arc<DescriptorSetLayout>) -> Arc<Self> {
         Self::new_push_constants(device, descriptor_set_layout, &[])
+    }
+
+    /// Create a pipeline layout with a single push constant with layout P
+    pub fn new_single_push<P>(
+        device: Arc<Device>,
+        descriptor_set_layout: Arc<DescriptorSetLayout>,
+        stage: vk::ShaderStageFlags,
+    ) -> Arc<Self> {
+        Self::new_push_constants(
+            device,
+            descriptor_set_layout,
+            &[PushConstantRange::default()
+                .offset(0)
+                .stage_flags(stage)
+                .size(mem::size_of::<P>() as u32)],
+        )
     }
 
     /// Create a new pipeline layout with push constants from push_constant_ranges
@@ -99,6 +115,40 @@ impl GraphicsPipeline {
 }
 
 impl ComputePipeline {
+    pub fn create_compute_with_layout(
+        core: &Core,
+        shader: &[u8],
+        pipeline_layout: Arc<PipelineLayout>,
+        name: &str,
+    ) -> ComputePipeline {
+        let comp_shader_module =
+            ShaderModule::new(core.device.clone(), bytemuck::cast_slice(shader));
+
+        let main_function_name = CString::new("main").unwrap(); // the beginning function name in shader code.
+
+        let shader_stage = vk::PipelineShaderStageCreateInfo::default()
+            .module(comp_shader_module.handle())
+            .name(&main_function_name)
+            .stage(vk::ShaderStageFlags::COMPUTE);
+
+        let pipeline_create_infos = [
+            vk::ComputePipelineCreateInfo::default()
+                .stage(shader_stage)
+                .layout(pipeline_layout.handle())
+                .flags(vk::PipelineCreateFlags::DISPATCH_BASE), // Allow non-0 bases, for applying this to instances
+        ];
+
+        let compute_pipelines = unsafe {
+            core.device
+                .create_compute_pipelines(vk::PipelineCache::null(), &pipeline_create_infos, None)
+                .expect("Failed to create Compute Pipeline!.")
+        };
+
+        core.name_object(name, compute_pipelines[0]);
+
+        ComputePipeline::new_raw(core.device.clone(), compute_pipelines[0], pipeline_layout)
+    }
+
     pub fn create_compute_pipeline(
         core: &Core,
         shader: &[u8],

@@ -12,31 +12,33 @@ scales = {FRAMETIME: 1000, PRIMS: 1}
 
 
 for d1 in os.listdir("benchmark/"):
-    print(d1)
+    # print(d1)
     data[d1] = {}
 
     d2s = os.listdir(f"benchmark/{d1}/")
     d2 = max(d2s)
 
-    print(d2)
+    # print(d2)
     data[d1][d2] = {}
     for f in os.listdir(f"benchmark/{d1}/{d2}"):
 
-        print(f)
+        # print(f)
 
         txt = np.loadtxt(f"benchmark/{d1}/{d2}/{f}", delimiter=",")
-        if txt.shape[1] >= 3:  # require PRIMS update
+        if txt.shape[1]:  # require PRIMS update
             data[d1][d2][f.split(".")[0]] = txt
 
 dragon = "ExpandingComputeCulledMeshdragon_high.glb.bin"
 torrin = "ExpandingComputeCulledMeshtorrin_main.glb.bin"
 NANITE = "Nanite"
+NANITETIME = "NaniteTime"
 
 forms = {
     "ExpandingComputeCulledMesh": "-",
     dragon: "-",
     torrin: "-",
-    NANITE: "-",
+    NANITE: "-.",
+    NANITETIME: "-.",
     "IndirectTasks": "-.",
     "DrawIndirect": "--",
     "DrawLOD": ":",
@@ -46,6 +48,7 @@ names = {
     dragon: "1000K Tris",
     torrin: "600K Tris",
     NANITE: "1000K Tris (Nanite)",
+    NANITETIME: "1000K Tris (Nanite)",
     "IndirectTasks": "Task Select",
     "DrawIndirect": "Instanced Full Resolution",
     "DrawLOD": "LOD Chain",
@@ -81,6 +84,13 @@ cols = {
         "2000": "C7",
         "2500": "C9",
     },
+    NANITETIME: {
+        "500": "C1",
+        "1000": "C3",
+        "1500": "C5",
+        "2000": "C7",
+        "2500": "C9",
+    },
     "IndirectTasks": {
         "500": "C1",
         "1000": "C3",
@@ -97,54 +107,58 @@ cols = {
     },
 }
 
-for (nm, ex), (nm2, ts), (nm3, lod) in zip(
-    next(iter(data["ExpandingComputeCulledMesh"].values())).items(),
-    next(iter(data["IndirectTasks"].values())).items(),
-    next(iter(data["DrawLOD"].values())).items(),
-):
+# for (nm, ex), (nm2, ts), (nm3, lod) in zip(
+#     next(iter(data["ExpandingComputeCulledMesh"].values())).items(),
+#     next(iter(data["IndirectTasks"].values())).items(),
+#     next(iter(data["DrawLOD"].values())).items(),
+# ):
 
-    assert nm == nm2
+#     assert nm == nm2
 
-    print(nm)
+#     print(nm)
 
-    total_ex = np.trapz(ex[:, 0], ex[:, 1])
-    total_ts = np.trapz(ts[:, 0], ts[:, 1])
+#     total_ex = np.trapz(ex[:, 0], ex[:, 1])
+#     total_ts = np.trapz(ts[:, 0], ts[:, 1])
 
-    # print(np.mean(ex[:, 1]))
-    # print(np.mean(ts[:, 1]))
+#     # print(np.mean(ex[:, 1]))
+#     # print(np.mean(ts[:, 1]))
 
-    ex1 = 5 / len(ex[:, 0])
-    # print(np.average(ex[:,1]))
-    ts1 = 5 / len(ts[:, 0])
+#     ex1 = 5 / len(ex[:, 0])
+#     # print(np.average(ex[:,1]))
+#     ts1 = 5 / len(ts[:, 0])
 
-    lod1 = 5 / len(lod[:, 0])
+#     lod1 = 5 / len(lod[:, 0])
 
-    print(ex1, ts1, lod1)
+#     print(ex1, ts1, lod1)
 
-    # print("task shader -> expanding", (total_ex - total_ts) / total_ts)
-    print(f"task shader -> expanding {100* (ex1 - ts1) / ts1:2}")
+#     # print("task shader -> expanding", (total_ex - total_ts) / total_ts)
+#     print(f"task shader -> expanding {100* (ex1 - ts1) / ts1:2}")
 
 
 def plot_data(
     ax,
     sample: int,
     a: bool,
-    sets: set,
+    sets: list[str],
     *s: str,
 ):
     for mode, result_sets in data.items():
 
         if mode in sets:
+            sets.remove(mode)
             for set_name, set in result_sets.items():
+                print(set_name)
                 for name, values in set.items():
+                    print(name)
                     if name in s or a:
                         ax.plot(
                             values[:, 0],
-                            values[:, sample] * scales[sample],
+                            np.minimum(values[:, sample] * scales[sample], 10.0),
                             forms[mode],
                             color=cols[mode][name],
                             label=f"{names[mode]}-{name}",
                         )
+    print(f"Not seen: {sets}")
 
 
 def def_fig(
@@ -161,7 +175,7 @@ def def_fig(
         ax,
         sample,
         a,
-        [dragon, torrin],
+        [dragon, NANITETIME],
         *s,
     )
 
@@ -193,7 +207,7 @@ def def_fig(
 # def_fig(False, "500")
 # def_fig(False, "1000")
 # def_fig(False, "2000")
-def_fig(PRIMS, False, "500", "1500", "2500")
+def_fig(FRAMETIME, False, "500", "1500", "2500")
 
 # # fig, [ax1, ax] = plt.subplots(2, sharex=True)
 

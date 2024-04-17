@@ -87,7 +87,7 @@ impl ProgramProc {
                                         );
                                     }
                                     (KeyCode::F9, ElementState::Pressed) => {
-                                        vulkan_app.world.insert_resource(Benchmarker::default());
+                                        vulkan_app.world.insert_resource(Benchmarker::new_record());
                                     }
                                     (KeyCode::F11, ElementState::Pressed) => {
                                         match vulkan_app.renderer().window().fullscreen() {
@@ -108,9 +108,9 @@ impl ProgramProc {
                                                     video_mode
                                                 );
 
-                                                window.set_fullscreen(Some(Fullscreen::Exclusive(
-                                                    video_mode,
-                                                )));
+                                                window.set_fullscreen(Some(
+                                                    Fullscreen::Borderless(Some(monitor)),
+                                                ));
                                             }
                                         }
                                     }

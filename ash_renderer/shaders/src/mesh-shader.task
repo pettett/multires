@@ -9,10 +9,9 @@
 
 #include "structs\camera.glsl"
 #include "structs\cluster_data.glsl"
-#include "structs\indirect_draw_data.glsl"
+#include "structs\indirect_dispatch_data.glsl"
 #include "structs\mesh_task_payload.glsl"
 #include "structs\model.glsl"
-
 
 // Bindings and layout
 
@@ -30,7 +29,7 @@ layout(binding = 3) uniform CameraUniformBufferObject {
 
 // Access to the indirect draw params for the next frame
 layout(std430, binding = 6) buffer IndirectDrawBuffer {
-	IndirectDrawData data[];
+	IndirectDispatchData data[];
 }
 indirect_draw;
 
@@ -82,17 +81,7 @@ void main() {
 	// (if root)   -1 <= -1 < cluster_index < max_child_index
 	// (if leaf)   -1 < parent0 < parent1 < cluster_index
 
-	uint max_needed_workgroups =
-		(draw ? cluster_index : // Perfect error, continue doing this
-			 (high_error ? max(clusters[cluster_index].max_child_index, cluster_index)
-						 : // Error is lower then ours, draw a child if we have one
-				  clusters[cluster_index].parent1 == -1
-				  ? cluster_index
-				  : clusters[cluster_index]
-						.parent1 // Error is higher then ours, only need to draw the parent (parent1 > parent0)
-			  )) /
-			TASK_GROUP_SIZE +
-		2;
+	uint max_needed_workgroups = calc_max_needed_workgroups(draw, cluster_index, high_error, TASK_GROUP_SIZE);
 
 	mat4 MVP = ubo.culling_view_proj * models[instance_index].model;
 	// Generate object space clipping planes
