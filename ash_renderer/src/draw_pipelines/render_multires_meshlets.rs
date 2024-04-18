@@ -59,6 +59,7 @@ impl RenderMultiresMeshlets {
             &renderer.render_pass,
             screen.swapchain().extent,
             ubo_layout.clone(),
+            renderer.fragment(),
         );
 
         let descriptor_sets = create_compute_culled_meshes_descriptor_sets(
@@ -154,6 +155,7 @@ fn create_graphics_pipeline(
     render_pass: &RenderPass,
     swapchain_extent: vk::Extent2D,
     ubo_set_layout: Arc<DescriptorSetLayout>,
+    frag_shader_module: &ShaderModule,
 ) -> GraphicsPipeline {
     let task_shader_module = ShaderModule::new(
         device.clone(),
@@ -164,10 +166,6 @@ fn create_graphics_pipeline(
     let mesh_shader_module = ShaderModule::new(
         device.clone(),
         bytemuck::cast_slice(include_bytes!("../../shaders/spv/mesh-shader.mesh")),
-    );
-    let frag_shader_module = ShaderModule::new(
-        device.clone(),
-        bytemuck::cast_slice(include_bytes!("../../shaders/spv/frag_colour.frag")),
     );
 
     let main_function_name = ffi::CString::new("main").unwrap(); // the beginning function name in shader code.

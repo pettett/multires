@@ -28,11 +28,12 @@ use crate::{
 use super::{frame_measure::RollingMeasure, mesh_data::MeshData, scene::Scene};
 #[derive(Debug, Clone, Copy, Event, PartialEq, Eq)]
 pub enum MeshDrawingPipelineType {
-    IndirectTasks,
     DrawIndirect,
     DrawLOD,
+    LocalSelectMesh,
+    LocalSelectIndices,
     ExpandingComputeCulledMesh,
-    ComputeCulledIndices,
+    ExpandingComputeCulledIndices,
     None,
 }
 

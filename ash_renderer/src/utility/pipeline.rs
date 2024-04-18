@@ -14,6 +14,7 @@ pub struct PipelineLayout {
     handle: vk::PipelineLayout,
     device: Arc<Device>,
     descriptor_set_layout: Arc<DescriptorSetLayout>,
+    push_constant_ranges: Vec<vk::PushConstantRange>,
 }
 
 vk_handle_wrapper!(PipelineLayout);
@@ -62,7 +63,30 @@ impl PipelineLayout {
             handle,
             device,
             descriptor_set_layout,
+            push_constant_ranges: push_constant_ranges.to_vec(),
         })
+    }
+
+    pub fn push_single_constant<P: bytemuck::Pod>(
+        &self,
+        range_index: usize,
+        cmd: vk::CommandBuffer,
+        constants: P,
+    ) {
+        // safety - data must be the right size
+        assert_eq!(
+            self.push_constant_ranges[range_index].size as usize,
+            mem::size_of::<P>()
+        );
+        unsafe {
+            self.device.cmd_push_constants(
+                cmd,
+                self.handle(),
+                self.push_constant_ranges[range_index].stage_flags,
+                self.push_constant_ranges[range_index].offset,
+                bytemuck::cast_slice(&[constants]),
+            )
+        }
     }
 }
 

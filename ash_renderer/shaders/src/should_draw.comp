@@ -9,17 +9,8 @@
 
 #include "structs\camera.glsl"
 #include "structs\cluster_data.glsl"
+#include "structs\indirect_dispatch_data.glsl"
 #include "structs\model.glsl"
-
-//@group(0) @binding(0) var<storage, write> result_indicies: array<i32>;
-
-// layout(binding = 0) writeonly buffer ResultIndicies {
-//     uint result[];
-// } result_indicies;
-
-// layout(binding = 1) writeonly buffer DrawIndirectParams {
-//     DrawIndexedIndirect result[];
-// } draw_indirect_params;
 
 layout(binding = 0) readonly buffer ModelUniformBufferObject {
 	Model models[];
@@ -37,7 +28,6 @@ layout(binding = 3) readonly uniform CameraUniformBufferObject {
 	CameraUniformObject ubo;
 };
 
-#include "structs\indirect_dispatch_data.glsl"
 layout(binding = 4) buffer IndirectDispatchBuffer {
 	IndirectDispatchData indirect_dispatch[];
 };
@@ -49,7 +39,7 @@ layout(push_constant) uniform constants {
 #include "util\cluster.glsl"
 #include "util\culling.glsl"
 
-const uint LOCAL_SIZE_X = 16;
+const uint LOCAL_SIZE_X = 1;
 
 layout(local_size_x = LOCAL_SIZE_X, local_size_y = 1, local_size_z = 1) in;
 
@@ -80,7 +70,9 @@ void main() {
 	bool in_clip = sphere_inside_planes(planes, clusters[cluster_index].tight_sphere);
 
 	if (draw && in_clip) {
+		// record our cluster and triangle counts
 		uint pos = atomicAdd(should_draw[0], 1);
+		atomicAdd(should_draw[1], clusters[cluster_index].index_count);
 
 		// debugPrintfEXT("%u, ", pos);
 

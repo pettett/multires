@@ -11,6 +11,7 @@
 #extension GL_EXT_debug_printf : enable
 
 #include "structs\cluster_data.glsl"
+#include "structs\range.glsl"
 
 layout(binding = 1) readonly buffer ShouldDraw {
 	uint should_draw[];
@@ -20,16 +21,20 @@ layout(binding = 2) readonly buffer Clusters {
 	ClusterData clusters[];
 };
 
+layout(binding = 4) buffer DrawIndexedIndirectData {
+	DrawIndexedIndirect indirect[];
+};
+
 layout(binding = 5) writeonly buffer ResultIndicies {
 	uint result_indicies[];
 };
 
-layout(binding = 6) readonly buffer Indicies {
-	uint indices[];
+layout(std430, binding = 7) readonly buffer RangeBuffer {
+	Range ranges[];
 };
 
-layout(binding = 7) buffer DrawIndexedIndirectData {
-	DrawIndexedIndirect indirect[];
+layout(binding = 8) readonly buffer Indicies {
+	uint indices[];
 };
 
 layout(push_constant) uniform constants {
@@ -47,22 +52,31 @@ void main() {
 	uint gid = gl_WorkGroupID.x;
 
 	uint idx = id.x;
+	uint indirect_index = instance_index + 1;
+	uint start = ranges[indirect_index].start;
+	uint end = ranges[indirect_index].end;
 
-	uint len = should_draw[0];
+	// debugPrintfEXT("Instance: %u\n", instance_index);
+
+	// debugPrintfEXT("Range: %u - %u\n", start, end);
+
+	uint len = end - start;
+	uint cluster_selection = should_draw[start + idx];
+
 	// uint index_count = should_draw[1];
 
 	// Add things within this workgroup
-	bool draw = should_draw[idx + 2] > 0 && idx < len;
+	bool draw = cluster_selection > 0;
 
-	uint indices_start = indirect[instance_index + 1].base_index;
+	uint indices_start = indirect[indirect_index].base_index;
 
 	if (subgroupAll(draw)) {
-		uint cluster_id = should_draw[idx + 2] - 1;
+		uint cluster_id = cluster_selection - 1;
 
 		uint destination_idx;
 		if (subgroupElect()) {
 			destination_idx =
-				indices_start + atomicAdd(indirect[instance_index + 1].index_count, clusters[cluster_id].index_count);
+				indices_start + atomicAdd(indirect[indirect_index].index_count, clusters[cluster_id].index_count);
 		}
 		destination_idx = subgroupBroadcastFirst(destination_idx);
 

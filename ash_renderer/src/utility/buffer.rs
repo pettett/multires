@@ -1,6 +1,8 @@
 use std::{
     marker::PhantomData,
-    mem, ptr,
+    mem,
+    ops::{Range, RangeBounds},
+    ptr,
     sync::{Arc, Mutex},
 };
 
@@ -187,17 +189,50 @@ impl<T> TBuffer<T> {
 
 impl TBuffer<vk::DrawMeshTasksIndirectCommandEXT> {
     /// Add cmd_draw_mesh_tasks_indirect to this task buffer
-    pub unsafe fn draw_tasks_indirect(&self, cmd: vk::CommandBuffer) {
-        self.buffer
-            .device
-            .fn_mesh_shader
-            .cmd_draw_mesh_tasks_indirect(
+    pub fn draw_tasks_indirect(&self, cmd: vk::CommandBuffer) {
+        //Safety : buffer must be correctly configured
+        unsafe {
+            self.buffer
+                .device
+                .fn_mesh_shader
+                .cmd_draw_mesh_tasks_indirect(
+                    cmd,
+                    self.handle(),
+                    0,
+                    self.len() as _,
+                    self.stride() as _,
+                );
+        }
+    }
+}
+
+impl TBuffer<vk::DispatchIndirectCommand> {
+    /// Add cmd_draw_mesh_tasks_indirect to this task buffer
+    pub fn dispatch_indirect(&self, cmd: vk::CommandBuffer, index: usize) {
+        assert!(index < self.len());
+        unsafe {
+            self.buffer.device.cmd_dispatch_indirect(
                 cmd,
                 self.handle(),
-                0,
-                self.len() as _,
+                (self.stride() * index) as _,
+            );
+        }
+    }
+}
+
+impl TBuffer<vk::DrawIndexedIndirectCommand> {
+    /// Add cmd_draw_mesh_tasks_indirect to this task buffer
+    pub fn draw_indexed_indirect(&self, cmd: vk::CommandBuffer, first: usize, count: usize) {
+        assert!(first + count <= self.len());
+        unsafe {
+            self.buffer.device.cmd_draw_indexed_indirect(
+                cmd,
+                self.handle(),
+                (self.stride() * first) as _,
+                (count) as _,
                 self.stride() as _,
             );
+        }
     }
 }
 

@@ -24,8 +24,8 @@ use crate::{
 
 use super::{
     render_multires_indices::{
-        create_traditional_graphics_descriptor_set_layout,
-        create_traditional_graphics_descriptor_sets, create_traditional_graphics_pipeline,
+        create_primitive_graphics_pipeline, create_traditional_graphics_descriptor_set_layout,
+        create_traditional_graphics_descriptor_sets,
     },
     DrawPipeline,
 };
@@ -47,7 +47,7 @@ impl DrawFullRes {
     pub fn new(renderer: &Renderer, mesh_data: &MeshData, scene: &Scene) -> Self {
         let ubo_layout = create_traditional_graphics_descriptor_set_layout(&renderer.core);
 
-        let graphics_pipeline = create_traditional_graphics_pipeline(
+        let graphics_pipeline = create_primitive_graphics_pipeline(
             &renderer.core,
             &renderer.render_pass,
             renderer.screen.swapchain().extent,

@@ -20,36 +20,24 @@
 #include "structs\model.glsl"
 #include "structs\range.glsl"
 
-//@group(0) @binding(0) var<storage, write> result_indicies: array<i32>;
-
-// layout(binding = 0) writeonly buffer ResultIndicies {
-//     uint result[];
-// } result_indicies;
-
-// layout(binding = 1) writeonly buffer DrawIndirectParams {
-//     DrawIndexedIndirect result[];
-// } draw_indirect_params;
-
 layout(binding = 0) readonly buffer ModelUniformBufferObject {
 	Model models[];
 };
-
-layout(binding = 2) readonly buffer Clusters {
-	ClusterData clusters[];
-};
-
 layout(binding = 1) writeonly buffer ShouldDraw {
 	uint draw_list[];
 };
-
+layout(binding = 2) readonly buffer Clusters {
+	ClusterData clusters[];
+};
 layout(binding = 3) readonly uniform CameraUniformBufferObject {
 	CameraUniformObject ubo;
 };
-
+layout(binding = 4) buffer DrawIndexedIndirectData {
+	DrawIndexedIndirect indirect[];
+};
 layout(std430, binding = 6) writeonly buffer IndirectDrawBuffer {
 	IndirectDispatchData indirect_draw[];
 };
-
 layout(std430, binding = 7) buffer RangeBuffer {
 	Range ranges[];
 };
@@ -78,5 +66,29 @@ void main() {
 	uint instance = gl_WorkGroupID.y;
 	uint cluster_count = traverse_dag(idx, instance);
 
-	output_selected_clusters(idx, instance, cluster_count, TASK_GROUP_SIZE);
+	output_selected_clusters(idx, instance, cluster_count, 1);
+
+	// We also need to output the indirect draw data corresponding to this selection.
+	// The indices will be copied as a later step
+	uint index_count = 0;
+
+	// share addition between invocations
+	for (uint c = idx; c < cluster_count; c += LOCAL_SIZE_X) {
+		index_count += clusters[to_draw[c]].index_count;
+	}
+
+	index_count = subgroupAdd(index_count);
+	if (subgroupElect()) {
+
+		uint indices_start = atomicAdd(indirect[0].base_index, index_count);
+
+		// keep index count as 0, so it can be atomic added to allocate individual cluster index positions
+		indirect[instance + 1].index_count = 0;
+		indirect[instance + 1].instance_count = 1;
+		indirect[instance + 1].base_index = indices_start;
+		indirect[instance + 1].base_vertex = 0;
+		indirect[instance + 1].base_instance = instance;
+
+		// debugPrintfEXT("Index: %u - %u\n", indices_start, index_count);
+	}
 }

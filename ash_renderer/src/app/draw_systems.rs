@@ -13,6 +13,7 @@ use crate::{
         compute_culled_indices::ComputeCulledIndices,
         draw_full_res::DrawFullRes,
         draw_lod_chain::DrawLODChain,
+        expanding_compute_culled_indices::ExpandingComputeCulledIndices,
         expanding_compute_culled_mesh::ExpandingComputeCulledMesh,
         indirect_tasks::{IndirectTasks, MeshShaderMode},
         stub::Stub,
@@ -60,7 +61,7 @@ pub fn update_pipeline(
     println!("Switching to {s:?}");
 
     let mut draw_pipeline: Box<dyn DrawPipeline + Send + Sync> = match s {
-        MeshDrawingPipelineType::IndirectTasks => Box::new(IndirectTasks::new(
+        MeshDrawingPipelineType::LocalSelectMesh => Box::new(IndirectTasks::new(
             renderer.core.clone(),
             &renderer,
             &renderer.screen,
@@ -78,7 +79,15 @@ pub fn update_pipeline(
                 &mesh_data,
             ))
         }
-        MeshDrawingPipelineType::ComputeCulledIndices => Box::new(ComputeCulledIndices::new(
+        MeshDrawingPipelineType::ExpandingComputeCulledIndices => {
+            Box::new(ExpandingComputeCulledIndices::new(
+                renderer.core.clone(),
+                &renderer,
+                &scene,
+                &mesh_data,
+            ))
+        }
+        MeshDrawingPipelineType::LocalSelectIndices => Box::new(ComputeCulledIndices::new(
             renderer.core.clone(),
             &renderer,
             &scene,
@@ -183,23 +192,28 @@ pub fn draw_gui(
 
             ui.label(format!("Current Pipeline: {:?}", renderer.current_pipeline));
 
+            ui.label("Mesh Shaders:");
+
             ui.add_enabled_ui(renderer.core.device.features.mesh_shader, |ui| {
-                if ui.button("Indirect Tasks").clicked() {
-                    draw_events.send(MeshDrawingPipelineType::IndirectTasks)
+                if ui.button("Local Select Mesh").clicked() {
+                    draw_events.send(MeshDrawingPipelineType::LocalSelectMesh)
+                }
+
+                if ui.button("Traverse Select Mesh").clicked() {
+                    draw_events.send(MeshDrawingPipelineType::ExpandingComputeCulledMesh)
                 }
             });
 
-            // if ui.button("Compute Culled Mesh").clicked() {
-            //     draw_events.send(MeshDrawingPipelineType::ComputeCulledMesh)
-            // }
+            ui.label("Primitive Shaders:");
 
-            if ui.button("Expanding Compute Culled Mesh").clicked() {
-                draw_events.send(MeshDrawingPipelineType::ExpandingComputeCulledMesh)
+            if ui.button("Local Select Indices").clicked() {
+                draw_events.send(MeshDrawingPipelineType::LocalSelectIndices)
+            }
+            if ui.button("Traverse Select Indices").clicked() {
+                draw_events.send(MeshDrawingPipelineType::ExpandingComputeCulledIndices)
             }
 
-            if ui.button("Compute Culled Indices").clicked() {
-                draw_events.send(MeshDrawingPipelineType::ComputeCulledIndices)
-            }
+            ui.label("Normal Shaders:");
 
             if ui.button("Draw Full Res").clicked() {
                 draw_events.send(MeshDrawingPipelineType::DrawIndirect)
@@ -207,6 +221,9 @@ pub fn draw_gui(
             if ui.button("Draw LOD").clicked() {
                 draw_events.send(MeshDrawingPipelineType::DrawLOD)
             }
+
+            ui.label("Scene:");
+
             if ui.button("Add 1 More Instance").clicked() {
                 scene_events.send(SceneEvent::AddInstances(1));
             }

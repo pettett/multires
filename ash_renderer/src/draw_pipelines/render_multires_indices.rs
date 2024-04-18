@@ -59,7 +59,7 @@ impl RenderMultiresIndices {
     ) -> Self {
         let ubo_layout = create_traditional_graphics_descriptor_set_layout(core);
 
-        let graphics_pipeline = create_traditional_graphics_pipeline(
+        let graphics_pipeline = create_primitive_graphics_pipeline(
             &core,
             render_pass,
             screen.swapchain().extent,
@@ -93,13 +93,22 @@ impl RenderMultiresIndices {
         }
     }
 
-    pub fn compact_indices(
-        &self,
-        cmd: vk::CommandBuffer,
-        device: &Device,
-        instance: usize,
-        cluster_count: usize,
-    ) {
+    pub fn compact_indices(&self, cmd: vk::CommandBuffer, device: &Device, instance: usize) {
+        self.bind_compact(cmd, device);
+        self.dispatch_compact(cmd, device, instance);
+    }
+
+    pub fn bind_compact(&self, cmd: vk::CommandBuffer, device: &Device) {
+        unsafe {
+            device.cmd_bind_pipeline(
+                cmd,
+                vk::PipelineBindPoint::COMPUTE,
+                self.compact_indices_pipeline.handle(),
+            );
+        }
+    }
+
+    pub fn dispatch_compact(&self, cmd: vk::CommandBuffer, device: &Device, instance: usize) {
         let result_indices_buffer_barriers = [
             vk::BufferMemoryBarrier2::default()
                 .buffer(self.result_indices_buffer.handle())
@@ -120,27 +129,10 @@ impl RenderMultiresIndices {
         let result_indices_dependency_info =
             vk::DependencyInfo::default().buffer_memory_barriers(&result_indices_buffer_barriers);
 
+        self.indirect_compute_buffer
+            .dispatch_indirect(cmd, instance);
+
         unsafe {
-            device.cmd_bind_pipeline(
-                cmd,
-                vk::PipelineBindPoint::COMPUTE,
-                self.compact_indices_pipeline.handle(),
-            );
-
-            device.cmd_push_constants(
-                cmd,
-                self.compact_indices_pipeline.layout().handle(),
-                vk::ShaderStageFlags::COMPUTE,
-                0,
-                bytemuck::cast_slice(&[instance as u32]),
-            );
-
-            device.cmd_dispatch_indirect(
-                cmd,
-                self.indirect_compute_buffer.handle(),
-                (self.indirect_compute_buffer.stride() * instance) as _,
-            );
-
             // Force result indices to be complete before continuing.
             // Because we re-bind the pipelines every time, we need to specify this dependency for all
             // Otherwise, only the last instance will have correct info
@@ -183,16 +175,6 @@ impl RenderMultires for RenderMultiresIndices {
                 self.graphics_pipeline.handle(),
             );
 
-            //let vertex_buffers = [vertex_buffer];
-            //let offsets = [0_u64];
-
-            //device.cmd_bind_vertex_buffers(cmd, 0, &vertex_buffers, &offsets);
-            //device.cmd_bind_index_buffer(
-            //    cmd,
-            //    index_buffer,
-            //    0,
-            //    vk::IndexType::UINT32,
-            //);
             device.cmd_bind_descriptor_sets(
                 **cmd,
                 vk::PipelineBindPoint::GRAPHICS,
@@ -212,12 +194,10 @@ impl RenderMultires for RenderMultiresIndices {
             device.cmd_bind_vertex_buffers(**cmd, 0, &[self.vertex_buffer.handle()], &[0]);
 
             // Each instance has their own indirect drawing buffer, tracing out their position in the result buffer
-            device.cmd_draw_indexed_indirect(
+            self.draw_indexed_indirect_buffer.draw_indexed_indirect(
                 **cmd,
-                self.draw_indexed_indirect_buffer.handle(),
-                0,
-                self.draw_indexed_indirect_buffer.len() as _,
-                self.draw_indexed_indirect_buffer.stride() as _,
+                1,
+                self.draw_indexed_indirect_buffer.len() - 1,
             );
 
             device.cmd_end_render_pass(**cmd);
@@ -225,7 +205,7 @@ impl RenderMultires for RenderMultiresIndices {
     }
 }
 
-pub fn create_traditional_graphics_pipeline(
+pub fn create_primitive_graphics_pipeline(
     core: &Core,
     render_pass: &RenderPass,
     swapchain_extent: vk::Extent2D,

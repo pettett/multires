@@ -31,9 +31,9 @@ layout(push_constant) uniform constants {
 	uint instance_index;
 };
 
-const uint LOCAL_SIZE_X = 16;
+const uint LOCAL_SIZE_X = 1;
 
-layout(local_size_x = LOCAL_SIZE_X, local_size_y = 1, local_size_z = 1) in;
+layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
 
 void main() {
 	uvec3 id = gl_GlobalInvocationID;
@@ -45,8 +45,9 @@ void main() {
 	uint indices_start = atomicAdd(indirect[0].base_index, index_count);
 
 	// keep index count as 0, so it can be atomic added to allocate individual cluster index positions
-	indirect[instance_index].instance_count = 1;
-	indirect[instance_index].base_index = indices_start;
-	indirect[instance_index].base_vertex = 0;
-	indirect[instance_index].base_instance = instance_index;
+	indirect[instance_index + 1].index_count = 0;
+	indirect[instance_index + 1].instance_count = 1;
+	indirect[instance_index + 1].base_index = indices_start;
+	indirect[instance_index + 1].base_vertex = 0;
+	indirect[instance_index + 1].base_instance = instance_index;
 }

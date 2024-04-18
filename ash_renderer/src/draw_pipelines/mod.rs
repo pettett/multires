@@ -9,6 +9,7 @@ use crate::{
 pub mod compute_culled_indices;
 pub mod draw_full_res;
 pub mod draw_lod_chain;
+pub mod expanding_compute_culled_indices;
 pub mod expanding_compute_culled_mesh;
 pub mod indirect_tasks;
 pub mod render_multires;

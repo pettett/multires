@@ -33,9 +33,11 @@ fn main() {
                     let mut path = PathBuf::from_str(requesting_source).unwrap();
                     path.pop(); // Remove file name
                     path.push(requested_source); // Push requested name;
-                    fs::read_to_string(path).unwrap()
+                    fs::read_to_string(&path).map_err(|_| path).unwrap()
                 }
-                shaderc::IncludeType::Standard => fs::read_to_string(requested_source).unwrap(),
+                shaderc::IncludeType::Standard => fs::read_to_string(requested_source)
+                    .map_err(|_| requested_source)
+                    .unwrap(),
             };
 
             Ok(shaderc::ResolvedInclude {

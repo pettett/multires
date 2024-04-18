@@ -79,7 +79,7 @@ impl ProgramProc {
                                     (KeyCode::F7, ElementState::Pressed) => {
                                         vulkan_app
                                             .world
-                                            .send_event(MeshDrawingPipelineType::IndirectTasks);
+                                            .send_event(MeshDrawingPipelineType::LocalSelectMesh);
                                     }
                                     (KeyCode::F8, ElementState::Pressed) => {
                                         vulkan_app.world.send_event(

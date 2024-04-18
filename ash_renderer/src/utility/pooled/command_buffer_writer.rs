@@ -56,6 +56,15 @@ impl<'a> CommandBufferWriter<'a> {
             );
         }
     }
+    pub fn start_render_pass(&mut self, render_pass_begin_info: vk::RenderPassBeginInfo<'_>) {
+        unsafe {
+            self.device.cmd_begin_render_pass(
+                **self,
+                &render_pass_begin_info,
+                vk::SubpassContents::INLINE,
+            );
+        }
+    }
 }
 impl<'a> Drop for CommandBufferWriter<'a> {
     fn drop(&mut self) {
