@@ -444,6 +444,17 @@ pub mod test {
     }
 
     #[test]
+    fn test_contiguous_meshes() {
+        println!("Loading from gltf!");
+        let (mesh, _tri_mesh) = WingedMesh::from_gltf("../../assets/dragon_1m.glb");
+
+        let mesh_dual = mesh.generate_face_graph();
+
+        println!("Testing Contiguous!");
+        graph::assert_graph_contiguous(&mesh_dual);
+    }
+
+    #[test]
     pub fn generate_partition_graph() -> Result<(), Box<dyn error::Error>> {
         let test_config = &metis::PartitioningConfig {
             method: metis::PartitioningMethod::MultilevelKWay,

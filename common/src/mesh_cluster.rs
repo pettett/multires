@@ -1,6 +1,6 @@
 use crate::{bounding_sphere::BoundingSphere, meshlet::Meshlet, origin_cone::OriginCone};
 
-#[derive(Debug, Clone, bincode::Decode, bincode::Encode)]
+#[derive(Debug, Default, Clone, bincode::Decode, bincode::Encode)]
 pub struct MeshCluster {
     meshlets: Vec<Meshlet>,
     // Bounding sphere for the submesh
@@ -90,7 +90,7 @@ impl MeshCluster {
 
     pub fn error(&self) -> f32 {
         self.error
-		// self.index_count() as f32 * 0.0001
+        // self.index_count() as f32 * 0.0001
     }
 
     pub fn group_index(&self) -> usize {

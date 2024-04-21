@@ -7,6 +7,7 @@ members = [
 	# "renderer",
 	# "renderer_bevy",
 	# "vk_renderer",
+	"evaluation",
 	"ash_renderer",
 ]
 resolver = "2"

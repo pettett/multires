@@ -1,35 +1,18 @@
-use std::{thread};
+use std::thread;
 
 use baker::{
-    group_and_partition_and_simplify, mesh::winged_mesh::WingedMesh, meshopt_simplify_lod_chain,
-    simplify_lod_chain,
+    lod::{
+        lod_chain::simplify_lod_chain, meshopt_chain::meshopt_simplify_lod_chain,
+        multiresolution::group_and_partition_and_simplify,
+    },
+    mesh::winged_mesh::WingedMesh,
+    Args, Mode,
 };
-use clap::{Parser, ValueEnum};
+use clap::Parser;
 use common::Asset;
 
 // Castle
 // https://sketchfab.com/3d-models/upnor-castle-a08280d12911401aa6022c1a58f2b49a
-
-#[derive(Default, Clone, Copy, ValueEnum, Debug)]
-enum Mode {
-    #[default]
-    DAG,
-    MeshoptLOD,
-    BakerLOD,
-}
-
-/// Search for a pattern in a file and display the lines that contain it.
-#[derive(Parser)]
-struct Args {
-    /// The path to the mesh to read
-    #[arg(short, long)]
-    input: String,
-    #[arg(short, long)]
-    output: std::path::PathBuf,
-
-    #[arg(short, long, default_value = "dag")]
-    mode: Mode,
-}
 
 fn bake_mesh(input: std::path::PathBuf, output: std::path::PathBuf, mode: Mode) {
     println!("Loading from gltf!");
@@ -77,16 +60,17 @@ fn main() {
 
     let mut threads: Vec<thread::JoinHandle<()>> = Vec::new();
 
-    for entry in glob::glob(&args.input).expect("Failed to read glob") {
+    for entry in glob::glob(&args.input()).expect("Failed to read glob") {
         match entry {
             Ok(path) => {
                 let mut name = path.file_name().unwrap().to_str().unwrap().to_owned();
                 name.push_str(".bin");
-                let output = args.output.clone().join(name);
+                let output = args.output().join(name);
                 println!("{:?}", path.display());
                 println!("{:?}", output.display());
 
-                threads.push(thread::spawn(move || bake_mesh(path, output, args.mode)))
+                let mode = args.mode();
+                threads.push(thread::spawn(move || bake_mesh(path, output, mode)))
             }
             Err(e) => println!("{:?}", e),
         }

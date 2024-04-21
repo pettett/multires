@@ -119,17 +119,17 @@ impl MeshErrorEval for MultiResMesh {
         verts: &[MeshVert],
         samples: SampleMode,
     ) -> Vec<(usize, Vec<glam::Vec3A>)> {
-        let mut triangles = Vec::new();
-        let mut weights = Vec::new();
+        let mut layer_triangles = Vec::new();
+        let mut layer_weights = Vec::new();
 
         //#[cfg(feature = "progress")]
         let bar = indicatif::ProgressBar::new(self.clusters.len() as u64);
 
         for cluster in &self.clusters {
             // Ensure we have enough vectors
-            while triangles.len() <= cluster.lod {
-                triangles.push(Vec::new());
-                weights.push(Vec::new());
+            while layer_triangles.len() <= cluster.lod {
+                layer_triangles.push(Vec::new());
+                layer_weights.push(Vec::new());
             }
 
             for m in cluster.meshlets() {
@@ -138,7 +138,7 @@ impl MeshErrorEval for MultiResMesh {
                     let b = m.verts()[i[1] as usize] as usize;
                     let c = m.verts()[i[2] as usize] as usize;
 
-                    triangles[cluster.lod].push([a, b, c]);
+                    layer_triangles[cluster.lod].push([a, b, c]);
 
                     let tri = Triangle::new(
                         glam::Vec3A::from_slice(&verts[a].pos),
@@ -146,7 +146,7 @@ impl MeshErrorEval for MultiResMesh {
                         glam::Vec3A::from_slice(&verts[c].pos),
                     );
 
-                    weights[cluster.lod].push(tri.area());
+                    layer_weights[cluster.lod].push(tri.area());
                 }
             }
 
@@ -161,7 +161,7 @@ impl MeshErrorEval for MultiResMesh {
 
         let mut sample_points = Vec::new();
 
-        for (weights, tris) in weights.into_iter().zip(triangles.into_iter()) {
+        for (weights, tris) in layer_weights.into_iter().zip(layer_triangles.into_iter()) {
             let idx = WeightedIndex::new(weights).unwrap();
 
             let mut layer_samples = Vec::new();
@@ -222,14 +222,17 @@ pub fn sample_multires_error(mesh_name: &(impl AsRef<path::Path> + std::fmt::Deb
 
         println!("({}, {error}),", layer_total);
 
-        file.write_fmt(format_args!("{}, {error}\n", layer_total))
+        file.write_fmt(format_args!("{layer_total}, {error}\n"))
             .expect("Failed to write");
     }
 }
 
 #[cfg(test)]
 pub mod tests {
-    use crate::{group_and_partition_and_simplify, mesh::winged_mesh::WingedMesh};
+
+    use baker::{
+        lod::multiresolution::group_and_partition_and_simplify, mesh::winged_mesh::WingedMesh,
+    };
 
     use super::*;
 

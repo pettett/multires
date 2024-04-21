@@ -1,5 +1,6 @@
+use baker::mesh::plane::Plane;
+
 use super::line::Line;
-use crate::mesh::plane::Plane;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Triangle {

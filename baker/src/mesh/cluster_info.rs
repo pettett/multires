@@ -17,9 +17,9 @@ pub struct ClusterInfo {
 }
 
 impl ClusterInfo {
-    pub fn new(group_index: usize, num_tris: usize) -> Self {
+    pub fn new(group_index: Option<usize>, num_tris: usize) -> Self {
         Self {
-            group_index: Some(group_index),
+            group_index,
             num_tris,
             ..Default::default()
         }

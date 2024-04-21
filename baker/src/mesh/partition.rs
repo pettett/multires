@@ -69,8 +69,8 @@ impl WingedMesh {
     }
 
     /// Partition the mesh into a single cluster
-    pub fn cluster_unity(&mut self, _child_group_index: Option<usize>) {
-        self.clusters = vec![ClusterInfo::new(0, self.face_count())];
+    pub fn cluster_unity(&mut self) {
+        self.clusters = vec![ClusterInfo::new(None, self.face_count())];
 
         for (_fid, f) in self.iter_faces_mut() {
             f.cluster_idx = 0;

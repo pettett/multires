@@ -206,7 +206,7 @@ pub fn benchmark(
             }
             BenchmarkStage::Finish => {
                 if bench.t < 0.2 {
-                    bench.sx.send(()).unwrap();
+                    bench.sx.send(());
                     bench.t = 0.5;
                 }
                 // give a second for the recording to finish

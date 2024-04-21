@@ -1,6 +1,5 @@
 use std::cmp;
 
-use idmap::IntegerId;
 //#[cfg(feature = "progress")]
 use indicatif::ProgressStyle;
 
@@ -20,12 +19,12 @@ pub struct CollapseQueue {
     queue: priority_queue::PriorityQueue<EdgeID, QuadricError>,
 }
 
-pub fn tri_area(a: glam::Vec3A, b: glam::Vec3A, c: glam::Vec3A) -> f32 {
-    let ab = b - a;
-    let ac = c - a;
+// pub fn tri_area(a: glam::Vec3A, b: glam::Vec3A, c: glam::Vec3A) -> f32 {
+//     let ab = b - a;
+//     let ac = c - a;
 
-    glam::Vec3A::cross(ab, ac).length() / 2.0
-}
+//     glam::Vec3A::cross(ab, ac).length() / 2.0
+// }
 
 impl WingedMesh {
     pub fn create_quadrics(&self, verts: &[glam::Vec3A]) -> Vec<Quadric> {
@@ -243,10 +242,7 @@ impl WingedMesh {
 mod tests {
     use std::error::Error;
 
-    use crate::mesh::{
-        plane::Plane,
-        winged_mesh::test::{TEST_MESH_MONK},
-    };
+    use crate::mesh::{plane::Plane, winged_mesh::test::TEST_MESH_MONK};
 
     use super::super::winged_mesh::{test::TEST_MESH_HIGH, WingedMesh};
 

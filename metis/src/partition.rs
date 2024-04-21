@@ -21,7 +21,6 @@ use crate::{
 use common::graph::filter_nodes_by_weight;
 use indicatif::ProgressIterator;
 use petgraph::visit::EdgeRef;
-use rayon::prelude::*;
 use std::{collections::HashSet, ptr::null_mut, thread};
 use thiserror::Error;
 
