@@ -19,7 +19,7 @@ pub mod test {
 
         graph::petgraph_to_svg(
             &graph,
-            "..\\svg\\triangle_plane.svg",
+            "triangle_plane.svg",
             &|_, _| String::new(),
             graph::GraphSVGRender::Undirected {
                 positions: false,
@@ -44,7 +44,7 @@ pub mod test {
 
         graph::petgraph_to_svg(
             &graph,
-            "..\\svg\\triangle_plane_unweighted_group.svg",
+            "triangle_plane_unweighted_group.svg",
             &|_, (i, _)| {
                 format!(
                     "color={}",
@@ -97,7 +97,7 @@ pub mod test {
 
         graph::petgraph_to_svg(
             &graph,
-            "..\\svg\\triangle_plane_unweighted_group.svg",
+            "triangle_plane_unweighted_group.svg",
             &|_, (i, _)| {
                 format!(
                     "color={}",
@@ -199,7 +199,7 @@ pub mod test {
 
         graph::petgraph_to_svg(
             &graph,
-            "..\\svg\\triangle_plane_weighted_group.svg",
+            "triangle_plane_weighted_group.svg",
             &|_, (i, _)| {
                 format!(
                     "color={}",

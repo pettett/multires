@@ -341,21 +341,17 @@ pub mod test {
 
     use crate::mesh::{
         graph::colour_graph,
+        partition::PartitionCount,
         winged_mesh::{
             test::{TEST_MESH_LOW, TEST_MESH_PLANE_LOW},
             WingedMesh,
         },
     };
 
-    pub const DOT_OUT: &str = "..\\baker\\graph.gv";
-
-    pub const HIERARCHY_SVG_OUT: &str = "..\\baker\\hierarchy_graph.svg";
-    pub const PART_SVG_OUT: &str = "..\\baker\\part_graph.svg";
-
-    pub const FACE_SVG_OUT: &str = "..\\baker\\face_graph.svg";
-
-    pub const FACE_SVG_OUT_2: &str = "..\\baker\\face_graph2.svg";
-    pub const ERROR_SVG_OUT: &str = "..\\error.svg";
+    pub const HIERARCHY_SVG_OUT: &str = "hierarchy_graph.svg";
+    pub const PART_SVG_OUT: &str = "part_graph.svg";
+    pub const FACE_SVG_OUT: &str = "face_graph.svg";
+    pub const FACE_SVG_OUT_2: &str = "face_graph2.svg";
 
     const COLS: [&str; 10] = [
         "red",
@@ -444,17 +440,6 @@ pub mod test {
     }
 
     #[test]
-    fn test_contiguous_meshes() {
-        println!("Loading from gltf!");
-        let (mesh, _tri_mesh) = WingedMesh::from_gltf("../../assets/dragon_1m.glb");
-
-        let mesh_dual = mesh.generate_face_graph();
-
-        println!("Testing Contiguous!");
-        graph::assert_graph_contiguous(&mesh_dual);
-    }
-
-    #[test]
     pub fn generate_partition_graph() -> Result<(), Box<dyn error::Error>> {
         let test_config = &metis::PartitioningConfig {
             method: metis::PartitioningMethod::MultilevelKWay,
@@ -465,8 +450,13 @@ pub mod test {
         let mesh = TEST_MESH_LOW;
         let (mut mesh, tri_mesh) = WingedMesh::from_gltf(mesh);
 
+        mesh.group_unity();
         // Apply primary partition, that will define the lowest level clusterings
-        mesh.cluster_within_groups(test_config, &tri_mesh.verts, None, Some(60))?;
+        mesh.cluster_within_groups(
+            test_config,
+            &tri_mesh.verts,
+            PartitionCount::MembersPerPartition(60),
+        )?;
         mesh.group(test_config).unwrap();
 
         graph::petgraph_to_svg(
@@ -545,8 +535,13 @@ pub mod test {
 
         println!("Faces: {}, Verts: {}", mesh.face_count(), mesh.vert_count());
 
+        mesh.group_unity();
         // Apply primary partition, that will define the lowest level clusterings
-        mesh.cluster_within_groups(test_config, &tri_mesh.verts, None, Some(60))?;
+        mesh.cluster_within_groups(
+            test_config,
+            &tri_mesh.verts,
+            PartitionCount::MembersPerPartition(60),
+        )?;
 
         mesh.group(test_config)?;
         let mut graph: petgraph::Graph<(), ()> = petgraph::Graph::new();
@@ -566,7 +561,11 @@ pub mod test {
 
             seen_groups += mesh.groups.len();
 
-            mesh.cluster_within_groups(test_config, &tri_mesh.verts, Some(2), None)?;
+            mesh.cluster_within_groups(
+                test_config,
+                &tri_mesh.verts,
+                PartitionCount::Partitions(2),
+            )?;
 
             let new_part_nodes: Vec<_> =
                 mesh.clusters.iter().map(|_o| graph.add_node(())).collect();

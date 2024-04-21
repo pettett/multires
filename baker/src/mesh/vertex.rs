@@ -1,5 +1,3 @@
-
-
 use super::{edge::EdgeID, plane::Plane, quadric::Quadric, winged_mesh::WingedMesh};
 
 #[derive(Default, Hash, Debug, Clone, Copy, PartialEq, Eq)]
@@ -203,7 +201,7 @@ impl Vertex {
     }
 
     /// Generate error matrix Q, the sum of Kp for all planes p around this vertex.
-    /// TODO: Eventually we can also add a high penality plane if this is a vertex on a boundary, but manually checking may be easier
+    /// We can also add a high penality plane if this is a vertex on a boundary, but manually checking may be easier
     pub fn generate_error_matrix(&self, mesh: &WingedMesh, verts: &[glam::Vec3A]) -> Quadric {
         let mut q = Quadric::default();
 

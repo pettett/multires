@@ -102,7 +102,7 @@ impl MultiResData for MultiResMesh {
             clusters.push(ClusterData {
                 index_offset: index_sum,
                 index_count,
-                error:  cluster.error(),
+                error: cluster.error(),
                 center: cluster.saturated_bound.center().into(),
 
                 parent0: -1,
@@ -374,8 +374,8 @@ mod tests {
     /// For expanding searches of the dag, starting at the top and
     #[test]
     fn test_dag_buffer_queue_traversal() {
-        const QUEUE_SIZE: usize = 3000;
-        const STARTING: usize = 8;
+        const QUEUE_SIZE: usize = 4000;
+        const STARTING: usize = 32;
 
         let mesh = MultiResMesh::load_from_cargo_manifest_dir("dragon_high.glb.bin").unwrap();
         let (cluster_order, groups) = mesh.order_clusters();

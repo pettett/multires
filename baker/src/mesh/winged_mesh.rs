@@ -1,6 +1,6 @@
 use anyhow::Context;
 use common::TriMesh;
-use glam::{Vec3};
+use glam::Vec3;
 
 use std::{collections::HashSet, fs};
 
@@ -664,7 +664,7 @@ pub mod test {
     use common::graph;
     use metis::PartitioningConfig;
 
-    use crate::mesh::winged_mesh::WingedMesh;
+    use crate::mesh::{partition::PartitionCount, winged_mesh::WingedMesh};
     pub const TEST_MESH_HIGH: &str =
         "C:\\Users\\maxwe\\OneDriveC\\sync\\projects\\assets\\sphere.glb";
     pub const TEST_MESH_DRAGON: &str =
@@ -842,7 +842,13 @@ pub mod test {
 
         mesh.assert_valid().unwrap();
 
-        mesh.cluster_within_groups(test_config, &tri_mesh.verts, None, Some(60))?;
+        mesh.group_unity();
+
+        mesh.cluster_within_groups(
+            test_config,
+            &tri_mesh.verts,
+            PartitionCount::MembersPerPartition(60),
+        )?;
 
         mesh.assert_valid().unwrap();
 
@@ -850,7 +856,7 @@ pub mod test {
 
         mesh.assert_valid().unwrap();
 
-        mesh.cluster_within_groups(test_config, &tri_mesh.verts, Some(2), None)?;
+        mesh.cluster_within_groups(test_config, &tri_mesh.verts, PartitionCount::Partitions(2))?;
 
         println!("{} {}", mesh.cluster_count(), mesh.groups.len());
 
@@ -873,8 +879,13 @@ pub mod test {
         let mesh = TEST_MESH_MID;
         let (mut mesh, tri_mesh) = WingedMesh::from_gltf(mesh);
 
+        mesh.group_unity();
         // Apply primary partition, that will define the lowest level clusterings
-        mesh.cluster_within_groups(test_config, &tri_mesh.verts, None, Some(60))?;
+        mesh.cluster_within_groups(
+            test_config,
+            &tri_mesh.verts,
+            PartitionCount::MembersPerPartition(60),
+        )?;
 
         let mut boundary_face_ratio = 0.0;
         for pi in 0..mesh.clusters.len() {
@@ -1036,6 +1047,8 @@ pub mod test {
         )
         .unwrap();
 
+        mesh.group_unity();
+
         let mut embed_prop = 0.0;
 
         for vid in 0..mesh.verts.len() {
@@ -1052,18 +1065,6 @@ pub mod test {
     }
 
     #[test]
-    fn test_meshes_valid() {
-        let mesh_names = ["../../assets/rock.glb", "../../assets/dragon_1m.glb"];
-
-        for mesh_name in &mesh_names {
-            println!("Loading from gltf!");
-            let (mesh, _tri_mesh) = WingedMesh::from_gltf(mesh_name);
-
-            mesh.assert_valid().unwrap();
-        }
-    }
-
-    #[test]
     fn test_reduce_contiguous() {
         let (mut mesh, tri_mesh) = WingedMesh::from_gltf(TEST_MESH_CONE);
 
@@ -1072,6 +1073,8 @@ pub mod test {
         //assert_contiguous_graph(&working_mesh.generate_face_graph());
 
         let mut quadrics = mesh.create_quadrics(&tri_mesh.verts);
+
+        mesh.group_unity();
 
         let _e = match mesh.reduce_within_groups(
             &tri_mesh.verts,

@@ -10,6 +10,11 @@ use common::{
 
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 
+pub enum PartitionCount {
+    MembersPerPartition(u32),
+    Partitions(u32),
+}
+
 impl WingedMesh {
     pub fn partition_contiguous(&mut self) -> Vec<usize> {
         println!("Wiping partitions");
@@ -75,6 +80,16 @@ impl WingedMesh {
         for (_fid, f) in self.iter_faces_mut() {
             f.cluster_idx = 0;
         }
+    }
+    pub fn group_unity(&mut self) {
+        for c in &mut self.clusters {
+            c.set_group_index_once(0);
+        }
+        self.groups = vec![GroupInfo {
+            clusters: (0..self.clusters.len()).collect(),
+            saturated_bound: Default::default(),
+            saturated_error: Default::default(),
+        }]
     }
 
     /// Cluster the mesh ignoring group boundaries
@@ -304,9 +319,16 @@ impl WingedMesh {
         &mut self,
         config: &metis::PartitioningConfig,
         verts: &[glam::Vec3A],
-        parts_per_group: Option<u32>,
-        tris_per_cluster: Option<u32>,
+        partitions: PartitionCount,
     ) -> Result<usize, metis::PartitioningError> {
+        #[cfg(test)]
+        for cluster in &self.clusters {
+            assert!(
+                cluster.group().is_some(),
+                "All clusters must be grouped to re-cluster within groups"
+            );
+        }
+
         let graphs = self.generate_group_keyed_graphs();
 
         println!("Partitioning {} groups into sub-partitions", graphs.len());
@@ -323,10 +345,11 @@ impl WingedMesh {
                     return Ok((Vec::new(), 0));
                 }
 
-                let parts = if let Some(parts_per_group) = parts_per_group {
-                    parts_per_group
-                } else {
-                    (graph.node_count() as u32).div_ceil(tris_per_cluster.unwrap())
+                let parts = match partitions {
+                    PartitionCount::MembersPerPartition(tris_per_cluster) => {
+                        (graph.node_count() as u32).div_ceil(tris_per_cluster)
+                    }
+                    PartitionCount::Partitions(clusters_per_group) => clusters_per_group,
                 };
 
                 assert_graph_contiguous(graph);

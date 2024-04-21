@@ -3,7 +3,7 @@ use core::fmt;
 use petgraph::dot;
 use serde::de::DeserializeOwned;
 use std::{
-    fs,
+    env, fs,
     io::{Read, Write},
     ops::Range,
     path, process, vec,
@@ -152,12 +152,10 @@ where
     <G as petgraph::visit::Data>::EdgeWeight: fmt::Debug,
     <G as petgraph::visit::Data>::NodeWeight: fmt::Debug,
 {
-    let mut root = std::env::current_dir().unwrap();
-
-    if cfg!(test) {
-        root = root.parent().unwrap().to_owned();
+    let root = std::env::temp_dir().join("multires");
+    if !root.is_dir() {
+        fs::create_dir(&root).unwrap();
     }
-
     let dot_out_path = root.join("dot.gv");
     let out_path = root.join(out);
 
@@ -289,18 +287,14 @@ pub fn graph_contiguous<V, E, Ty: petgraph::EdgeType>(graph: &petgraph::Graph<V,
 pub fn assert_graph_contiguous<V: std::fmt::Debug, E: std::fmt::Debug, Ty: petgraph::EdgeType>(
     graph: &petgraph::Graph<V, E, Ty>,
 ) {
-    let dir = if cfg!(test) {
-        "..\\svg\\non_contig_graph.svg"
-    } else {
-        "svg\\non_contig_graph.svg"
-    };
+    let dir = "non_contig_graph.svg";
 
     if !graph_contiguous(graph) {
         println!("Graph is not contiguous, outputting error...");
 
         petgraph_to_svg(
             graph,
-            dir,
+            &dir,
             &|_, _| String::new(),
             GraphSVGRender::Directed {
                 node_label: Label::None,
@@ -310,7 +304,7 @@ pub fn assert_graph_contiguous<V: std::fmt::Debug, E: std::fmt::Debug, Ty: petgr
 
         assert!(
             false,
-            "Graph is not contiguous. Outputted error graph to {}",
+            "Graph is not contiguous. Outputted error graph to {:?}",
             dir
         );
     }

@@ -362,6 +362,7 @@ mod tests {
         let (mut mesh, tri_mesh) = WingedMesh::from_gltf(TEST_MESH_MONK);
         let mut quadrics = mesh.create_quadrics(&tri_mesh.verts);
 
+        mesh.group_unity();
         for _i in 0..4 {
             mesh.assert_valid().unwrap();
             mesh.reduce_within_groups(&tri_mesh.verts, &mut quadrics, &[mesh.face_count() / 4])

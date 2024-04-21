@@ -1,9 +1,15 @@
 use std::ops;
 
 /// Quadric type. Internally a DMat4.
-#[derive(Default)]
+
 #[repr(transparent)]
 pub struct Quadric(pub glam::DMat4);
+
+impl Default for Quadric {
+    fn default() -> Self {
+        Self(glam::DMat4::ZERO)
+    }
+}
 
 impl ops::Add for &Quadric {
     type Output = Quadric;

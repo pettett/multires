@@ -2,7 +2,7 @@ use common::{MeshVert, MultiResMesh, TriMesh};
 
 use crate::{
     lod::{generate_clusters, stat_readout},
-    mesh::winged_mesh::WingedMesh,
+    mesh::{winged_mesh::WingedMesh, PartitionCount},
     CLUSTERS_PER_SIMPLIFIED_GROUP, STARTING_CLUSTER_SIZE,
 };
 
@@ -163,8 +163,7 @@ pub fn group_and_partition_and_simplify(
         let partition_count = match mesh.cluster_within_groups(
             group_clustering_config,
             &tri_mesh.verts,
-            Some(CLUSTERS_PER_SIMPLIFIED_GROUP as _),
-            None,
+            PartitionCount::Partitions(CLUSTERS_PER_SIMPLIFIED_GROUP as _),
         ) {
             Ok(partition_count) => partition_count,
             Err(e) => {

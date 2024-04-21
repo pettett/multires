@@ -48,3 +48,25 @@ impl Meshlet {
         &self.local_strip_indices
     }
 }
+
+#[cfg(test)]
+mod tests {
+
+    use crate::Meshlet;
+
+    #[test]
+    fn test_local_indices() {
+        let verts = vec![100, 200, 300];
+        let m = Meshlet::from_local_indices(vec![0, 1, 2], verts.clone());
+
+        assert_eq!(m.local_to_global_vert_index(1), 200);
+        assert_eq!(m.calc_indices(), verts);
+        let mut indices = vec![0];
+
+        m.calc_indices_to_vec(&mut indices);
+
+        assert_eq!(indices, vec![0, 100, 200, 300]);
+
+        assert_eq!(m.verts(), &verts);
+    }
+}
