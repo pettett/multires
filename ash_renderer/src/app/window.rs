@@ -7,6 +7,7 @@ use winit::window::Fullscreen;
 
 use super::app::App;
 use super::benchmarker::Benchmarker;
+use super::recorder::Recorder;
 use super::renderer::{MeshDrawingPipelineType, Renderer};
 use super::scene::SceneEvent;
 
@@ -87,7 +88,7 @@ impl ProgramProc {
                                         );
                                     }
                                     (KeyCode::F9, ElementState::Pressed) => {
-                                        vulkan_app.world.insert_resource(Benchmarker::new_record());
+                                        vulkan_app.world.insert_resource(Recorder::default());
                                     }
                                     (KeyCode::F11, ElementState::Pressed) => {
                                         match vulkan_app.renderer().window().fullscreen() {
@@ -114,6 +115,9 @@ impl ProgramProc {
                                             }
                                         }
                                     }
+                                    (KeyCode::KeyT, ElementState::Pressed) => vulkan_app
+                                        .renderer()
+                                        .screenshot("".to_string(), "screenshot.png".to_string()),
                                     _ => {}
                                 },
                                 _ => {}

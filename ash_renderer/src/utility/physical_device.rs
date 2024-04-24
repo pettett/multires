@@ -4,12 +4,16 @@ use ash::vk;
 
 use crate::VkHandle;
 
-use super::{extensions::Extensions, instance::Instance, macros::vk_handle_wrapper, swapchain::SwapChainSupportDetail};
+use super::{
+    extensions::Extensions, instance::Instance, macros::vk_handle_wrapper,
+    swapchain::SwapChainSupportDetail,
+};
 
 pub struct PhysicalDevice {
     instance: Arc<Instance>,
     handle: vk::PhysicalDevice,
     pub extensions: Extensions,
+    pub properties: vk::PhysicalDeviceProperties,
 }
 
 vk_handle_wrapper!(PhysicalDevice);
@@ -101,12 +105,18 @@ impl PhysicalDevice {
         swapchain_support: SwapChainSupportDetail,
         extensions: Extensions,
     ) -> Self {
-        println!("Attaching to device with extensions: {extensions:?}");
+        let properties = unsafe { instance.get_physical_device_properties(handle) };
+
+        println!(
+            "Attaching to device {:?} with extensions: {extensions:?}",
+            properties.device_name_as_c_str().unwrap()
+        );
 
         Self {
             handle,
             instance,
             extensions,
+            properties,
         }
     }
     pub fn get_memory_properties(&self) -> vk::PhysicalDeviceMemoryProperties {
@@ -116,20 +126,20 @@ impl PhysicalDevice {
         }
     }
 
-    pub fn get_subgroup_properties(&self) -> PhysicalDeviceSubgroupProperties {
+    pub fn get_format_properties(&self, format: vk::Format) -> vk::FormatProperties {
         unsafe {
-            let mut subgroup_properties = vk::PhysicalDeviceSubgroupProperties {
-                s_type: vk::StructureType::PHYSICAL_DEVICE_SUBGROUP_PROPERTIES,
-                p_next: ptr::null_mut(),
-                ..Default::default()
-            };
+            self.instance
+                .get_physical_device_format_properties(self.handle, format)
+        }
+    }
 
-            let mut physical_device_properties = vk::PhysicalDeviceProperties2 {
-                s_type: vk::StructureType::PHYSICAL_DEVICE_PROPERTIES_2,
-                p_next: &mut subgroup_properties as *mut _ as *mut std::ffi::c_void,
-                ..Default::default()
-            };
+    pub fn get_subgroup_properties(&self) -> PhysicalDeviceSubgroupProperties {
+        let mut subgroup_properties = vk::PhysicalDeviceSubgroupProperties::default();
 
+        let mut physical_device_properties =
+            vk::PhysicalDeviceProperties2::default().push_next(&mut subgroup_properties);
+
+        unsafe {
             self.instance
                 .get_physical_device_properties2(self.handle, &mut physical_device_properties);
 

@@ -57,9 +57,7 @@ impl Transform {
     }
 
     pub fn look_at(&mut self, target: Vec3A) {
-        let look_at = Mat4::look_at_rh(self.pos.into(), target.into(), Vec3::Y);
-
-        self.rot = look_at.to_scale_rotation_translation().1;
+        self.rot = Quat::from_rotation_arc(-Vec3::Z, (target - self.pos).normalize().into());
     }
 
     pub fn get_euler(&self) -> Vec3 {

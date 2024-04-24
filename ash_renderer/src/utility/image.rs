@@ -128,6 +128,56 @@ impl Sampler {
     }
 }
 
+pub trait ImageTrackedLayout: VkHandle<VkItem = vk::Image> {
+    fn set_current_layout(&mut self, new: vk::ImageLayout);
+    fn current_layout(&self) -> vk::ImageLayout;
+    fn insert_image_memory_barrier(
+        &mut self,
+        device: &ash::Device,
+        cmd_buff: &vk::CommandBuffer,
+        src_access_mask: vk::AccessFlags2,
+        dst_access_mask: vk::AccessFlags2,
+        new_image_layout: vk::ImageLayout,
+        src_stage_mask: vk::PipelineStageFlags2,
+        dst_stage_mask: vk::PipelineStageFlags2,
+        subresource_range: vk::ImageSubresourceRange,
+    ) {
+        let image_memory_barrier = [vk::ImageMemoryBarrier2::default()
+            .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+            .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+            .src_access_mask(src_access_mask)
+            .dst_access_mask(dst_access_mask)
+            .src_stage_mask(src_stage_mask)
+            .dst_stage_mask(dst_stage_mask)
+            .old_layout(self.current_layout())
+            .new_layout(new_image_layout)
+            .image(self.handle())
+            .subresource_range(subresource_range)];
+
+        self.set_current_layout(new_image_layout);
+
+        let dep_info = vk::DependencyInfo::default().image_memory_barriers(&image_memory_barrier);
+
+        unsafe {
+            device.cmd_pipeline_barrier2(*cmd_buff, &dep_info);
+        }
+    }
+}
+
+pub struct ImageWrapper {
+    handle: vk::Image,
+    current_layout: vk::ImageLayout,
+}
+
+impl ImageWrapper {
+    pub fn new(handle: vk::Image, current_layout: vk::ImageLayout) -> Self {
+        Self {
+            handle,
+            current_layout,
+        }
+    }
+}
+
 pub struct Image {
     device: Arc<Device>,
     handle: vk::Image,
@@ -142,6 +192,7 @@ pub struct Image {
 }
 
 vk_handle_wrapper!(Image);
+vk_handle_wrapper!(ImageWrapper, Image);
 
 impl Drop for Image {
     fn drop(&mut self) {
@@ -154,6 +205,26 @@ impl Drop for Image {
 
             self.allocator.lock().unwrap().free(allocation).unwrap();
         }
+    }
+}
+
+impl ImageTrackedLayout for Image {
+    fn set_current_layout(&mut self, new: vk::ImageLayout) {
+        self.current_layout = new;
+    }
+
+    fn current_layout(&self) -> vk::ImageLayout {
+        self.current_layout
+    }
+}
+
+impl ImageTrackedLayout for ImageWrapper {
+    fn set_current_layout(&mut self, new: vk::ImageLayout) {
+        self.current_layout = new;
+    }
+
+    fn current_layout(&self) -> vk::ImageLayout {
+        self.current_layout
     }
 }
 
@@ -610,8 +681,9 @@ impl Image {
     pub fn current_layout(&self) -> vk::ImageLayout {
         self.current_layout
     }
-    pub fn set_current_layout(&mut self, layout: vk::ImageLayout) {
-        self.current_layout = layout
+
+    pub fn image_memory(&self) -> &Allocation {
+        &self.image_memory
     }
 }
 

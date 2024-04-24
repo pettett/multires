@@ -20,8 +20,8 @@ use super::macros::vk_device_owned_wrapper;
 /// data structures that depend on the resolution of the current screen
 pub struct Screen {
     core: Arc<Core>,
-    swapchain: Option<Swapchain>,
     depth: Option<Arc<Image>>,
+    swapchain: Option<Swapchain>,
     pub swapchain_framebuffers: Vec<Framebuffer>,
     pub swapchain_image_views: Vec<ImageView>,
 }
@@ -65,7 +65,12 @@ impl Screen {
     pub fn swapchain(&self) -> &Swapchain {
         self.swapchain.as_ref().unwrap()
     }
-
+    pub fn width(&self) -> u32 {
+        self.swapchain().extent.width
+    }
+    pub fn height(&self) -> u32 {
+        self.swapchain().extent.height
+    }
     pub fn depth(&self) -> &Image {
         self.depth.as_ref().unwrap()
     }

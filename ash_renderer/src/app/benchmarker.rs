@@ -40,31 +40,11 @@ pub struct Benchmarker {
     instances_per_round: usize,
 
     results: Vec<(usize, Vec<(f32, f32, u32)>)>,
-
-    sx: Sender<()>,
 }
 
 impl Benchmarker {
     pub fn default() -> Self {
-        Benchmarker::new(
-            glam::Vec3A::Z * 10.0,
-            glam::Vec3A::Z * 1500.0,
-            15.0,
-            500,
-            5,
-            false,
-        )
-    }
-
-    pub fn new_record() -> Self {
-        Benchmarker::new(
-            glam::Vec3A::Z * 10.0,
-            glam::Vec3A::Z * 1500.0,
-            15.0,
-            50,
-            1,
-            true,
-        )
+        Benchmarker::new(glam::Vec3A::Z * 10.0, glam::Vec3A::Z * 1500.0, 15.0, 500, 5)
     }
 
     pub fn new(
@@ -73,35 +53,8 @@ impl Benchmarker {
         time: f32,
         instances_per_round: usize,
         rounds: usize,
-        record: bool,
     ) -> Self {
         println!("Beginning benchmark between {} and {}", start, end);
-
-        let (sx, rx) = mpsc::channel();
-        if record {
-            thread::spawn(move || {
-                let mut enigo = enigo::Enigo::new();
-                // start recording
-                enigo.key_down(enigo::Key::Alt);
-                enigo.key_down(enigo::Key::F9);
-
-                sleep(Duration::from_millis(10));
-
-                enigo.key_up(enigo::Key::Alt);
-                enigo.key_up(enigo::Key::F9);
-
-                rx.recv().unwrap();
-
-                //end recording
-                enigo.key_down(enigo::Key::Alt);
-                enigo.key_down(enigo::Key::F9);
-
-                sleep(Duration::from_millis(10));
-
-                enigo.key_up(enigo::Key::Alt);
-                enigo.key_up(enigo::Key::F9);
-            });
-        }
 
         Self {
             start,
@@ -113,7 +66,6 @@ impl Benchmarker {
             results: Vec::new(),
             total_instances: 0,
             instances_per_round,
-            sx,
         }
     }
 
@@ -206,7 +158,6 @@ pub fn benchmark(
             }
             BenchmarkStage::Finish => {
                 if bench.t < 0.2 {
-                    let _ = bench.sx.send(());
                     bench.t = 0.5;
                 }
                 // give a second for the recording to finish

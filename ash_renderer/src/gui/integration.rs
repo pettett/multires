@@ -7,7 +7,7 @@ use crate::{
     utility::{
         buffer::{AsBuffer, Buffer},
         device::Device,
-        image::{Image, ImageView, Sampler},
+        image::{Image, ImageTrackedLayout, ImageView, Sampler},
         pooled::descriptor_pool::{
             DescriptorSet, DescriptorSetLayout, DescriptorSetLayoutBinding, DescriptorWriteData,
         },
@@ -26,20 +26,18 @@ use egui::{
 };
 use egui_winit::{winit::window::Window, EventResponse};
 use gpu_allocator::{vulkan::*, MemoryLocation};
-use raw_window_handle::{HasDisplayHandle, HasRawDisplayHandle};
+use raw_window_handle::HasDisplayHandle;
 use std::{
-    ffi::{self, CString},
+    ffi,
     sync::{Arc, Mutex},
 };
 
 use crate::{core::Core, utility::pooled::descriptor_pool::DescriptorPool};
 
-use super::{utils::insert_image_memory_barrier, *};
-
 /// egui integration with winit and ash.
 pub struct Integration {
     physical_width: u32,
-    physical_height: u32, 
+    physical_height: u32,
     egui_winit: egui_winit::State,
     core: Arc<Core>,
     allocator: Arc<Mutex<Allocator>>,
@@ -62,7 +60,7 @@ pub struct Integration {
 }
 impl Integration {
     /// Create an instance of the integration.
-    pub fn new<H: HasDisplayHandle >(
+    pub fn new<H: HasDisplayHandle>(
         display_target: &H,
         physical_width: u32,
         physical_height: u32,
@@ -81,15 +79,10 @@ impl Integration {
         context.set_fonts(font_definitions);
         context.set_style(style);
 
-		let id = context.viewport_id();
+        let id = context.viewport_id();
 
-        let egui_winit = egui_winit::State::new(
-            context,
-            id,
-            display_target,
-            Some(scale_factor),
-            None,
-        );
+        let egui_winit =
+            egui_winit::State::new(context, id, display_target, Some(scale_factor), None);
 
         // Get swap_images to get len of swapchain images and to create framebuffers
         let swap_images = unsafe {
@@ -187,7 +180,7 @@ impl Integration {
 
         Self {
             physical_width,
-            physical_height, 
+            physical_height,
             egui_winit,
 
             core,
@@ -590,12 +583,9 @@ impl Integration {
                 .unwrap();
         }
         // Transition texture image for transfer dst
-        insert_image_memory_barrier(
+        texture_image.insert_image_memory_barrier(
             &self.core.device,
             &cmd_buff,
-            &mut texture_image,
-            vk::QUEUE_FAMILY_IGNORED,
-            vk::QUEUE_FAMILY_IGNORED,
             vk::AccessFlags2::NONE_KHR,
             vk::AccessFlags2::TRANSFER_WRITE,
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
@@ -634,12 +624,9 @@ impl Integration {
                 &[region],
             );
         }
-        insert_image_memory_barrier(
+        texture_image.insert_image_memory_barrier(
             &self.core.device,
             &cmd_buff,
-            &mut texture_image,
-            vk::QUEUE_FAMILY_IGNORED,
-            vk::QUEUE_FAMILY_IGNORED,
             vk::AccessFlags2::TRANSFER_WRITE,
             vk::AccessFlags2::SHADER_READ,
             vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
@@ -690,12 +677,9 @@ impl Integration {
                         .unwrap();
 
                     // Transition existing image for transfer dst
-                    insert_image_memory_barrier(
+                    existing_texture.insert_image_memory_barrier(
                         &self.core.device,
                         &cmd_buff,
-                        existing_texture,
-                        vk::QUEUE_FAMILY_IGNORED,
-                        vk::QUEUE_FAMILY_IGNORED,
                         vk::AccessFlags2::SHADER_READ,
                         vk::AccessFlags2::TRANSFER_WRITE,
                         vk::ImageLayout::TRANSFER_DST_OPTIMAL,
@@ -709,12 +693,9 @@ impl Integration {
                             .level_count(1u32),
                     );
                     // Transition new image for transfer src
-                    insert_image_memory_barrier(
+                    texture_image.insert_image_memory_barrier(
                         &self.core.device,
                         &cmd_buff,
-                        &mut texture_image,
-                        vk::QUEUE_FAMILY_IGNORED,
-                        vk::QUEUE_FAMILY_IGNORED,
                         vk::AccessFlags2::SHADER_READ,
                         vk::AccessFlags2::TRANSFER_READ,
                         vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
@@ -772,12 +753,9 @@ impl Integration {
                     );
 
                     // Transition existing image for shader read
-                    insert_image_memory_barrier(
+                    existing_texture.insert_image_memory_barrier(
                         &self.core.device,
                         &cmd_buff,
-                        existing_texture,
-                        vk::QUEUE_FAMILY_IGNORED,
-                        vk::QUEUE_FAMILY_IGNORED,
                         vk::AccessFlags2::TRANSFER_WRITE,
                         vk::AccessFlags2::SHADER_READ,
                         vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
@@ -785,10 +763,10 @@ impl Integration {
                         vk::PipelineStageFlags2::FRAGMENT_SHADER,
                         vk::ImageSubresourceRange::default()
                             .aspect_mask(vk::ImageAspectFlags::COLOR)
-                            .base_array_layer(0u32)
-                            .layer_count(1u32)
-                            .base_mip_level(0u32)
-                            .level_count(1u32),
+                            .base_array_layer(0)
+                            .layer_count(1)
+                            .base_mip_level(0)
+                            .level_count(1),
                     );
                     self.core.device.end_command_buffer(cmd_buff).unwrap();
                     let cmd_buffs = [cmd_buff];

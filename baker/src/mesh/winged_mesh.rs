@@ -677,6 +677,8 @@ pub mod test {
     pub const TEST_MESH_LOW: &str =
         "C:\\Users\\maxwe\\OneDriveC\\sync\\projects\\assets\\torus.glb";
 
+    pub const TEST_MESH_LOWER: &str =
+        "C:\\Users\\maxwe\\OneDriveC\\sync\\projects\\assets\\torus_low.glb";
     pub const TEST_MESH_PLANE: &str =
         "C:\\Users\\maxwe\\OneDriveC\\sync\\projects\\assets\\plane_high.glb";
     pub const TEST_MESH_CIRC: &str =

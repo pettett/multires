@@ -108,12 +108,14 @@ impl HalfEdge {
     /// Grab the source and destination vertex IDs from this edge.
     /// Source vertex is just `HalfEdge.vert_origin`, destination vertex is `HalfEdge.edge_left_cw`'s vert_origin
     pub fn src_dst(&self, mesh: &WingedMesh) -> Result<(VertID, VertID)> {
-        let orig = self.vert_origin;
-        let dest = mesh
+        Ok((self.vert_origin, self.dst(mesh)?))
+    }
+
+    pub fn dst(&self, mesh: &WingedMesh) -> Result<VertID> {
+        Ok(mesh
             .try_get_edge(self.edge_left_cw)
             .context(MeshError::InvalidCwEdge(self.edge_left_cw))?
-            .vert_origin;
-        Ok((orig, dest))
+            .vert_origin)
     }
 }
 

@@ -343,7 +343,7 @@ pub mod test {
         graph::colour_graph,
         partition::PartitionCount,
         winged_mesh::{
-            test::{TEST_MESH_LOW, TEST_MESH_PLANE_LOW},
+            test::{TEST_MESH_LOW, TEST_MESH_LOWER, TEST_MESH_PLANE_LOW},
             WingedMesh,
         },
     };
@@ -540,7 +540,7 @@ pub mod test {
         mesh.cluster_within_groups(
             test_config,
             &tri_mesh.verts,
-            PartitionCount::MembersPerPartition(60),
+            PartitionCount::MembersPerPartition(150),
         )?;
 
         mesh.group(test_config)?;

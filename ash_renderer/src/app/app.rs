@@ -6,6 +6,7 @@ use crate::{
             update_pipeline,
         },
         mesh_data::MeshData,
+        recorder::record,
         renderer::{Fragment, MeshDrawingPipelineType, Renderer},
         scene::{
             process_scene_events, CameraUniformBufferObject, ModelUniformBufferObject, SceneEvent,
@@ -260,6 +261,7 @@ impl App {
             start_gui,
             acquire_swapchain,
             (
+                record,
                 (
                     gather_queries,
                     draw_gui.after(start_gui).after(gather_queries),

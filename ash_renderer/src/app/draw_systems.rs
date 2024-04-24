@@ -28,6 +28,7 @@ use super::{
     app::AssetLib,
     benchmarker::Benchmarker,
     fps_limiter::FPSMeasure,
+    recorder::Recorder,
     renderer::{Fragment, MeshDrawingPipelineType, Renderer},
     scene::{Scene, SceneEvent},
 };
@@ -233,6 +234,10 @@ pub fn draw_gui(
             if ui.button("Add 200 More Instances").clicked() {
                 scene_events.send(SceneEvent::AddInstances(200));
             }
+            if ui.button("Add 10000 More Instances").clicked() {
+                scene_events.send(SceneEvent::AddInstances(10000));
+            }
+
             if ui.button("Reset Scene").clicked() {
                 scene_events.send(SceneEvent::ResetScene);
             }
@@ -281,8 +286,8 @@ pub fn draw_gui(
                 commands.insert_resource(Benchmarker::default())
             }
 
-            if ui.button("Begin Recorded Benchmark").clicked() {
-                commands.insert_resource(Benchmarker::new_record())
+            if ui.button("Begin Recorded Run").clicked() {
+                commands.insert_resource(Recorder::default())
             }
 
             if renderer.query {

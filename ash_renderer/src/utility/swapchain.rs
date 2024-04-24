@@ -5,8 +5,8 @@ use ash::vk::{self};
 use crate::VkHandle;
 
 use super::{
-    device::Device, macros::vk_handle_wrapper, physical_device::PhysicalDevice,
-    queue_family_indices::QueueFamilyIndices, surface::Surface,
+    device::Device, image::ImageWrapper, macros::vk_handle_wrapper,
+    physical_device::PhysicalDevice, queue_family_indices::QueueFamilyIndices, surface::Surface,
 };
 pub struct SwapChainSupportDetail {
     capabilities: vk::SurfaceCapabilitiesKHR,
@@ -15,15 +15,23 @@ pub struct SwapChainSupportDetail {
 }
 
 impl SwapChainSupportDetail {
-    pub fn new(capabilities: vk::SurfaceCapabilitiesKHR, formats: Vec<vk::SurfaceFormatKHR>, present_modes: Vec<vk::PresentModeKHR>) -> Self {
-		Self { capabilities, formats, present_modes }
-	}
-	
-	pub fn supported(&self) -> bool {
-		!self.formats.is_empty() && !self.present_modes.is_empty()
-	}
+    pub fn new(
+        capabilities: vk::SurfaceCapabilitiesKHR,
+        formats: Vec<vk::SurfaceFormatKHR>,
+        present_modes: Vec<vk::PresentModeKHR>,
+    ) -> Self {
+        Self {
+            capabilities,
+            formats,
+            present_modes,
+        }
+    }
 
-	pub fn choose_swapchain_format(&self) -> vk::SurfaceFormatKHR {
+    pub fn supported(&self) -> bool {
+        !self.formats.is_empty() && !self.present_modes.is_empty()
+    }
+
+    pub fn choose_swapchain_format(&self) -> vk::SurfaceFormatKHR {
         for available_format in &self.formats {
             if available_format.format == vk::Format::B8G8R8A8_SRGB
                 && available_format.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR
@@ -205,5 +213,9 @@ impl Swapchain {
             extent,
             images,
         }
+    }
+
+    pub fn image(&self, i: usize) -> ImageWrapper {
+        ImageWrapper::new(self.images[i], vk::ImageLayout::PRESENT_SRC_KHR)
     }
 }
