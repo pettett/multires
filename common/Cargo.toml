@@ -14,3 +14,4 @@ petgraph = { version = "0.6", features = ["serde-1"] }
 serde-binary = "0.5"
 anyhow.workspace = true
 open = "5.0"
+meshopt.workspace = true

@@ -4,6 +4,7 @@ use std::{
     path::{self, PathBuf},
 };
 
+use baker::mesh::triangle::Triangle;
 use common::{Asset, MeshVert, MultiResMesh};
 use glam::Vec3A;
 use kdtree::KdTree;
@@ -11,8 +12,6 @@ use rand::{
     distributions::{Distribution, WeightedIndex},
     thread_rng,
 };
-
-use super::triangle::Triangle;
 
 enum SampleMode {
     PointsPerTri(f32),
@@ -232,6 +231,7 @@ pub mod tests {
 
     use baker::{
         lod::multiresolution::group_and_partition_and_simplify, mesh::winged_mesh::WingedMesh,
+        STARTING_CLUSTER_SIZE,
     };
 
     use super::*;
@@ -243,7 +243,9 @@ pub mod tests {
 
         let (mesh, tri_mesh) = WingedMesh::from_gltf(mesh_name);
 
-        let multires = group_and_partition_and_simplify(mesh, tri_mesh, "".to_owned()).unwrap();
+        let multires =
+            group_and_partition_and_simplify(mesh, tri_mesh, "".to_owned(), STARTING_CLUSTER_SIZE)
+                .unwrap();
 
         println!("Sampling points");
 

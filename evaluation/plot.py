@@ -1,7 +1,7 @@
 import matplotlib.pyplot as plt
 
 
-PLOT_SIZE = (7, 3)
+PLOT_SIZE = (8, 3)
 
 
 def config(ax: plt.Axes, fig: plt.Figure):

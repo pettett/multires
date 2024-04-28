@@ -27,7 +27,7 @@ impl WingedMesh {
 
         for (fid, face) in self.iter_faces() {
             for e in self.iter_edge_loop(face.edge) {
-                if let Some(twin) = self.get_edge(e).twin {
+                for twin in self.twin_loop(e) {
                     let other_face = &self.get_edge(twin).face;
 
                     graph.update_edge(ids[&fid], ids[other_face], ());
@@ -69,7 +69,7 @@ impl WingedMesh {
             let key = key_lookup(face); // self.clusters[face.cluster_idx].group_index;
 
             for e in self.iter_edge_loop(face.edge) {
-                if let Some(twin) = self.get_edge(e).twin {
+                for twin in self.twin_loop(e) {
                     let other_face = self.get_edge(twin).face;
                     let o_key = key_lookup(self.get_face(other_face)); // self.clusters[self.get_face(other_face).cluster_idx].group_index;
 
@@ -126,7 +126,7 @@ impl WingedMesh {
             *graph.node_weight_mut(n0).unwrap() += 1;
 
             for e in self.iter_edge_loop(face.edge) {
-                if let Some(twin) = self.get_edge(e).twin {
+                for twin in self.twin_loop(e) {
                     let other_face = &self.get_face(self.get_edge(twin).face);
 
                     //let c0 = face.cluster_idx.min(other_face.cluster_idx);

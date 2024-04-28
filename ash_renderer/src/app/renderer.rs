@@ -1,4 +1,9 @@
-use crate::{utility::image::ImageTrackedLayout, VkHandle};
+use crate::{
+    draw_pipelines::stub::Stub,
+    gui::allocator_visualiser_window::AllocatorVisualiserWindow,
+    utility::{device::Device, image::ImageTrackedLayout, pooled::query_pool::TimestampResults},
+    Config, VkHandle,
+};
 use ash::vk;
 use bevy_ecs::prelude::*;
 use common_renderer::components::camera::Camera;
@@ -28,7 +33,12 @@ use crate::{
     },
 };
 
-use super::{frame_measure::RollingMeasure, mesh_data::MeshData, scene::Scene};
+use super::{
+    frame_measure::RollingMeasure,
+    material::{Fragment, Material},
+    mesh_data::MeshData,
+    scene::Scene,
+};
 #[derive(Debug, Clone, Copy, Event, PartialEq, Eq)]
 pub enum MeshDrawingPipelineType {
     DrawIndirect,
@@ -38,12 +48,6 @@ pub enum MeshDrawingPipelineType {
     ExpandingComputeCulledMesh,
     ExpandingComputeCulledIndices,
     None,
-}
-
-#[derive(Debug, Clone, Copy, Event, PartialEq)]
-pub enum Fragment {
-    VertexColour,
-    Lit,
 }
 
 #[derive(Resource)]
@@ -62,8 +66,11 @@ pub struct Renderer {
     // Evaluation data
     pub last_sample: time::Instant,
     pub primitives: RollingMeasure<u32, 60>,
+    pub gpu_time: RollingMeasure<f64, 60>,
     pub query_primitives: QueryPool<PrimitivesQueryResults>,
+    pub query_timestamp: QueryPool<TimestampResults>,
     pub query: bool,
+    pub query_time: bool,
 
     pub render_gui: bool,
     pub current_frame: usize,
@@ -75,8 +82,9 @@ pub struct Renderer {
     pub screen: Screen,
     pub core: Arc<Core>,
 
-    pub fragment_colour: ShaderModule,
-    pub fragment_lit: ShaderModule,
+    pub fragment_colour: Material,
+    pub fragment_lit: Material,
+    pub fragment_edge: Material,
 
     pub mesh: String,
 
@@ -85,6 +93,63 @@ pub struct Renderer {
 }
 
 impl Renderer {
+    pub fn new(
+        config: &Config,
+        graphics_queue: vk::Queue,
+        present_queue: vk::Queue,
+        screen: Screen,
+        core: Arc<Core>,
+        descriptor_pool: Arc<DescriptorPool>,
+        sync_objects: SyncObjects,
+        allocator: Arc<Mutex<Allocator>>,
+        render_pass: RenderPass,
+    ) -> Self {
+        let pbr = Arc::new(ShaderModule::new(
+            core.device.clone(),
+            include_bytes!("../../shaders/spv/frag_pbr.frag"),
+        ));
+
+        let col = Arc::new(ShaderModule::new(
+            core.device.clone(),
+            include_bytes!("../../shaders/spv/frag_colour.frag"),
+        ));
+
+        Self {
+            fragment_colour: Material::new(col.clone(), vk::PolygonMode::FILL),
+            fragment_lit: Material::new(pbr, vk::PolygonMode::FILL),
+            fragment_edge: Material::new(col, vk::PolygonMode::LINE),
+
+            graphics_queue,
+            present_queue,
+            render_pass,
+            draw_pipeline: Box::new(Stub),
+            descriptor_pool,
+            windows: vec![Box::new(AllocatorVisualiserWindow::new(allocator.clone()))],
+            mesh_mode: MeshShaderMode::TriangleList,
+            allocator,
+            current_pipeline: MeshDrawingPipelineType::None,
+            sync_objects,
+            query: false,
+            query_time: true,
+            current_frame: 0,
+            is_framebuffer_resized: false,
+            app_info_open: true,
+            render_gui: true, // disable GUI during benchmarks
+            query_primitives: QueryPool::new(core.device.clone(), 1),
+            query_timestamp: QueryPool::new(core.device.clone(), 2),
+            core,
+            screen,
+            mesh: config.mesh_names[0].clone(),
+            fragment: Fragment::Lit,
+            hacky_command_buffer_passthrough: None,
+            image_index: 0,
+            is_suboptimal: false,
+            last_sample: time::Instant::now(),
+            primitives: Default::default(),
+            gpu_time: Default::default(),
+        }
+    }
+
     pub fn recreate_swapchain(&mut self, gui: &mut Gui, cam: &mut Camera) {
         self.core.device.wait_device_idle();
 
@@ -111,10 +176,11 @@ impl Renderer {
         self.is_framebuffer_resized = true;
     }
 
-    pub fn fragment(&self) -> &ShaderModule {
+    pub fn fragment(&self) -> &Material {
         match self.fragment {
             Fragment::VertexColour => &self.fragment_colour,
             Fragment::Lit => &self.fragment_lit,
+            Fragment::Edges => &self.fragment_edge,
         }
     }
 
@@ -128,6 +194,10 @@ impl Renderer {
     pub fn get_query(&self) -> Option<Arc<TypelessQueryPool>> {
         self.query.then(|| self.query_primitives.typeless())
     }
+    pub fn get_timestamp_query(&self) -> Option<Arc<TypelessQueryPool>> {
+        self.query_time.then(|| self.query_timestamp.typeless())
+    }
+
     pub fn get_query_ref(&self) -> Option<&TypelessQueryPool> {
         self.query.then(|| self.query_primitives.typeless_ref())
     }

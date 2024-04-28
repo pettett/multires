@@ -31,13 +31,12 @@ pub fn meshopt_simplify_lod_chain(tri_mesh: TriMesh, name: String) -> anyhow::Re
     .unwrap();
 
     for _i in 0..10 {
-        let prev_indices = indices.clone();
-
-        indices = meshopt::simplify_sloppy(
-            &prev_indices,
+        indices = meshopt::simplify(
+            &indices,
             &verts_adapter,
-            prev_indices.len() / 2,
+            indices.len() / 2,
             1.0,
+            meshopt::SimplifyOptions::None,
             None,
         );
 

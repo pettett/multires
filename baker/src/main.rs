@@ -1,12 +1,13 @@
-use std::thread;
+use std::{thread, time};
 
 use baker::{
     lod::{
         lod_chain::simplify_lod_chain, meshopt_chain::meshopt_simplify_lod_chain,
+        meshopt_multiresolution::meshopt_multiresolution,
         multiresolution::group_and_partition_and_simplify,
     },
     mesh::winged_mesh::WingedMesh,
-    Args, Mode,
+    Args, Mode, Simplifier, STARTING_CLUSTER_SIZE,
 };
 use clap::Parser;
 use common::Asset;
@@ -14,9 +15,17 @@ use common::Asset;
 // Castle
 // https://sketchfab.com/3d-models/upnor-castle-a08280d12911401aa6022c1a58f2b49a
 
-fn bake_mesh(input: std::path::PathBuf, output: std::path::PathBuf, mode: Mode) {
+fn bake_mesh(
+    input: std::path::PathBuf,
+    output: std::path::PathBuf,
+    mode: Mode,
+    simplifier: Simplifier,
+) {
     println!("Loading from gltf!");
+    let start_time = time::Instant::now();
     let (mut mesh, tri_mesh) = WingedMesh::from_gltf(&input);
+
+    // mesh.assert_valid().unwrap();``
 
     let num_contiguous = mesh.partition_contiguous();
 
@@ -41,18 +50,27 @@ fn bake_mesh(input: std::path::PathBuf, output: std::path::PathBuf, mode: Mode) 
 
     let name = input.to_str().unwrap().to_owned();
 
-    let multi_res = match mode {
-        Mode::DAG => group_and_partition_and_simplify(mesh, tri_mesh, name).unwrap(),
-        Mode::MeshoptLOD => {
+    let multi_res = match (mode, simplifier) {
+        (Mode::DAG, Simplifier::Quadrics) => {
+            group_and_partition_and_simplify(mesh, tri_mesh, name, STARTING_CLUSTER_SIZE).unwrap()
+        }
+        (Mode::DAG, Simplifier::Meshopt) => {
+            meshopt_multiresolution(mesh, tri_mesh, name, STARTING_CLUSTER_SIZE).unwrap()
+        }
+        (Mode::Chain, Simplifier::Meshopt) => {
             meshopt_simplify_lod_chain(tri_mesh, name).expect("Failed to extract meshopt stuff")
         }
-        Mode::BakerLOD => simplify_lod_chain(mesh, tri_mesh, name).unwrap(),
+        (Mode::Chain, Simplifier::Quadrics) => simplify_lod_chain(mesh, tri_mesh, name).unwrap(),
     };
 
     //group_and_partition_full_res(working_mesh, &verts, mesh_name.to_owned());
     //apply_simplification(working_mesh, &verts, mesh_name.to_owned());
 
     multi_res.save(output).unwrap();
+
+    let finish_time = time::Instant::now();
+
+    println!("Finished in {}ms", (finish_time - start_time).as_millis())
 }
 
 fn main() {
@@ -70,7 +88,8 @@ fn main() {
                 println!("{:?}", output.display());
 
                 let mode = args.mode();
-                threads.push(thread::spawn(move || bake_mesh(path, output, mode)))
+                let simp = args.simplifier();
+                threads.push(thread::spawn(move || bake_mesh(path, output, mode, simp)))
             }
             Err(e) => println!("{:?}", e),
         }

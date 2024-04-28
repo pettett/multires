@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use super::{edge::EdgeID, plane::Plane, quadric::Quadric, winged_mesh::WingedMesh};
 
 #[derive(Default, Hash, Debug, Clone, Copy, PartialEq, Eq)]
@@ -17,6 +19,18 @@ impl Into<u32> for VertID {
 impl From<usize> for VertID {
     fn from(value: usize) -> Self {
         VertID(value as _)
+    }
+}
+
+impl From<u32> for VertID {
+    fn from(value: u32) -> Self {
+        VertID(value)
+    }
+}
+
+impl Display for VertID {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("{}", self.0))
     }
 }
 
@@ -76,7 +90,7 @@ impl VertID {
             //     last_e_part = Some(e_part);
             // }
 
-            eid = e.edge_left_cw;
+            eid = e.edge_back_cw;
 
             if eid == eid_first {
                 return true;

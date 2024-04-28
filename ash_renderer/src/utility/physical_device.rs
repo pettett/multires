@@ -34,6 +34,7 @@ pub struct PhysicalRelevantExtensionFeatureSupport {
     shader_draw_param: vk::PhysicalDeviceShaderDrawParametersFeatures<'static>,
     sync2: vk::PhysicalDeviceSynchronization2Features<'static>,
     storage8bit: vk::PhysicalDevice8BitStorageFeatures<'static>,
+    query_reset: vk::PhysicalDeviceHostQueryResetFeatures<'static>,
 }
 
 #[derive(Default)]
@@ -89,6 +90,7 @@ impl PhysicalRelevantExtensionFeatureSupport {
             .push_next(&mut self.sync2)
             .push_next(&mut self.shader_draw_param)
             .push_next(&mut self.storage8bit)
+            .push_next(&mut self.query_reset)
     }
 }
 
@@ -188,6 +190,8 @@ impl PhysicalDevice {
 
         extensions.storage8bit.storage_buffer8_bit_access =
             all_f.storage8bit.storage_buffer8_bit_access;
+
+        extensions.query_reset.host_query_reset = vk::TRUE;
 
         PhysicalRelevantFeatureSupport { device, extensions }
     }

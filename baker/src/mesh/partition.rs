@@ -43,6 +43,8 @@ impl WingedMesh {
                 break counts;
             }
 
+            assert_eq!(search.len(), 1);
+
             counts.push(0);
 
             while let Some(fid) = search.pop() {
@@ -53,11 +55,11 @@ impl WingedMesh {
 
                 // Search for unmarked
                 let e0 = self.get_face(fid).edge;
-                let e1 = self.get_edge(e0).edge_left_cw;
-                let e2 = self.get_edge(e0).edge_left_ccw;
+                let e1 = self.get_edge(e0).edge_back_cw;
+                let e2 = self.get_edge(e0).edge_next_ccw;
 
                 for e in [e0, e1, e2] {
-                    if let Some(t) = self.get_edge(e).twin {
+                    for t in self.twin_loop(e) {
                         let f = self.get_edge(t).face;
                         if self.get_face(f).cluster_idx == 0 {
                             // splitting by contiguous, we should not be able to access others
@@ -345,14 +347,14 @@ impl WingedMesh {
                     return Ok((Vec::new(), 0));
                 }
 
+                assert_graph_contiguous(graph);
+
                 let parts = match partitions {
                     PartitionCount::MembersPerPartition(tris_per_cluster) => {
                         (graph.node_count() as u32).div_ceil(tris_per_cluster)
                     }
                     PartitionCount::Partitions(clusters_per_group) => clusters_per_group,
                 };
-
-                assert_graph_contiguous(graph);
 
                 let part = match config.partition_from_graph(parts, graph) {
                     Ok(part) => part,

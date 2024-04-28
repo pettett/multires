@@ -1,4 +1,5 @@
 from collections import defaultdict
+from dataclasses import dataclass
 import matplotlib.pyplot as plt
 import numpy as np
 import os
@@ -6,133 +7,78 @@ from plot import *
 
 data: dict[str, dict[str, dict[str, np.ndarray]]] = {}
 
-FRAMETIME = 1
-PRIMS = 2
+FRAMETIME = "false"
+PRIMS = "true"
 metrics = {FRAMETIME: "Frame time (ms)", PRIMS: "Clipped Primitives"}
-scales = {FRAMETIME: 1000, PRIMS: 1}
+samples = {FRAMETIME: 1, PRIMS: 2}
 
-for d1 in os.listdir("../benchmark/"):
+
+for d1 in os.listdir("benchmark/"):
     # print(d1)
     data[d1] = {}
 
-    d2s = os.listdir(f"../benchmark/{d1}/")
+    d2s = os.listdir(f"benchmark/{d1}/")
     d2 = max(d2s)
 
     # print(d2)
     data[d1][d2] = {}
-    for f in os.listdir(f"../benchmark/{d1}/{d2}"):
+    for f in os.listdir(f"benchmark/{d1}/{d2}"):
 
         # print(f)
 
-        txt = np.loadtxt(f"../benchmark/{d1}/{d2}/{f}", delimiter=",")
+        txt = np.loadtxt(f"benchmark/{d1}/{d2}/{f}", delimiter=",")
         if txt.shape[1]:  # require PRIMS update
             data[d1][d2][f.split(".")[0]] = txt
 
-dragon = "dragon_high.glb.bin"
+DRAGON = "dragon_high.glb.bin"
+TORRIN = "torrin_main.glb.bin"
 
-expanding_dragon_mesh = f"ExpandingComputeCulledMesh{dragon}"
-expanding_torrin_mesh = f"ExpandingComputeCulledMeshtorrin_main.glb.bin"
-expanding_dragon_indices = f"ExpandingComputeCulledIndices{dragon}"
-local_dragon_mesh = f"LocalSelectMesh{dragon}"
-local_dragon_indices = f"LocalSelectIndices{dragon}"
+NANITE = "Nanite"
+MESH = "Mesh"
+INDICES = "Indices"
+NONE = ""
+
+LOCAL = "LocalSelect"
+TRAVERSE = "ExpandingComputeCulled"
+DRAWLOD = "DrawLOD"
+DRAWINDIRECT = "DrawIndirect"
+
+ERR01 = "0.1"
+ERR02 = "0.2"
+
+
+@dataclass(frozen=True)
+class Benchmark:
+    selector: str
+    geometry: str
+    mesh: str
+    bench: str
+    error: str
+    title: str
+
+    def to_string(self):
+        return f"{self.selector}{self.geometry}{self.mesh}{self.bench}{self.error}"
+
+    def sample(self):
+        match self.bench:
+            case x if x == PRIMS:
+                return 2
+            case _:
+                return 1
+
+    def form(self):
+        return "-"
+
+    def marker(self):
+        if self.geometry == NANITE and self.bench == PRIMS:
+            return "x"
+        return ""
+
 
 torrin = "ExpandingComputeCulledMeshtorrin_main.glb.bin"
 NANITEPRIMS = "Nanite"
 NANITETIME = "NaniteTime"
 
-forms = {
-    "ExpandingComputeCulledMesh": "-",
-    expanding_dragon_mesh: "-",
-    expanding_dragon_indices: "-.",
-    local_dragon_mesh: "-",
-    local_dragon_indices: "-.",
-    torrin: "-",
-    NANITEPRIMS: "-",
-    NANITETIME: "-.",
-    "IndirectTasks": "-.",
-    "DrawIndirect": "--",
-    "DrawLOD": ":",
-}
-names = {
-    "ExpandingComputeCulledMesh": "DAG Explore",
-    expanding_dragon_mesh: "Traverse/Mesh",
-    expanding_dragon_indices: "Traverse/Primitive",
-    local_dragon_mesh: "Local/Mesh",
-    local_dragon_indices: "Local/Primitive",
-    torrin: "600K Tris",
-    NANITEPRIMS: "1000K Tris (Nanite)",
-    NANITETIME: "1000K Tris (Nanite)",
-    "IndirectTasks": "Task Select",
-    "DrawIndirect": "Instanced Full Resolution",
-    "DrawLOD": "LOD Chain",
-}
-
-
-cols = {
-    expanding_dragon_indices: {
-        "500": "C8",
-        "1000": "C2",
-        "1500": "C4",
-        "2000": "C6",
-        "2500": "C0",
-    },
-    expanding_dragon_mesh: {
-        "500": "C8",
-        "1000": "C2",
-        "1500": "C4",
-        "2000": "C6",
-        "2500": "C0",
-    },
-    local_dragon_mesh: {
-        "500": "C9",
-        "1000": "C3",
-        "1500": "C5",
-        "2000": "C7",
-        "2500": "C1",
-    },
-    local_dragon_indices: {
-        "500": "C9",
-        "1000": "C3",
-        "1500": "C5",
-        "2000": "C7",
-        "2500": "C1",
-    },
-    torrin: {
-        "500": "C1",
-        "1000": "C3",
-        "1500": "C5",
-        "2000": "C7",
-        "2500": "C9",
-    },
-    NANITEPRIMS: {
-        "500": "C1",
-        "1000": "C3",
-        "1500": "C5",
-        "2000": "C7",
-        "2500": "C9",
-    },
-    NANITETIME: {
-        "500": "C1",
-        "1000": "C3",
-        "1500": "C5",
-        "2000": "C7",
-        "2500": "C9",
-    },
-    "IndirectTasks": {
-        "500": "C1",
-        "1000": "C3",
-        "1500": "C5",
-        "2000": "C7",
-        "2500": "C9",
-    },
-    "DrawLOD": {
-        "500": "C1",
-        "1000": "C3",
-        "1500": "C5",
-        "2000": "C7",
-        "2500": "C9",
-    },
-}
 
 maximums = defaultdict(lambda: float("inf"))
 markers = defaultdict(lambda: None)
@@ -170,35 +116,39 @@ markers[NANITEPRIMS] = "x"
 
 def plot_data(
     ax,
-    sample: int,
     a: bool,
-    sets: list[str],
+    benchmarks: list[Benchmark],
     *s: str,
 ):
-    for mode, result_sets in data.items():
 
-        if mode in sets:
-            sets.remove(mode)
-            for set_name, set in result_sets.items():
-                print(set_name)
-                for name, values in set.items():
-                    print(name)
-                    if name in s or a:
-                        ax.plot(
-                            values[:, 0],
-                            np.minimum(
-                                values[:, sample] * scales[sample], maximums[mode]
-                            ),
-                            forms[mode],
-                            marker=markers[mode],
-                            color=cols[mode][name],
-                            label=f"{names[mode]}",
-                        )
-    print(f"Not seen: {sets}")
+    for data_name, result_sets in data.items():
+
+        for benchmark in benchmarks:
+            if benchmark.to_string() == data_name:
+
+                benchmarks.remove(benchmark)
+                for set_name, set in result_sets.items():
+                    print(set_name)
+                    for name, values in set.items():
+                        # print(name)
+                        if name in s or a:
+                            ax.plot(
+                                values[:, 0],
+                                np.minimum(
+                                    values[:, benchmark.sample()],
+                                    maximums[data_name],
+                                ),
+                                benchmark.form(),
+                                marker=benchmark.marker(),
+                                # color=cols[benchmark.selector][name],
+                                label=benchmark.title,
+                            )
+                break
+
+    print(f"Not seen: {benchmarks}")
 
 
 def nanite_comparison(
-    sample: int,
     a: bool,
     *s: str,
 ):
@@ -209,25 +159,32 @@ def nanite_comparison(
     # )
     plot_data(
         ax,
-        sample,
         a,
-        [expanding_dragon_mesh, NANITETIME, "DrawLOD"],
+        [
+            Benchmark(
+                LOCAL, MESH, DRAGON, FRAMETIME, ERR01, "Ours (Mesh Shading), τ=0.1"
+            ),
+            Benchmark(
+                LOCAL, MESH, DRAGON, FRAMETIME, ERR02, "Ours (Mesh Shading), τ=0.2"
+            ),
+            Benchmark(NANITE, NONE, NONE, FRAMETIME, NONE, "Nanite"),
+            Benchmark(DRAWLOD, NONE, NONE, NONE, NONE, "LOD Chain"),
+        ],
         *s,
     )
 
     ax.set_xlabel("Relative Camera Distance")
-    ax.set_ylabel(metrics[sample])
+    ax.set_ylabel(metrics[FRAMETIME])
 
     # Put a legend below current axis
     ax.legend(fancybox=True, ncol=2)
 
     config(None, fig)
 
-    fig.savefig(f"../../diss/figures/eval/mesh_benchmark_nanite.svg")
+    fig.savefig(f"../diss/figures/eval/mesh_benchmark_nanite.svg")
 
 
 def internal_comparison(
-    sample: int,
     a: bool,
     *s: str,
 ):
@@ -235,19 +192,41 @@ def internal_comparison(
 
     plot_data(
         ax,
-        sample,
         a,
         [
-            expanding_dragon_mesh,
-            expanding_dragon_indices,
-            local_dragon_mesh,
-            local_dragon_indices,
+            Benchmark(
+                LOCAL, MESH, DRAGON, FRAMETIME, ERR01, "Local Select + Mesh Shading"
+            ),
+            Benchmark(
+                TRAVERSE,
+                MESH,
+                DRAGON,
+                FRAMETIME,
+                ERR01,
+                "Traverse Select + Mesh Shading",
+            ),
+            Benchmark(
+                LOCAL,
+                INDICES,
+                DRAGON,
+                FRAMETIME,
+                ERR01,
+                "Local Select + Primitive Shading",
+            ),
+            Benchmark(
+                TRAVERSE,
+                INDICES,
+                DRAGON,
+                FRAMETIME,
+                ERR01,
+                "Traverse Select + Primitive Shading",
+            ),
         ],
         *s,
     )
 
     ax.set_xlabel("Relative Camera Distance")
-    ax.set_ylabel(metrics[sample])
+    ax.set_ylabel(metrics[FRAMETIME])
 
     ax.set_yscale("log")
 
@@ -255,12 +234,10 @@ def internal_comparison(
     ax.legend(fancybox=True, ncol=2)
 
     config(None, fig)
-
-    fig.savefig(f"../../diss/figures/eval/mesh_benchmark_internal.svg")
+    fig.savefig(f"../diss/figures/eval/mesh_benchmark_internal.svg")
 
 
 def mesh_nanite_comparison(
-    sample: int,
     a: bool,
     *s: str,
 ):
@@ -271,25 +248,28 @@ def mesh_nanite_comparison(
     # )
     plot_data(
         ax,
-        sample,
         a,
-        [expanding_dragon_mesh, NANITEPRIMS, "DrawLOD"],
+        [
+            Benchmark(LOCAL, MESH, DRAGON, PRIMS, ERR01, "Ours, τ=0.1"),
+            Benchmark(LOCAL, MESH, DRAGON, PRIMS, ERR02, "Ours, τ=0.2"),
+            Benchmark(NANITE, NONE, NONE, PRIMS, NONE, "Nanite"),
+            # Benchmark(DRAWLOD, NONE, NONE, NONE, NONE),
+        ],
         *s,
     )
 
     ax.set_xlabel("Relative Camera Distance")
-    ax.set_ylabel(metrics[sample])
+    ax.set_ylabel(metrics[PRIMS])
 
     # Put a legend below current axis
     ax.legend(fancybox=True, ncol=2)
 
     config(None, fig)
 
-    fig.savefig(f"../../diss/figures/eval/prims_benchmark_nanite.svg")
+    fig.savefig(f"../diss/figures/eval/prims_benchmark_nanite.svg")
 
 
 def mesh_comparison(
-    sample: int,
     a: bool,
     *s: str,
 ):
@@ -297,31 +277,30 @@ def mesh_comparison(
 
     plot_data(
         ax,
-        sample,
         a,
         [
-            expanding_dragon_mesh,
-            expanding_torrin_mesh,
+            Benchmark(LOCAL, MESH, DRAGON, PRIMS, ERR01, "1000K Tris/Mesh"),
+            Benchmark(LOCAL, MESH, TORRIN, PRIMS, ERR01, "600K Tris/Mesh"),
         ],
         *s,
     )
 
     ax.set_xlabel("Relative Camera Distance")
-    ax.set_ylabel(metrics[sample])
+    ax.set_ylabel(metrics[PRIMS])
 
     # Put a legend below current axis
     ax.legend(fancybox=True, ncol=2)
 
     config(None, fig)
 
-    fig.savefig(f"../../diss/figures/eval/prims_benchmark_meshes.svg")
+    fig.savefig(f"../diss/figures/eval/prims_benchmark_meshes.svg")
 
 
-nanite_comparison(FRAMETIME, False, "2500")
-internal_comparison(FRAMETIME, False, "2500")
+nanite_comparison(False, "2500")
+internal_comparison(False, "2500")
 
-mesh_nanite_comparison(PRIMS, False, "500", "1500", "2500")
-mesh_comparison(PRIMS, False, "500", "1500", "2500")
+mesh_nanite_comparison(False, "2500")
+mesh_comparison(False, "2500")
 
 
 plt.show()

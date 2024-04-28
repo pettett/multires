@@ -4,6 +4,7 @@
 // use crate::gui::allocator::AllocationCreateInfoTrait;
 // use crate::gui::allocator::AllocationTrait;
 use crate::{
+    app::material::MAIN_FUNCTION_NAME,
     utility::{
         buffer::{AsBuffer, Buffer},
         device::Device,
@@ -1010,16 +1011,15 @@ fn create_pipeline(
         include_bytes!("../../shaders/spv/egui_frag.frag"),
     );
 
-    let main_function_name = ffi::CString::new("main").unwrap();
     let pipeline_shader_stages = [
         vk::PipelineShaderStageCreateInfo::default()
             .stage(vk::ShaderStageFlags::VERTEX)
             .module(vertex_shader_module.handle())
-            .name(&main_function_name),
+            .name(&MAIN_FUNCTION_NAME),
         vk::PipelineShaderStageCreateInfo::default()
             .stage(vk::ShaderStageFlags::FRAGMENT)
             .module(fragment_shader_module.handle())
-            .name(&main_function_name),
+            .name(&MAIN_FUNCTION_NAME),
     ];
 
     let input_assembly_info = vk::PipelineInputAssemblyStateCreateInfo::default()

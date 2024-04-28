@@ -28,8 +28,9 @@ use super::{
     app::AssetLib,
     benchmarker::Benchmarker,
     fps_limiter::FPSMeasure,
+    material::Fragment,
     recorder::Recorder,
-    renderer::{Fragment, MeshDrawingPipelineType, Renderer},
+    renderer::{MeshDrawingPipelineType, Renderer},
     scene::{Scene, SceneEvent},
 };
 
@@ -136,6 +137,35 @@ pub fn gather_queries(mut renderer: ResMut<Renderer>) {
             renderer.last_sample = time::Instant::now();
         }
     }
+
+    if renderer.query_time {
+        let timestamp_period = (renderer
+            .core
+            .physical_device
+            .properties
+            .limits
+            .timestamp_period as f64)
+            / 1_000_000.0; // use milliseconds
+
+        if renderer.last_sample.elapsed() > time::Duration::from_secs_f32(0.01) {
+            if let Some(results) = renderer.query_timestamp.get_many_results::<2>(0) {
+                // assert!(results[0].avail > 0);
+
+                if results[0].avail > 0
+                    && results[1].avail > 0
+                    && results[1].timestamp > results[0].timestamp
+                {
+                    renderer.gpu_time.tick(
+                        (timestamp_period) * ((results[1].timestamp - results[0].timestamp) as f64),
+                    );
+
+                    renderer.last_sample = time::Instant::now();
+                }
+            } else {
+                renderer.last_sample = time::Instant::now();
+            }
+        }
+    }
 }
 pub fn draw_gui(
     gui: NonSendMut<Gui>,
@@ -166,7 +196,8 @@ pub fn draw_gui(
         .open(&mut app_info_open)
         .show(ctx, |ui| {
             {
-                ui.checkbox(&mut scene.freeze_pos, "Freeze");
+                ui.checkbox(&mut scene.freeze_culling, "Freeze Culling");
+                ui.checkbox(&mut scene.freeze_error, "Freeze Error");
                 ui.add(
                     egui::Slider::new(&mut scene.target_error, 0.0..=100000.0)
                         .logarithmic(true)
@@ -272,6 +303,7 @@ pub fn draw_gui(
                         Fragment::VertexColour,
                         "Vertex Colour",
                     );
+                    ui.selectable_value(&mut renderer.fragment, Fragment::Edges, "Edges");
                 });
 
             if ui.checkbox(&mut renderer.query, "Enable Queries").clicked() {
@@ -291,17 +323,11 @@ pub fn draw_gui(
             }
 
             if renderer.query {
-                if renderer.last_sample.elapsed() > time::Duration::from_secs_f32(0.01) {
-                    if let Some(results) = renderer.query_primitives.get_results(0) {
-                        assert!(results.avail > 0);
-
-                        renderer.primitives.tick(results.clipping_primitives);
-                    }
-
-                    renderer.last_sample = time::Instant::now();
-                }
-
                 renderer.primitives.gui("Clipping Primitives", ui);
+            }
+
+            if renderer.query_time {
+                renderer.gpu_time.gui("GPU Time", ui);
             }
         });
 

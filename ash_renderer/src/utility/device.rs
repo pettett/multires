@@ -71,11 +71,6 @@ impl Device {
             queue_create_infos.push(queue_create_info);
         }
 
-        let required_validation_layer_raw_names: Vec<ffi::CString> = validation
-            .required_validation_layers
-            .iter()
-            .map(|layer_name| ffi::CString::new(*layer_name).unwrap())
-            .collect();
         // Just go ahead and enable everything we have
         let mut device_features = physical_device.get_features();
         // FIXME: Do these on a case by case basis for each pipeline

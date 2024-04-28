@@ -38,17 +38,6 @@ pub trait DrawPipeline {
     fn cleanup(&mut self, commands: &mut Commands) {}
 }
 
-pub fn init_rasterization_statue_create_info() -> vk::PipelineRasterizationStateCreateInfo<'static>
-{
-    vk::PipelineRasterizationStateCreateInfo::default()
-        .depth_clamp_enable(false)
-        .cull_mode(vk::CullModeFlags::BACK)
-        .front_face(vk::FrontFace::CLOCKWISE)
-        .line_width(1.0)
-        .polygon_mode(vk::PolygonMode::FILL)
-        .rasterizer_discard_enable(false)
-        .depth_bias_enable(false)
-}
 pub fn init_multisample_state_create_info() -> vk::PipelineMultisampleStateCreateInfo<'static> {
     vk::PipelineMultisampleStateCreateInfo::default()
         .rasterization_samples(vk::SampleCountFlags::TYPE_1)

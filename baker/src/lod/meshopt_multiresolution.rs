@@ -3,10 +3,10 @@ use common::{MeshVert, MultiResMesh, TriMesh};
 use crate::{
     lod::{generate_clusters, stat_readout},
     mesh::{winged_mesh::WingedMesh, PartitionCount},
-    CLUSTERS_PER_SIMPLIFIED_GROUP, STARTING_CLUSTER_SIZE,
+    CLUSTERS_PER_SIMPLIFIED_GROUP,
 };
 
-pub fn group_and_partition_and_simplify(
+pub fn meshopt_multiresolution(
     mut mesh: WingedMesh,
     tri_mesh: TriMesh,
     name: String,
@@ -51,8 +51,6 @@ pub fn group_and_partition_and_simplify(
         ..Default::default()
     }
     .into();
-
-    let mut quadrics = mesh.create_quadrics(&tri_mesh.verts);
 
     // Apply primary partition, that will define the lowest level clusterings
     mesh.cluster_full_mesh(
@@ -111,21 +109,21 @@ pub fn group_and_partition_and_simplify(
 
         // Each group requires half it's triangles removed
 
-        let collapse_requirements: Vec<usize> = mesh
-            .groups
-            .iter()
-            .map(|g| {
-                g.num_tris(&mesh) / 4
-                //let halved_tris = g.tris / 4;
-                //let tris_to_remove_for_cluster_max = g
-                //    .tris
-                //    .saturating_sub(MAX_TRIS_PER_CLUSTER * CLUSTERS_PER_SIMPLIFIED_GROUP - 25);
-                //
-                // Each operation removes 2 triangles.
-                // Do whichever we need to bring ourselves down to the limit. Error function will make up for variations in density
-                //halved_tris.max(halved_tris).div_ceil(2)
-            })
-            .collect();
+        // let collapse_requirements: Vec<usize> = mesh
+        //     .groups
+        //     .iter()
+        //     .map(|g| {
+        //         g.num_tris(&mesh) / 4
+        //         //let halved_tris = g.tris / 4;
+        //         //let tris_to_remove_for_cluster_max = g
+        //         //    .tris
+        //         //    .saturating_sub(MAX_TRIS_PER_CLUSTER * CLUSTERS_PER_SIMPLIFIED_GROUP - 25);
+        //         //
+        //         // Each operation removes 2 triangles.
+        //         // Do whichever we need to bring ourselves down to the limit. Error function will make up for variations in density
+        //         //halved_tris.max(halved_tris).div_ceil(2)
+        //     })
+        //     .collect();
 
         mesh.age();
 
@@ -139,27 +137,26 @@ pub fn group_and_partition_and_simplify(
             }
         }
 
-        println!("Reducing within {} groups:", collapse_requirements.len());
+        // println!("Reducing within {} groups:", collapse_requirements.len());
 
-        let e =
-            match mesh.reduce_within_groups(&tri_mesh.verts, &mut quadrics, &collapse_requirements)
-            {
-                Ok(e) => e,
-                Err(e) => {
-                    println!(
-                        "Experience error {} with reducing, exiting early with what we have",
-                        e
-                    );
-                    break;
-                }
-            };
+        let e = match mesh.meshopt_reduce_within_groups(&tri_mesh.verts) {
+            Ok(e) => e,
+            Err(e) => {
+                println!(
+                    "Experience error {} with reducing, exiting early with what we have",
+                    e
+                );
+                break;
+            }
+        };
+
         println!(
             "Introduced error of {e}. Max edge age: {}, Mean: {}",
             mesh.max_edge_age(),
             mesh.avg_edge_age(),
         );
 
-        //layers.push(to_mesh_layer(&working_mesh, &verts));
+        println!("Clustering Groups!");
 
         let partition_count = match mesh.cluster_within_groups(
             group_clustering_config,

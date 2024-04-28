@@ -23,6 +23,7 @@ use crate::{
             command_buffer_group::CommandBufferGroup,
             command_pool::{CommandBuffer, CommandPool},
             descriptor_pool::{DescriptorPool, DescriptorSet},
+            query_pool::TypelessQueryPool,
         },
         render_pass::RenderPass,
         screen::Screen,
@@ -48,6 +49,8 @@ pub struct DrawLODChainData {
     vertex_buffer: Arc<TBuffer<MeshVert>>,
     query: bool,
     command_buffers: Vec<CommandBuffer>,
+
+    timestamp_query_pool: Option<Arc<TypelessQueryPool>>,
 }
 
 // Calculates the frustum and planes from a projection matrix.
@@ -127,6 +130,13 @@ pub fn create_lod_command_buffer(
         {
             let mut command_buffer_writer =
                 draw.command_buffers[renderer.image_index].reset_and_write();
+
+            if renderer.image_index == 0 {
+                renderer
+                    .get_timestamp_query()
+                    .as_ref()
+                    .map(|pool| pool.write_timestamp_top(*command_buffer_writer));
+            }
 
             unsafe {
                 device.cmd_begin_render_pass(
@@ -255,6 +265,13 @@ pub fn create_lod_command_buffer(
                 }
                 device.cmd_end_render_pass(*command_buffer_writer);
             }
+
+            if renderer.image_index == 0 {
+                renderer
+                    .get_timestamp_query()
+                    .as_ref()
+                    .map(|pool| pool.write_timestamp_bottom(*command_buffer_writer));
+            }
         }
         renderer.hacky_command_buffer_passthrough =
             Some(draw.command_buffers[renderer.image_index].handle());
@@ -270,6 +287,7 @@ impl DrawLODChainData {
             &renderer.render_pass,
             renderer.screen.swapchain().extent,
             ubo_layout.clone(),
+            renderer.fragment(),
         );
 
         let descriptor_sets = create_traditional_graphics_descriptor_sets(
@@ -289,6 +307,7 @@ impl DrawLODChainData {
             query: renderer.query,
             vertex_buffer: mesh_data.vertex_buffer.clone(),
             command_buffers: Vec::new(),
+            timestamp_query_pool: renderer.get_timestamp_query(),
         }
     }
 }

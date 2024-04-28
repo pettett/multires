@@ -15,6 +15,7 @@ use crate::{
                 DescriptorPool, DescriptorSet, DescriptorSetLayout, DescriptorSetLayoutBinding,
                 DescriptorWriteData,
             },
+            query_pool::TypelessQueryPool,
         },
         render_pass::RenderPass,
         screen::Screen,
@@ -38,6 +39,8 @@ pub struct ExpandingComputeCulledIndices {
     indirect_compute_buffer: Arc<TBuffer<vk::DispatchIndirectCommand>>,
     range_buffer: Arc<TBuffer<BufferRange>>,
     push_pipeline_layout: Arc<PipelineLayout>,
+
+    timestamp_query_pool: Option<Arc<TypelessQueryPool>>,
 }
 
 impl ExpandingComputeCulledIndices {
@@ -216,13 +219,11 @@ impl ExpandingComputeCulledIndices {
 
         let render_indices = RenderMultiresIndices::new(
             &core,
-            &renderer.screen,
-            &renderer.render_pass,
+            &renderer,
             mesh_data.vertex_buffer.clone(),
             result_indices_buffer.clone(),
             draw_indexed_indirect_buffer.clone(),
             indirect_compute_buffer.clone(),
-            renderer.descriptor_pool.clone(),
             scene,
             compact_indices_pipeline,
         );
@@ -238,6 +239,7 @@ impl ExpandingComputeCulledIndices {
             indirect_compute_buffer,
             range_buffer,
             render_indices,
+            timestamp_query_pool: renderer.get_timestamp_query(),
         }
     }
 }
@@ -338,6 +340,13 @@ impl ScreenData {
             let draw_indirect_buffer_dependency_info =
                 vk::DependencyInfo::default().buffer_memory_barriers(&draw_indirect_buffer_barrier);
 
+            if frame == 0 {
+                core_draw
+                    .timestamp_query_pool
+                    .as_ref()
+                    .map(|pool| pool.write_timestamp_top(*command_buffer));
+            }
+
             unsafe {
                 core_draw.range_buffer.get_buffer().fill(*command_buffer, 0);
 
@@ -428,121 +437,13 @@ impl ScreenData {
                     render_pass,
                     frame,
                 );
+            }
 
-                // Mark barrier between compute write and task read, and between indirect write and indirect read
-                // device.cmd_pipeline_barrier2(*command_buffer, &compute_to_task_dependency_info);
-
-                // device.cmd_bind_descriptor_sets(
-                //     *command_buffer,
-                //     vk::PipelineBindPoint::COMPUTE,
-                //     core_draw.should_draw_pipeline.layout().handle(),
-                //     0,
-                //     &descriptor_sets_to_bind,
-                //     &[],
-                // );
-
-                // // Fill indirect draw with 0s
-                // device.cmd_fill_buffer(
-                //     *command_buffer,
-                //     core_draw.draw_indexed_indirect_buffer.handle(),
-                //     0,
-                //     core_draw.draw_indexed_indirect_buffer.size(),
-                //     0,
-                // );
-
-                // Instance 0 is intermediate data / the entire scene
-
-                // reset the count value to 1 (first index, as 0 reserved for counter)
-                // device.cmd_fill_buffer(
-                //     *command_buffer,
-                //     core_draw.should_cull_buffer.handle(),
-                //     0,
-                //     4,
-                //     2,
-                // );
-                // //reset tri-count to 0.
-                // device.cmd_fill_buffer(
-                //     *command_buffer,
-                //     core_draw.should_cull_buffer.handle(),
-                //     4,
-                //     4,
-                //     0,
-                // );
-
-                // All the shaders share this layout, so we only need to push once
-                // core_draw
-                //     .allocate_indices_pipeline
-                //     .layout()
-                //     .push_single_constant(0, *command_buffer, instance as u32);
-
-                // {
-                //     // Generate cluster selection
-                //     device.cmd_bind_pipeline(
-                //         *command_buffer,
-                //         vk::PipelineBindPoint::COMPUTE,
-                //         core_draw.should_draw_pipeline.handle(),
-                //     );
-
-                //     core_draw
-                //         .indirect_compute_buffer
-                //         .dispatch_indirect(*command_buffer, instance);
-
-                //     // Force previous compute shader to be complete before this one
-                //     device.cmd_pipeline_barrier2(
-                //         *command_buffer,
-                //         &should_cull_buffer_dependency_info,
-                //     );
-                // }
-
-                // {
-                //     // Initialise indirect draw arguments
-
-                //     device.cmd_bind_pipeline(
-                //         *command_buffer,
-                //         vk::PipelineBindPoint::COMPUTE,
-                //         core_draw.allocate_indices_pipeline.handle(),
-                //     );
-
-                //     device.cmd_push_constants(
-                //         *command_buffer,
-                //         core_draw.allocate_indices_pipeline.layout().handle(),
-                //         vk::ShaderStageFlags::COMPUTE,
-                //         0,
-                //         bytemuck::cast_slice(&[instance as u32]),
-                //     );
-
-                //     device.cmd_dispatch(*command_buffer, 1, 1, 1);
-
-                //     device.cmd_pipeline_barrier2(
-                //         *command_buffer,
-                //         &draw_indirect_buffer_dependency_info,
-                //     );
-                // }
-
-                // {
-                //     // Fill into indirect draw arguments
-                //     core_draw.render_indices.compact_indices(
-                //         *command_buffer,
-                //         &core.device,
-                //         instance,
-                //     );
-                // }
-                // device.cmd_pipeline_barrier2(
-                //     *command_buffer,
-                //     &should_cull_buffer_dependency_info,
-                // );
-                // device.cmd_pipeline_barrier2(
-                //     *command_buffer,
-                //     &draw_indirect_buffer_dependency_info,
-                // );
-
-                // core_draw.render_indices.render(
-                //     &mut command_buffer,
-                //     &core.device,
-                //     screen,
-                //     render_pass,
-                //     i,
-                // );
+            if frame == 0 {
+                core_draw
+                    .timestamp_query_pool
+                    .as_ref()
+                    .map(|pool| pool.write_timestamp_bottom(*command_buffer));
             }
         }
 

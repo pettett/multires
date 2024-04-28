@@ -1,3 +1,7 @@
+use crate::app::{fps_limiter::FPSMeasure, scene::Scene};
+use crate::gui::gui::Gui;
+use crate::utility::buffer::TBuffer;
+use crate::VkHandle;
 use crate::{
     app::{
         benchmarker::benchmark,
@@ -7,38 +11,25 @@ use crate::{
         },
         mesh_data::MeshData,
         recorder::record,
-        renderer::{Fragment, MeshDrawingPipelineType, Renderer},
+        renderer::{MeshDrawingPipelineType, Renderer},
         scene::{
             process_scene_events, CameraUniformBufferObject, ModelUniformBufferObject, SceneEvent,
         },
     },
     core::Core,
-    draw_pipelines::{draw_lod_chain::create_lod_command_buffer, indirect_tasks::MeshShaderMode},
-    gui::allocator_visualiser_window::AllocatorVisualiserWindow,
+    draw_pipelines::draw_lod_chain::create_lod_command_buffer,
     utility::{
-        // the mod define some fixed functions that have been learned before.
         constants::*,
-        pooled::{descriptor_pool::DescriptorPool, query_pool::QueryPool},
+        pooled::descriptor_pool::DescriptorPool,
         render_pass::RenderPass,
         screen::{find_depth_format, Screen},
-        swapchain::SwapChainSupportDetail,
         sync::SyncObjects,
-        ShaderModule,
     },
     Config,
 };
-
-use crate::app::{fps_limiter::FPSMeasure, scene::Scene};
 use ash::vk;
-
 use bevy_ecs::prelude::*;
 use bytemuck::Zeroable;
-use egui::ahash::HashMap;
-
-use crate::draw_pipelines::stub::Stub;
-use crate::gui::gui::Gui;
-use crate::utility::buffer::TBuffer;
-use crate::VkHandle;
 use common_renderer::{
     components::{
         camera::Camera,
@@ -49,11 +40,11 @@ use common_renderer::{
     },
     resources::time::Time,
 };
+use egui::ahash::HashMap;
 use glam::{Quat, Vec3A};
 use gpu_allocator::{vulkan::*, AllocationSizes, AllocatorDebugSettings};
-
-use std::{default, sync::Arc};
-use std::{sync::Mutex, time};
+use std::sync::Arc;
+use std::sync::Mutex;
 use winit::event::WindowEvent;
 
 pub struct App {
@@ -119,7 +110,7 @@ impl App {
     pub fn new(event_loop: &winit::event_loop::EventLoop<()>, config: Config) -> App {
         assert!(config.mesh_names.len() >= 1);
 
-        let core = Core::new(event_loop);
+        let core = Core::new(event_loop, &config);
 
         let device = &core.device;
         let physical_device = &core.physical_device;
@@ -213,8 +204,6 @@ impl App {
 
         println!("Loading command buffers");
 
-        let mesh_draw = Stub;
-
         let sync_objects: SyncObjects = SyncObjects::new(device.clone(), MAX_FRAMES_IN_FLIGHT);
 
         println!("Generated App");
@@ -299,47 +288,24 @@ impl App {
             uniform_camera_buffers,
             target_error: config.starting_error,
             dist_pow: 0.5,
-            freeze_pos: false,
+            freeze_culling: false,
+            freeze_error: false,
             instances: 0,
             uniform_transforms,
         });
 
-        world.insert_resource(Renderer {
-            fragment_colour: ShaderModule::new(
-                device.clone(),
-                include_bytes!("../../shaders/spv/frag_colour.frag"),
-            ),
-            fragment_lit: ShaderModule::new(
-                device.clone(),
-                include_bytes!("../../shaders/spv/frag_pbr.frag"),
-            ),
-
+        world.insert_resource(Renderer::new(
+            &config,
             graphics_queue,
             present_queue,
-            render_pass,
-            draw_pipeline: Box::new(mesh_draw),
-            descriptor_pool,
-            windows: vec![Box::new(AllocatorVisualiserWindow::new(allocator.clone()))],
-            mesh_mode: MeshShaderMode::TriangleList,
-            allocator,
-            current_pipeline: MeshDrawingPipelineType::None,
-            sync_objects,
-            query: false,
-            current_frame: 0,
-            is_framebuffer_resized: false,
-            app_info_open: true,
-            render_gui: true, // disable GUI during benchmarks
-            query_primitives: QueryPool::new(device.clone(), 1),
-            core,
             screen,
-            mesh: config.mesh_names[0].clone(),
-            fragment: Fragment::Lit,
-            hacky_command_buffer_passthrough: None,
-            image_index: 0,
-            is_suboptimal: false,
-            last_sample: time::Instant::now(),
-            primitives: Default::default(),
-        });
+            core,
+            descriptor_pool,
+            sync_objects,
+            allocator,
+            render_pass,
+        ));
+
         world.insert_non_send_resource(gui);
         world.insert_resource(meshes);
         world.insert_resource(FPSMeasure::new());

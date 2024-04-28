@@ -42,6 +42,8 @@ pub struct ExpandingComputeCulledMesh {
     mesh_invocations: RollingMeasure<u32, 60>,
     query_pool: Option<Arc<TypelessQueryPool>>,
     render_meshlets: RenderMultiresMeshlets,
+
+    timestamp_query_pool: Option<Arc<TypelessQueryPool>>,
 }
 
 impl ExpandingComputeCulledMesh {
@@ -135,6 +137,7 @@ impl ExpandingComputeCulledMesh {
             query_pool: renderer.get_query(),
             last_sample: time::Instant::now(),
             mesh_invocations: Default::default(),
+            timestamp_query_pool: renderer.get_timestamp_query(),
         }
     }
 }
@@ -224,6 +227,13 @@ impl ScreenData {
             let compute_to_task_dependency_info =
                 vk::DependencyInfo::default().buffer_memory_barriers(&compute_to_task_barriers);
 
+            if i == 0 {
+                core_draw
+                    .timestamp_query_pool
+                    .as_ref()
+                    .map(|pool| pool.write_timestamp_top(*command_buffer));
+            }
+
             unsafe {
                 // core_draw
                 //     .cluster_draw_buffer
@@ -273,6 +283,13 @@ impl ScreenData {
                     render_pass,
                     i,
                 );
+            }
+
+            if i == 0 {
+                core_draw
+                    .timestamp_query_pool
+                    .as_ref()
+                    .map(|pool| pool.write_timestamp_bottom(*command_buffer));
             }
         }
 

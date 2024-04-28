@@ -1,15 +1,20 @@
-use std::cmp;
+use std::{cmp, collections::HashSet, mem};
 
 //#[cfg(feature = "progress")]
 use indicatif::ProgressStyle;
 
+use meshopt::SimplifyOptions;
+use obj::{Group, IndexTuple, ObjData, Object, SimplePolygon};
 use rayon::prelude::*;
 
-use crate::mesh::graph::colour_graph;
+use crate::{
+    mesh::{graph::colour_graph, triangle::Triangle},
+    pidge::Pidge,
+};
 
 use super::{
-    edge::EdgeID, face::FaceID, quadric::Quadric, quadric_error::QuadricError, vertex::VertID,
-    winged_mesh::WingedMesh,
+    cluster_info::ClusterInfo, edge::EdgeID, face::FaceID, quadric::Quadric,
+    quadric_error::QuadricError, vertex::VertID, winged_mesh::WingedMesh,
 };
 use anyhow::Result;
 
@@ -63,8 +68,8 @@ impl WingedMesh {
             let face = self.get_face(fid);
             for eid in [
                 face.edge,
-                self.get_edge(face.edge).edge_left_cw,
-                self.get_edge(face.edge).edge_left_ccw,
+                self.get_edge(face.edge).edge_back_cw,
+                self.get_edge(face.edge).edge_next_ccw,
             ] {
                 let error = eid.edge_collapse_error(&self, verts, &quadrics).unwrap();
 
@@ -235,6 +240,180 @@ impl WingedMesh {
         bar.finish();
         // Get mut to save a single lock
         Ok(new_error)
+    }
+
+    /// Returns estimate of error introduced by halving the number of triangles
+    pub fn meshopt_reduce_within_groups(&mut self, verts: &[glam::Vec3A]) -> Result<f64> {
+        let mut group_tris = vec![Vec::new(); self.groups.len()];
+
+        for (i, f) in self.iter_faces() {
+            let gi = self.clusters[f.cluster_idx].group_index();
+            group_tris[self.clusters[f.cluster_idx].group_index()]
+                .extend_from_slice(&self.triangle_from_face(f));
+        }
+
+        // let mut border_edges = HashSet::new();
+
+        // for (i, f) in self.iter_faces() {
+        //     let gi = self.clusters[f.cluster_idx].group_index();
+        //     group_tris[self.clusters[f.cluster_idx].group_index()]
+        //         .extend_from_slice(&self.triangle_from_face(f));
+
+        //     for edge in self.iter_edge_loop(f.edge) {
+        //         if let Some(twin) = self.get_edge(edge).twin {
+        //             let gi2 = self.clusters[self.get_face(self.get_edge(twin).face).cluster_idx]
+        //                 .group_index();
+        //             if gi != gi2 {
+        //                 // println!("{gi} {gi2}");
+        //                 let (s, d) = edge.src_dst(self).unwrap();
+
+        //                 border_edges.insert([s.id().min(d.id()), s.id().max(d.id())]);
+        //             }
+        //         }
+        //     }
+        // }
+
+        *self.verts_mut() = Pidge::with_capacity(verts.len());
+        *self.edges_mut() = Pidge::with_capacity(self.edge_count());
+        *self.faces_mut() = Pidge::with_capacity(self.face_count());
+
+        let len_ratio = mem::size_of_val(&verts[0]) / mem::size_of::<u8>();
+        let bytes = unsafe {
+            core::slice::from_raw_parts(verts.as_ptr() as *const u8, verts.len() * len_ratio)
+        };
+
+        let verts_adapter =
+            meshopt::VertexDataAdapter::new(bytes, mem::size_of::<glam::Vec3A>(), 0).unwrap();
+
+        assert_eq!(verts_adapter.vertex_count, verts.len());
+
+        println!("Simplifying groups via MESHOPT");
+
+        // Must lock the border of groups.
+        let new_groups = group_tris
+            .into_par_iter()
+            .map(|group| {
+                let new_group = meshopt::simplify(
+                    &group,
+                    &verts_adapter,
+                    group.len() / 2,
+                    1.0,
+                    SimplifyOptions::LockBorder,
+                    None,
+                );
+
+                // Double check this is my fault
+                for ind in &new_group {
+                    assert!(group.contains(ind), "Meshopt has made up new indices!")
+                }
+
+                new_group
+            })
+            .collect_vec_list();
+
+        // Allocate new face IDs
+
+        let mut id = FaceID(0);
+
+        // Forget old clusterings; we have just remade the mesh
+        self.clusters = vec![ClusterInfo::default(); self.groups.len()];
+
+        println!("Pushing geometry back to half-edge");
+
+        let mut pushed_edges = 0;
+        let mut pushed_faces = 0;
+
+        // println!("Done");
+
+        for (group_idx, new_group) in new_groups.iter().flatten().enumerate() {
+            // self.assert_valid().unwrap();
+
+            self.clusters[group_idx].set_group_index_once(group_idx);
+            for tri in new_group.chunks_exact(3) {
+                assert_eq!(tri.len(), 3);
+
+                let [a, b, c] = tri else { unreachable!() };
+
+                if a == b && b == c {
+                    // Degenerate triangle - meshopt will sometimes turn a line of 3 points into a triangle on a border
+
+                    continue;
+                }
+
+                match self.add_tri(id, (*a).into(), (*b).into(), (*c).into()) {
+                    Ok(_) => {
+                        self.get_face_mut(id).cluster_idx = group_idx;
+
+                        pushed_edges += 3;
+                        pushed_faces += 1;
+                        id.0 += 1;
+                    }
+                    Err(me) => match me {
+                        crate::mesh::winged_mesh::MeshError::EdgeExists(e) => {
+                            let e = self.get_edge(e);
+
+                            // println!("{:?}", e.twin);
+
+                            println!(
+                                "Duplicate face from group {} (we are group {})",
+                                self.get_face(e.face).cluster_idx,
+                                group_idx
+                            );
+                        }
+                        _ => unreachable!(),
+                    },
+                }
+            }
+            assert_eq!(self.face_count(), pushed_faces);
+            assert_eq!(self.edge_count(), pushed_edges);
+
+            // println!("{pushed_faces} {}", new_group.len() / 3)
+        }
+
+        // if failed {
+        let mut obj = ObjData::default();
+
+        obj.position = verts.iter().map(|v| [v[0], v[1], v[2]]).collect();
+
+        // obj.normal = multires
+        //     .verts
+        //     .into_iter()
+        //     .map(|v| [v.normal[0], v.normal[1], v.normal[2]])
+        //     .collect();
+
+        for (i, cluster) in new_groups.iter().flatten().enumerate() {
+            let name = format!("Cluster  I{}", i);
+
+            let mut group = Group::new("0".to_string());
+
+            // Indices to polygons
+            for t in cluster.chunks_exact(3) {
+                group.polys.push(SimplePolygon(
+                    [
+                        IndexTuple(t[0] as _, None, None),
+                        IndexTuple(t[1] as _, None, None),
+                        IndexTuple(t[2] as _, None, None),
+                    ]
+                    .to_vec(),
+                ))
+            }
+
+            let mut object = Object::new(name);
+
+            object.groups.push(group);
+
+            obj.objects.push(object)
+        }
+
+        obj.save(format!("shit.obj")).unwrap();
+        // }
+
+        // assert!(!failed, "Failed");
+
+        println!("Simplification Complete!");
+
+        // Get mut to save a single lock
+        Ok(0.0)
     }
 }
 

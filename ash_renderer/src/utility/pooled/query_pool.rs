@@ -21,8 +21,8 @@ pub struct MeshInvocationsQueryResults {
 }
 
 impl QueryResult for MeshInvocationsQueryResults {
-    fn flags() -> vk::QueryPipelineStatisticFlags {
-        vk::QueryPipelineStatisticFlags::MESH_SHADER_INVOCATIONS_EXT
+    fn flags() -> QueryType {
+        QueryType::Pipeline(vk::QueryPipelineStatisticFlags::MESH_SHADER_INVOCATIONS_EXT)
     }
 }
 
@@ -32,9 +32,21 @@ pub struct PrimitivesQueryResults {
     pub avail: u32,
 }
 
+#[derive(bytemuck::Zeroable, Copy, Clone)]
+pub struct TimestampResults {
+    pub timestamp: u64,
+    pub avail: u64,
+}
+
 impl QueryResult for PrimitivesQueryResults {
-    fn flags() -> vk::QueryPipelineStatisticFlags {
-        vk::QueryPipelineStatisticFlags::CLIPPING_PRIMITIVES
+    fn flags() -> QueryType {
+        QueryType::Pipeline(vk::QueryPipelineStatisticFlags::CLIPPING_PRIMITIVES)
+    }
+}
+
+impl QueryResult for TimestampResults {
+    fn flags() -> QueryType {
+        QueryType::Timestamp
     }
 }
 
@@ -54,8 +66,13 @@ pub struct Query<'a> {
     query: u32,
 }
 
+pub enum QueryType {
+    Pipeline(vk::QueryPipelineStatisticFlags),
+    Timestamp,
+}
+
 pub trait QueryResult {
-    fn flags() -> vk::QueryPipelineStatisticFlags;
+    fn flags() -> QueryType;
 }
 
 vk_handle_wrapper!(TypelessQueryPool, QueryPool);
@@ -83,6 +100,32 @@ impl TypelessQueryPool {
             query,
         }
     }
+
+    pub fn write_timestamp_top(&self, cmd: vk::CommandBuffer) {
+        self.reset(cmd, 0);
+
+        unsafe {
+            self.device.cmd_write_timestamp(
+                cmd,
+                vk::PipelineStageFlags::TOP_OF_PIPE,
+                self.handle(),
+                0,
+            )
+        }
+    }
+
+    pub fn write_timestamp_bottom(&self, cmd: vk::CommandBuffer) {
+        self.reset(cmd, 1);
+
+        unsafe {
+            self.device.cmd_write_timestamp(
+                cmd,
+                vk::PipelineStageFlags::BOTTOM_OF_PIPE,
+                self.handle(),
+                1,
+            )
+        }
+    }
 }
 
 impl<R> QueryPool<R>
@@ -90,10 +133,14 @@ where
     R: bytemuck::Zeroable + Copy + QueryResult,
 {
     pub fn new(device: Arc<Device>, query_count: u32) -> Self {
-        let create_info = vk::QueryPoolCreateInfo::default()
-            .query_type(vk::QueryType::PIPELINE_STATISTICS)
-            .pipeline_statistics(R::flags())
-            .query_count(query_count);
+        let create_info = vk::QueryPoolCreateInfo::default().query_count(query_count);
+
+        let create_info = match R::flags() {
+            QueryType::Pipeline(flags) => create_info
+                .query_type(vk::QueryType::PIPELINE_STATISTICS)
+                .pipeline_statistics(flags),
+            QueryType::Timestamp => create_info.query_type(vk::QueryType::TIMESTAMP),
+        };
 
         let handle = unsafe {
             device
@@ -112,17 +159,24 @@ where
     }
     /// Call `get_query_pool_results` for the correct sized
     pub fn get_results(&self, i: u32) -> Option<R> {
-        let mut results = [R::zeroed()];
+        self.get_many_results::<1>(i).map(|results| results[0])
+    }
+
+    pub fn get_many_results<const N: usize>(&self, offset: u32) -> Option<[R; N]> {
+        let mut results = [R::zeroed(); N];
+
+        let flags = match R::flags() {
+            QueryType::Pipeline(_) => vk::QueryResultFlags::WITH_AVAILABILITY,
+            QueryType::Timestamp => {
+                vk::QueryResultFlags::WITH_AVAILABILITY | vk::QueryResultFlags::TYPE_64
+            }
+        };
+
         unsafe {
             self.device
-                .get_query_pool_results(
-                    self.handle,
-                    i,
-                    &mut results,
-                    vk::QueryResultFlags::WITH_AVAILABILITY,
-                )
+                .get_query_pool_results(self.handle, offset, &mut results, flags)
                 .ok()
-                .map(|()| results[0])
+                .map(|()| results)
         }
     }
 

@@ -31,7 +31,7 @@ void main() {
 
 	OUT.world_normal = (models[gl_InstanceIndex].model * vec4(norm.xyz, 0)).xyz;
 
-	OUT.fragColor = vec3(1, 1, 1);
+	OUT.fragColor = vec3(0);
 
-	OUT.fragTexCoord = vec2(1, 1);
+	OUT.fragTexCoord = vec2(0);
 }

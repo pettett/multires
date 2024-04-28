@@ -1,10 +1,12 @@
-# mesh_name = "assets/lucy.glb.bin"
+# mesh_names = ["assets/lucy.glb.bin"]
 mesh_names = [
 	"assets/dragon_high.glb.bin",
-	# "assets/torrin_main.glb.bin"
+	"assets/meshopt_multires/dragon_high.glb.bin",
 ]
 
 
 # mesh_name = "assets/torrin_main.glb.bin"
 
-starting_error = 0.25
+starting_error = 0.10
+
+validation = false

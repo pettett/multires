@@ -10,7 +10,7 @@ use crate::{
         pooled::command_pool::CommandPool,
         queue_family_indices::*,
     },
-    VkHandle, TASK_GROUP_SIZE, WINDOW_TITLE,
+    Config, VkHandle, TASK_GROUP_SIZE, WINDOW_TITLE,
 };
 
 use crate::utility::{device::Device, physical_device::PhysicalDevice, surface::Surface};
@@ -29,10 +29,10 @@ pub struct Core {
 
     debug_utils_instance: ash::ext::debug_utils::Instance,
     debug_utils_device: ash::ext::debug_utils::Device,
-    debug_messenger: vk::DebugUtilsMessengerEXT,
+    debug_messenger: Option<vk::DebugUtilsMessengerEXT>,
 }
 impl Core {
-    pub fn new(event_loop: &EventLoop<()>) -> Arc<Self> {
+    pub fn new(event_loop: &EventLoop<()>, config: &Config) -> Arc<Self> {
         println!("initing window");
         let window =
             crate::app::window::init_window(event_loop, WINDOW_TITLE, WINDOW_WIDTH, WINDOW_HEIGHT);
@@ -46,7 +46,7 @@ impl Core {
         let instance = Instance::new(
             &entry,
             WINDOW_TITLE,
-            VALIDATION.is_enable,
+            config.validation,
             &window,
             required_instance_extensions,
             &VALIDATION.required_validation_layers.to_vec(),
@@ -61,7 +61,6 @@ impl Core {
             WINDOW_HEIGHT,
         );
 
-    
         let required_extensions = Extensions::new(vec![
             ash::khr::buffer_device_address::NAME,
             ash::khr::swapchain::NAME,
@@ -84,9 +83,8 @@ impl Core {
             &surface,
         );
 
-		let (debug_utils_instance, debug_utils_device, debug_messenger) =
-		setup_debug_utils(VALIDATION.is_enable, &entry, &instance, &device);
-
+        let (debug_utils_instance, debug_utils_device, debug_messenger) =
+            setup_debug_utils(config.validation, &entry, &instance, &device);
 
         // Features required for subgroupMax to work in task shader
         assert!(TASK_GROUP_SIZE <= physical_device_subgroup_properties.subgroup_size);
@@ -110,7 +108,7 @@ impl Core {
             queue_family,
             command_pool,
             debug_utils_instance,
-			debug_utils_device,
+            debug_utils_device,
             debug_messenger,
         })
     }
@@ -118,28 +116,26 @@ impl Core {
     /// Name the object, if a debug util loader is attached
     /// Otherwise this function will do nothing
     pub fn name_object<T: Handle + Default>(&self, name: &str, object: T) {
-        if self.debug_messenger.is_null() {
-            return;
-        }
+        if let Some(msgr) = self.debug_messenger {
+            let name_c = ffi::CString::new(name).unwrap();
 
-        let name_c = ffi::CString::new(name).unwrap();
-
-        let object_name_info = vk::DebugUtilsObjectNameInfoEXT::default()
-            .object_handle(object)
-            .object_name(&name_c);
-        unsafe {
-            self.debug_utils_device
-                .set_debug_utils_object_name(&object_name_info)
-                .unwrap();
+            let object_name_info = vk::DebugUtilsObjectNameInfoEXT::default()
+                .object_handle(object)
+                .object_name(&name_c);
+            unsafe {
+                self.debug_utils_device
+                    .set_debug_utils_object_name(&object_name_info)
+                    .unwrap();
+            }
         }
     }
 }
 impl Drop for Core {
     fn drop(&mut self) {
         unsafe {
-            if VALIDATION.is_enable {
+            if let Some(msgr) = self.debug_messenger {
                 self.debug_utils_instance
-                    .destroy_debug_utils_messenger(self.debug_messenger, None);
+                    .destroy_debug_utils_messenger(msgr, None);
             }
         }
     }

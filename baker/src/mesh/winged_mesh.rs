@@ -2,7 +2,10 @@ use anyhow::Context;
 use common::TriMesh;
 use glam::Vec3;
 
-use std::{collections::HashSet, fs};
+use std::{
+    collections::{HashMap, HashSet},
+    fs,
+};
 
 use crate::pidge::Pidge;
 
@@ -40,6 +43,9 @@ pub enum MeshError {
     InvalidNeighbours(usize, usize),
     #[error("Ran out of valid edges while reducing")]
     OutOfEdges,
+
+    #[error("Triangle Already Exists")]
+    EdgeExists(EdgeID),
 }
 
 //Definition 6: A cut in the DAG is a subset of the tree such that for every node Ci all ancestors
@@ -53,6 +59,31 @@ pub struct WingedMesh {
     verts: Pidge<VertID, Vertex>,
     pub clusters: Vec<ClusterInfo>,
     pub groups: Vec<GroupInfo>,
+}
+
+struct TwinLoop<'a> {
+    mesh: &'a WingedMesh,
+    first: EdgeID,
+    current: EdgeID,
+}
+
+impl<'a> Iterator for TwinLoop<'a> {
+    type Item = EdgeID;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let twin = self.mesh.get_edge(self.current).twin;
+
+        if let Some(next) = twin {
+            if next == self.first {
+                None
+            } else {
+                self.current = next;
+                Some(next)
+            }
+        } else {
+            None
+        }
+    }
 }
 
 impl WingedMesh {
@@ -158,7 +189,7 @@ impl WingedMesh {
         });
     }
     pub fn max_edge_age(&self) -> u32 {
-        self.edges.iter().map(|e| e.age).max().unwrap()
+        self.edges.iter().map(|e| e.age).max().unwrap_or_default()
     }
     pub fn avg_edge_age(&self) -> f32 {
         self.edges.iter().map(|e| e.age).sum::<u32>() as f32 / self.edge_count() as f32
@@ -234,18 +265,18 @@ impl WingedMesh {
     pub fn edge_sqr_length(&self, edge: EdgeID, verts: &[Vec3]) -> f32 {
         let e = &self.get_edge(edge);
         return verts[e.vert_origin.id() as usize]
-            .distance_squared(verts[self.get_edge(e.edge_left_cw).vert_origin.id() as usize]);
+            .distance_squared(verts[self.get_edge(e.edge_back_cw).vert_origin.id() as usize]);
     }
 
     pub fn triangle_from_face(&self, face: &Face) -> [u32; 3] {
-        let e1 = self.get_edge(face.edge);
-        let e0 = self.get_edge(e1.edge_left_ccw);
-        let e2 = self.get_edge(e1.edge_left_cw);
+        let first = self.get_edge(face.edge);
+        let next = self.get_edge(first.edge_next_ccw);
+        let back = self.get_edge(first.edge_back_cw);
 
         [
-            e0.vert_origin.into(),
-            e1.vert_origin.into(),
-            e2.vert_origin.into(),
+            back.vert_origin.into(),
+            first.vert_origin.into(),
+            next.vert_origin.into(),
         ]
     }
 
@@ -277,8 +308,12 @@ impl WingedMesh {
             if a == b || b == c || a == c {
                 println!("Discarding 0 area triangle");
             } else {
-                mesh.add_tri(current, a.into(), b.into(), c.into());
-                current.0 += 1;
+                match mesh.add_tri(current, a.into(), b.into(), c.into()) {
+                    Ok(_) => {
+                        current.0 += 1;
+                    }
+                    Err(_) => println!("Attempted to add potentially duplicated triangle"),
+                };
             }
 
             //#[cfg(feature = "progress")]
@@ -296,7 +331,13 @@ impl WingedMesh {
             .map(|v| {
                 v.outgoing_edges()
                     .iter()
-                    .filter(|&&p| self.get_edge(self.get_edge(p).edge_left_cw).vert_origin == b)
+                    .filter(|&&p| {
+                        let e = self.get_edge(p);
+
+                        assert_eq!(e.vert_origin, a);
+
+                        e.dst(self).unwrap() == b
+                    })
                     .next()
                     .copied()
             })
@@ -310,21 +351,48 @@ impl WingedMesh {
         dest: VertID,
         face: FaceID,
         eid: EdgeID,
-        edge_left_cw: EdgeID,
-        edge_left_ccw: EdgeID,
+        edge_back_cw: EdgeID,
+        edge_next_ccw: EdgeID,
     ) {
-        let twin = self.find_edge(dest, orig);
+        // assert!(
+        //     self.find_edge(orig, dest).is_none(),
+        //     "Adding duplicate edge to Mesh"
+        // );
+
+        // Set the "twin" to an existing mesh going this way, if it exists. Try to keep things contiguous
+        let twin = self
+            .find_edge(dest, orig)
+            .or_else(|| self.find_edge(orig, dest));
+
         let e = HalfEdge {
             vert_origin: orig,
             face,
-            edge_left_cw,
-            edge_left_ccw,
+            edge_back_cw,
+            edge_next_ccw,
             twin,
             age: 0,
         };
 
+        // Warning: cursed code
         if let Some(twin_eid) = twin {
-            self.get_edge_mut(twin_eid).twin = Some(eid);
+            if self.get_edge(twin_eid).twin.is_none() {
+                // We are safe from the madness
+                self.get_edge_mut(twin_eid).twin = Some(eid)
+            } else {
+                let first_twin = twin_eid;
+                let mut current = twin_eid;
+                // Find the end of the twin loop
+                loop {
+                    let current_twin = self.get_edge(current).twin.unwrap();
+
+                    if current_twin == first_twin {
+                        self.get_edge_mut(current).twin = Some(eid);
+                        break;
+                    } else {
+                        current = current_twin
+                    }
+                }
+            }
         }
 
         self.get_vert_or_default(orig).add_outgoing(eid);
@@ -334,22 +402,86 @@ impl WingedMesh {
         self.insert_edge(eid, e);
     }
 
-    pub fn add_tri(&mut self, f: FaceID, a: VertID, b: VertID, c: VertID) {
-        let iea = (f.0 * 3 + 0).into();
-        let ieb = (f.0 * 3 + 1).into();
-        let iec = (f.0 * 3 + 2).into();
+    pub fn twin_loop(&self, eid: EdgeID) -> impl Iterator<Item = EdgeID> + '_ {
+        TwinLoop {
+            mesh: self,
+            first: eid,
+            current: eid,
+        }
+    }
 
-        self.add_half_edge(a, b, f, iea, ieb, iec);
-        self.add_half_edge(b, c, f, ieb, iec, iea);
-        self.add_half_edge(c, a, f, iec, iea, ieb);
+    pub fn assert_twin_loop(&self, eid: EdgeID) {
+        let mut seen = Vec::new();
+
+        for current in self.twin_loop(eid) {
+            if seen.contains(&current) {
+                panic!("We fucked the twin loop");
+            }
+
+            seen.push(current);
+        }
+
+        assert!(!seen.contains(&eid));
+
+        let (src, dst) = self.get_edge(eid).src_dst(self).unwrap();
+
+        for &o in self.get_vert(dst).incoming_edges() {
+            if o != eid && self.get_edge(o).vert_origin == src {
+                assert!(seen.contains(&o))
+            }
+        }
+
+        for &o in self.get_vert(src).incoming_edges() {
+            if self.get_edge(o).vert_origin == dst {
+                assert!(seen.contains(&o))
+            }
+        }
+    }
+
+    pub fn add_tri(&mut self, f: FaceID, a: VertID, b: VertID, c: VertID) -> Result<(), MeshError> {
+        // if self.find_edge(a, b).is_some()
+        //     || self.find_edge(b, c).is_some()
+        //     || self.find_edge(c, a).is_some()
+        // {
+        //     if let Some(e) = self.find_edge(a, b) {
+        //         return Err(MeshError::EdgeExists(e));
+        //     }
+        //     if let Some(e) = self.find_edge(b, c) {
+        //         return Err(MeshError::EdgeExists(e));
+        //     }
+        //     if let Some(e) = self.find_edge(c, a) {
+        //         return Err(MeshError::EdgeExists(e));
+        //     }
+        // }
+
+        let edge_center = (f.0 * 3 + 0).into();
+        let edge_back_cw = (f.0 * 3 + 1).into();
+        let edge_next_ccw = (f.0 * 3 + 2).into();
+
+        //     b   e    a
+        //     next  prev
+        //         c
+
+        self.add_half_edge(a, b, f, edge_center, edge_back_cw, edge_next_ccw);
+        self.add_half_edge(b, c, f, edge_next_ccw, edge_center, edge_back_cw);
+        self.add_half_edge(c, a, f, edge_back_cw, edge_next_ccw, edge_center);
 
         self.insert_face(
             f,
             Face {
-                edge: iea,
+                edge: edge_center,
                 cluster_idx: 0,
             },
         );
+
+        assert!(self.faces_mut().slot_full(f));
+
+        // assert twin loop is not fucked
+        self.assert_twin_loop(edge_center);
+        self.assert_twin_loop(edge_back_cw);
+        self.assert_twin_loop(edge_next_ccw);
+
+        Ok(())
     }
 
     /// Remove every triangle with a `cluster_idx` different to `cluster_idx`
@@ -587,7 +719,7 @@ impl WingedMesh {
         let f = self.faces.wipe(face);
         let edge = self.wipe_edge(f.edge);
 
-        let tri = [f.edge, edge.edge_left_ccw, edge.edge_left_cw];
+        let tri = [f.edge, edge.edge_next_ccw, edge.edge_back_cw];
 
         let edges = [edge, self.wipe_edge(tri[1]), self.wipe_edge(tri[2])];
 
@@ -597,7 +729,7 @@ impl WingedMesh {
 
             self.get_vert_mut(v_o).remove_outgoing(tri[i]);
             self.get_vert_mut(v_o)
-                .remove_incoming(edges[i].edge_left_ccw);
+                .remove_incoming(edges[i].edge_back_cw);
         }
 
         (f, tri, edges)
@@ -637,7 +769,7 @@ impl WingedMesh {
                 assert_ne!(dest, replacement);
             }
 
-            let outgoing_ccw = outgoing_edge.edge_left_ccw;
+            let outgoing_ccw = outgoing_edge.edge_next_ccw;
 
             self.get_edge_mut(outgoing).vert_origin = replacement;
 
@@ -651,6 +783,138 @@ impl WingedMesh {
             self.get_edge_mut(outgoing).age = 0;
             self.get_edge_mut(outgoing_ccw).age = 0;
         }
+    }
+
+    pub fn assert_valid(&self) -> anyhow::Result<()> {
+        for (i, _) in self.iter_faces() {
+            self.assert_face_valid(i).context("Invalid Mesh")?;
+        }
+        for (eid, _) in self.iter_edges() {
+            self.assert_edge_valid(eid).context("Invalid Mesh")?;
+        }
+        for (vid, _) in self.iter_verts() {
+            self.assert_vertex_valid(vid).context("Invalid Mesh")?;
+        }
+        Ok(())
+    }
+
+    pub fn assert_face_valid(&self, fid: FaceID) -> anyhow::Result<()> {
+        let f = &self.get_face(fid);
+        let tri: Vec<_> = self.iter_edge_loop(f.edge).collect();
+
+        if tri.len() > 3 {
+            Err(MeshError::InvalidTri(fid)).context("Tri has >3 edges")?;
+        }
+        if tri.len() < 3 {
+            Err(MeshError::InvalidTri(fid)).context("Tri has <3 edges")?;
+        }
+
+        for &e in &tri {
+            self.assert_edge_valid(e)
+                .context(MeshError::InvalidTri(fid))?;
+
+            if let Some(t) = self.get_edge(e).twin {
+                if tri.contains(&t) {
+                    Err(MeshError::InvalidTri(fid)).context("Tri neighbours itself")?
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub fn assert_edge_valid(&self, eid: EdgeID) -> anyhow::Result<()> {
+        let edge = self.try_get_edge(eid)?;
+
+        self.get_face(edge.face);
+
+        if let Some(t) = edge.twin {
+            self.try_get_edge(t).context(MeshError::InvalidTwin(eid))?;
+        }
+
+        let v = self
+            .try_get_vert(edge.vert_origin)
+            .context(MeshError::InvalidEdge(eid))?;
+
+        if !v.outgoing_edges().contains(&eid) {
+            Err(MeshError::InvalidEdge(eid))
+                .context(MeshError::InvalidVertex(edge.vert_origin))
+                .context(
+                    "Vertex does not contain reference to edge that is it's source in outgoing",
+                )?;
+        }
+
+        self.try_get_edge(edge.edge_next_ccw)?;
+
+        self.try_get_edge(edge.edge_back_cw)?;
+
+        let (src, dest) = eid.src_dst(self)?;
+
+        if src == dest {
+            Err(MeshError::SingletonEdge(eid, src))?;
+        }
+
+        self.assert_vertex_valid(edge.vert_origin)?;
+        self.assert_vertex_valid(self.get_edge(edge.edge_next_ccw).vert_origin)?;
+        self.assert_vertex_valid(self.get_edge(edge.edge_back_cw).vert_origin)?;
+
+        Ok(())
+    }
+
+    pub fn assert_vertex_valid(&self, vid: VertID) -> anyhow::Result<()> {
+        self.try_get_vert(vid)?;
+
+        let mut dests = HashMap::new();
+        let mut origs = HashMap::new();
+
+        for &eid in self.get_vert(vid).outgoing_edges() {
+            let (orig, dest) = eid.src_dst(self).context(MeshError::InvalidVertex(vid))?;
+
+            if orig != vid {
+                return Err(MeshError::InvalidVertex(vid))
+                    .context("Invalid vertex edge source loop");
+            }
+
+            if let Some(other) = dests.insert(dest, eid) {
+                // Go back and find the other edge with this destination
+
+                return Err(MeshError::InvalidVertex(vid))
+                    .context(MeshError::DuplicateEdges(
+                        vid,
+                        eid,
+                        other,
+                        self.get_edge(eid).clone(),
+                        self.get_edge(other).clone(),
+                    ))
+                    .with_context(|| {
+                        format!("Vert has outgoing edges with duplicate destinations. ",)
+                    });
+            }
+        }
+        for &eid in self.get_vert(vid).incoming_edges() {
+            let (orig, dest) = eid.src_dst(self).context(MeshError::InvalidVertex(vid))?;
+
+            if dest != vid {
+                return Err(MeshError::InvalidVertex(vid)).context("Invalid vertex edge dest loop");
+            }
+
+            if let Some(_other) = origs.insert(orig, eid) {
+                return Err(MeshError::InvalidVertex(vid))
+                    .context("Vert has incoming edges with duplicate sources");
+            }
+        }
+        Ok(())
+    }
+
+    pub fn faces_mut(&mut self) -> &mut Pidge<FaceID, Face> {
+        &mut self.faces
+    }
+
+    pub fn edges_mut(&mut self) -> &mut Pidge<EdgeID, HalfEdge> {
+        &mut self.edges
+    }
+
+    pub fn verts_mut(&mut self) -> &mut Pidge<VertID, Vertex> {
+        &mut self.verts
     }
 }
 #[cfg(test)]
@@ -692,124 +956,6 @@ pub mod test {
 
     /// Extra assertion methods for test environment
     impl WingedMesh {
-        pub fn assert_valid(&self) -> anyhow::Result<()> {
-            for (i, _) in self.iter_faces() {
-                self.assert_face_valid(i).context("Invalid Mesh")?;
-            }
-            for (eid, _) in self.iter_edges() {
-                self.assert_edge_valid(eid).context("Invalid Mesh")?;
-            }
-            for (vid, _) in self.iter_verts() {
-                self.assert_vertex_valid(vid).context("Invalid Mesh")?;
-            }
-            Ok(())
-        }
-
-        pub fn assert_face_valid(&self, fid: FaceID) -> anyhow::Result<()> {
-            let f = &self.get_face(fid);
-            let tri: Vec<_> = self.iter_edge_loop(f.edge).collect();
-
-            if tri.len() > 3 {
-                Err(MeshError::InvalidTri(fid)).context("Tri has >3 edges")?;
-            }
-            if tri.len() < 3 {
-                Err(MeshError::InvalidTri(fid)).context("Tri has <3 edges")?;
-            }
-
-            for &e in &tri {
-                self.assert_edge_valid(e)
-                    .context(MeshError::InvalidTri(fid))?;
-
-                if let Some(t) = self.get_edge(e).twin {
-                    if tri.contains(&t) {
-                        Err(MeshError::InvalidTri(fid)).context("Tri neighbours itself")?
-                    }
-                }
-            }
-            Ok(())
-        }
-
-        pub fn assert_edge_valid(&self, eid: EdgeID) -> anyhow::Result<()> {
-            let edge = self.try_get_edge(eid)?;
-
-            if let Some(t) = edge.twin {
-                self.try_get_edge(t).context(MeshError::InvalidTwin(eid))?;
-            }
-
-            let v = self
-                .try_get_vert(edge.vert_origin)
-                .context(MeshError::InvalidEdge(eid))?;
-
-            if !v.outgoing_edges().contains(&eid) {
-                Err(MeshError::InvalidEdge(eid))
-                    .context(MeshError::InvalidVertex(edge.vert_origin))
-                    .context(
-                        "Vertex does not contain reference to edge that is it's source in outgoing",
-                    )?;
-            }
-
-            self.try_get_edge(edge.edge_left_ccw)?;
-
-            self.try_get_edge(edge.edge_left_cw)?;
-
-            let (src, dest) = eid.src_dst(self)?;
-
-            if src == dest {
-                Err(MeshError::SingletonEdge(eid, src))?;
-            }
-
-            self.assert_vertex_valid(edge.vert_origin)?;
-            self.assert_vertex_valid(self.get_edge(edge.edge_left_ccw).vert_origin)?;
-            self.assert_vertex_valid(self.get_edge(edge.edge_left_cw).vert_origin)?;
-
-            Ok(())
-        }
-
-        pub fn assert_vertex_valid(&self, vid: VertID) -> anyhow::Result<()> {
-            self.try_get_vert(vid)?;
-
-            let mut dests = HashMap::new();
-            let mut origs = HashMap::new();
-
-            for &eid in self.get_vert(vid).outgoing_edges() {
-                let (orig, dest) = eid.src_dst(self).context(MeshError::InvalidVertex(vid))?;
-
-                if orig != vid {
-                    return Err(MeshError::InvalidVertex(vid))
-                        .context("Invalid vertex edge source loop");
-                }
-
-                if let Some(other) = dests.insert(dest, eid) {
-                    // Go back and find the other edge with this destination
-
-                    return Err(MeshError::InvalidVertex(vid))
-                        .context(MeshError::DuplicateEdges(
-                            vid,
-                            eid,
-                            other,
-                            self.get_edge(eid).clone(),
-                            self.get_edge(other).clone(),
-                        ))
-                        .with_context(|| {
-                            format!("Vert has outgoing edges with duplicate destinations. ",)
-                        });
-                }
-            }
-            for &eid in self.get_vert(vid).incoming_edges() {
-                let (orig, dest) = eid.src_dst(self).context(MeshError::InvalidVertex(vid))?;
-
-                if dest != vid {
-                    return Err(MeshError::InvalidVertex(vid))
-                        .context("Invalid vertex edge dest loop");
-                }
-
-                if let Some(_other) = origs.insert(orig, eid) {
-                    return Err(MeshError::InvalidVertex(vid))
-                        .context("Vert has incoming edges with duplicate sources");
-                }
-            }
-            Ok(())
-        }
         /// Find the inner boundary of a set of faces. Quite simple - record all edges we have seen, and any twins for those.
         /// Inner boundary as will not include edges from an edge of the mesh, as these have no twins.
         pub fn face_boundary(&self, faces: &Vec<&Face>) -> HashSet<EdgeID> {

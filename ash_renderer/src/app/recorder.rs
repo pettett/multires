@@ -105,23 +105,29 @@ pub fn record(
             }
             RecordStage::EnterStage(i) => {
                 bench.t = 0;
-                if i == bench.rounds {
-                    bench.stage = RecordStage::Finish;
-                } else {
+
+                if bench.p == 0 && i != bench.rounds {
                     scene_events.send(SceneEvent::AddInstances(bench.instances_per_round));
                     bench.total_instances += bench.instances_per_round;
+                }
 
-                    // Get next data ready
-                    let ti = bench.total_instances;
+                bench.p += 1;
 
-                    let t = chrono::offset::Local::now().format("%Y-%m-%d(%H-%M)");
-                    let p = format!(
-                        "benchmark/{:?}{}/{t}",
-                        renderer.current_pipeline,
-                        renderer.mesh.split('/').skip(1).next().unwrap()
-                    );
-
-                    bench.stage = RecordStage::Running(i, Arc::new(p));
+                if bench.p == 40 {
+                    bench.p = 0;
+                    if i == bench.rounds {
+                        bench.stage = RecordStage::Finish;
+                    } else {
+                        // Get next data ready
+                        let ti = bench.total_instances;
+                        let t = chrono::offset::Local::now().format("%Y-%m-%d(%H-%M)");
+                        let p = format!(
+                            "benchmark/{:?}{}/{t}",
+                            renderer.current_pipeline,
+                            renderer.mesh.split('/').skip(1).next().unwrap()
+                        );
+                        bench.stage = RecordStage::Running(i, Arc::new(p));
+                    }
                 }
             }
 
@@ -134,7 +140,7 @@ pub fn record(
                 bench.p += 1;
                 // A frame buffer is about 3 frames long. If we dont do this, things sadly get janky
                 if bench.p == 6 {
-                    renderer.screenshot(p.to_string(), format!("{}.png", bench.t));
+                    // renderer.screenshot(p.to_string(), format!("{}.png", bench.t));
                 }
                 if bench.p == 12 {
                     bench.t += 1;

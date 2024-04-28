@@ -7,7 +7,10 @@ use common_renderer::components::transform::Transform;
 
 use crate::{
     app::{
-        frame_measure::RollingMeasure, mesh_data::MeshData, renderer::Renderer,
+        frame_measure::RollingMeasure,
+        material::{Material, MAIN_FUNCTION_NAME},
+        mesh_data::MeshData,
+        renderer::Renderer,
         scene::ModelUniformBufferObject,
     },
     core::Core,
@@ -32,7 +35,7 @@ use crate::{
 
 use super::{
     init_color_blend_attachment_states, init_depth_state_create_info,
-    init_multisample_state_create_info, init_rasterization_statue_create_info, DrawPipeline,
+    init_multisample_state_create_info, DrawPipeline,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -50,7 +53,8 @@ pub struct IndirectTasks {
     indirect_task_buffer: Arc<TBuffer<vk::DrawMeshTasksIndirectCommandEXT>>,
 
     //task_invocations: RollingMeasure<u32, 60>,
-    query_pool: Option<Arc<TypelessQueryPool>>,
+    pipeline_query_pool: Option<Arc<TypelessQueryPool>>,
+    timestamp_query_pool: Option<Arc<TypelessQueryPool>>,
 }
 
 impl IndirectTasks {
@@ -115,7 +119,8 @@ impl IndirectTasks {
             descriptor_pool: renderer.descriptor_pool.clone(),
             screen: None,
             indirect_task_buffer,
-            query_pool: renderer.get_query(),
+            pipeline_query_pool: renderer.get_query(),
+            timestamp_query_pool: renderer.get_timestamp_query(),
             core,
             //task_invocations: Default::default(),
         }
@@ -180,6 +185,13 @@ impl ScreenData {
                 let q = i as u32;
                 let query = q == 0;
 
+                if query {
+                    core_draw
+                        .timestamp_query_pool
+                        .as_ref()
+                        .map(|pool| pool.write_timestamp_top(*command_buffer));
+                }
+
                 device.cmd_begin_render_pass(
                     *command_buffer,
                     &render_pass_begin_info,
@@ -191,7 +203,7 @@ impl ScreenData {
                 {
                     let _qry = if query {
                         core_draw
-                            .query_pool
+                            .pipeline_query_pool
                             .as_ref()
                             .map(|pool| pool.begin_query(*command_buffer, i as _))
                     } else {
@@ -221,6 +233,13 @@ impl ScreenData {
                 }
 
                 device.cmd_end_render_pass(*command_buffer);
+
+                if query {
+                    core_draw
+                        .timestamp_query_pool
+                        .as_ref()
+                        .map(|pool| pool.write_timestamp_bottom(*command_buffer));
+                }
             }
         }
 
@@ -311,7 +330,7 @@ fn create_graphics_pipeline(
     render_pass: &RenderPass,
     swapchain_extent: vk::Extent2D,
     ubo_set_layout: Arc<DescriptorSetLayout>,
-    frag_shader_module: &ShaderModule,
+    frag_shader_module: &Material,
     mode: MeshShaderMode,
 ) -> GraphicsPipeline {
     let task_shader_module = ShaderModule::new(
@@ -329,21 +348,16 @@ fn create_graphics_pipeline(
         },
     );
 
-    let main_function_name = CString::new("main").unwrap(); // the beginning function name in shader code.
-
     let shader_stages = [
         vk::PipelineShaderStageCreateInfo::default()
             .module(task_shader_module.handle())
-            .name(&main_function_name)
+            .name(&MAIN_FUNCTION_NAME)
             .stage(vk::ShaderStageFlags::TASK_EXT),
         vk::PipelineShaderStageCreateInfo::default()
             .module(mesh_shader_module.handle())
-            .name(&main_function_name)
+            .name(&MAIN_FUNCTION_NAME)
             .stage(vk::ShaderStageFlags::MESH_EXT),
-        vk::PipelineShaderStageCreateInfo::default()
-            .module(frag_shader_module.handle())
-            .name(&main_function_name)
-            .stage(vk::ShaderStageFlags::FRAGMENT),
+        frag_shader_module.shader_stage_create_info(),
     ];
 
     // let binding_description = VertexV3::get_binding_descriptions();
@@ -384,7 +398,7 @@ fn create_graphics_pipeline(
         .scissors(&scissors)
         .viewports(&viewports);
 
-    let rasterization_statue_create_info = init_rasterization_statue_create_info();
+    let rasterization_statue_create_info = frag_shader_module.rasterization_statue_create_info();
 
     let multisample_state_create_info = init_multisample_state_create_info();
 

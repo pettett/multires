@@ -5,7 +5,12 @@ use std::{ffi, sync::Arc};
 use ash::vk;
 
 use crate::{
-    app::{mesh_data::MeshData, renderer::Renderer, scene::Scene},
+    app::{
+        material::{Material, MAIN_FUNCTION_NAME},
+        mesh_data::MeshData,
+        renderer::Renderer,
+        scene::Scene,
+    },
     core::Core,
     utility::{
         buffer::{AsBuffer, TBuffer},
@@ -27,8 +32,7 @@ use crate::{
 
 use super::{
     init_color_blend_attachment_states, init_depth_state_create_info,
-    init_multisample_state_create_info, init_rasterization_statue_create_info,
-    render_multires::RenderMultires, BufferRange,
+    init_multisample_state_create_info, render_multires::RenderMultires, BufferRange,
 };
 use crate::VkHandle;
 
@@ -155,7 +159,7 @@ fn create_graphics_pipeline(
     render_pass: &RenderPass,
     swapchain_extent: vk::Extent2D,
     ubo_set_layout: Arc<DescriptorSetLayout>,
-    frag_shader_module: &ShaderModule,
+    frag_shader_module: &Material,
 ) -> GraphicsPipeline {
     let task_shader_module = ShaderModule::new(
         device.clone(),
@@ -168,21 +172,16 @@ fn create_graphics_pipeline(
         bytemuck::cast_slice(include_bytes!("../../shaders/spv/mesh-shader.mesh")),
     );
 
-    let main_function_name = ffi::CString::new("main").unwrap(); // the beginning function name in shader code.
-
     let shader_stages = [
         vk::PipelineShaderStageCreateInfo::default()
             .module(task_shader_module.handle())
-            .name(&main_function_name)
+            .name(&MAIN_FUNCTION_NAME)
             .stage(vk::ShaderStageFlags::TASK_EXT),
         vk::PipelineShaderStageCreateInfo::default()
             .module(mesh_shader_module.handle())
-            .name(&main_function_name)
+            .name(&MAIN_FUNCTION_NAME)
             .stage(vk::ShaderStageFlags::MESH_EXT),
-        vk::PipelineShaderStageCreateInfo::default()
-            .module(frag_shader_module.handle())
-            .name(&main_function_name)
-            .stage(vk::ShaderStageFlags::FRAGMENT),
+        frag_shader_module.shader_stage_create_info(),
     ];
 
     let viewports = [vk::Viewport {
@@ -203,7 +202,7 @@ fn create_graphics_pipeline(
         .scissors(&scissors)
         .viewports(&viewports);
 
-    let rasterization_statue_create_info = init_rasterization_statue_create_info();
+    let rasterization_statue_create_info = frag_shader_module.rasterization_statue_create_info();
 
     let multisample_state_create_info = init_multisample_state_create_info();
 

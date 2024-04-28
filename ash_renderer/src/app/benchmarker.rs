@@ -1,20 +1,14 @@
-use std::{
-    fs,
-    io::Write,
-    sync::mpsc::{self, Sender},
-    thread::{self, sleep},
-    time::Duration,
-};
+use std::{fs, io::Write};
 
 use bevy_ecs::prelude::*;
 
 use common_renderer::components::{camera::Camera, transform::Transform};
-use enigo::KeyboardControllable;
+
 use glam::Vec3A;
 
 use crate::{app::scene::SceneEvent, Config};
 
-use super::{fps_limiter::FPSMeasure, renderer::Renderer};
+use super::{fps_limiter::FPSMeasure, renderer::Renderer, scene::Scene};
 
 enum BenchmarkStage {
     Start,
@@ -39,7 +33,7 @@ pub struct Benchmarker {
 
     instances_per_round: usize,
 
-    results: Vec<(usize, Vec<(f32, f32, u32)>)>,
+    results: Vec<(usize, Vec<(f32, f64, u32)>)>,
 }
 
 impl Benchmarker {
@@ -69,14 +63,16 @@ impl Benchmarker {
         }
     }
 
-    fn record(&self, renderer: &Renderer, config: &Config) {
+    fn record(&self, renderer: &Renderer, scene: &Scene) {
         // Output all results to files
 
         let t = chrono::offset::Local::now().format("%Y-%m-%d(%H-%M)");
         let p = format!(
-            "benchmark/{:?}{}/{t}",
+            "benchmark/{:?}{}{}{}/{t}",
             renderer.current_pipeline,
-            renderer.mesh.split('/').skip(1).next().unwrap()
+            renderer.mesh.split('/').skip(1).next().unwrap(),
+            renderer.query,
+            scene.target_error
         );
 
         println!("Making dir  {:?}", p);
@@ -101,6 +97,7 @@ pub fn benchmark(
     mut commands: Commands,
     mut scene_events: EventWriter<SceneEvent>,
     mut renderer: ResMut<Renderer>,
+    scene: Res<Scene>,
     config: Res<Config>,
     time: Res<FPSMeasure>,
 ) {
@@ -145,7 +142,7 @@ pub fn benchmark(
                 let t = bench.t;
                 bench.results[i].1.push((
                     t,
-                    time.long_delta_time(),
+                    renderer.gpu_time.last_sample(),
                     renderer.primitives.last_sample(),
                 ));
                 camera.set_pos(bench.start.lerp(bench.end, bench.t));
@@ -165,7 +162,7 @@ pub fn benchmark(
                 bench.t += time.delta_time();
                 if bench.t > 1.0 {
                     // cleanup
-                    bench.record(&renderer, &config);
+                    bench.record(&renderer, &scene);
                     renderer.render_gui = true;
                     commands.remove_resource::<Benchmarker>();
                 }

@@ -28,7 +28,7 @@ impl Camera {
         Self {
             //transform: Transform::new(Vec3A::new(-8000.0, -2000.0, 1000.0), Quat::IDENTITY),
             aspect,
-            fovy: 45.0,
+            fovy: 45.0_f32.to_radians(),
             znear: 0.01,
             zfar: 100.0,
             part_highlight: -1,
@@ -56,6 +56,11 @@ impl Camera {
 
         // 2.
         let proj = Mat4::perspective_rh(self.fovy, self.aspect, self.znear, self.zfar);
+
+        // println!(
+        //     "FOV: {}",
+        //     (2.0 * f32::atan(1.0 / proj.x_axis.x)).to_degrees()
+        // );
 
         // 3.
         return OPENGL_TO_WGPU_MATRIX * proj * view;

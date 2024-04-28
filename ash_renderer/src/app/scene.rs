@@ -49,7 +49,8 @@ pub struct Scene {
     pub target_error: f32,
     pub dist_pow: f32,
     pub uniform_camera_buffers: Vec<Arc<TBuffer<CameraUniformBufferObject>>>,
-    pub freeze_pos: bool,
+    pub freeze_error: bool,
+    pub freeze_culling: bool,
     pub instances: usize,
 }
 #[derive(Component)]
@@ -86,10 +87,10 @@ impl Scene {
     ) {
         self.uniform_camera.update_view_proj(
             camera.build_view_projection_matrix(camera_transform),
-            self.freeze_pos,
+            self.freeze_culling,
         );
 
-        if !self.freeze_pos {
+        if !self.freeze_error {
             self.uniform_camera.cam_pos = (*camera_transform.get_pos()).into();
         }
 

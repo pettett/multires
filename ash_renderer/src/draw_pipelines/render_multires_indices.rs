@@ -3,7 +3,11 @@
 use std::{ffi, sync::Arc};
 
 use crate::{
-    app::scene::Scene,
+    app::{
+        material::{Material, MAIN_FUNCTION_NAME},
+        renderer::Renderer,
+        scene::Scene,
+    },
     core::Core,
     utility::{
         buffer::{AsBuffer, TBuffer},
@@ -29,8 +33,7 @@ use crate::{
 
 use super::{
     init_color_blend_attachment_states, init_depth_state_create_info,
-    init_multisample_state_create_info, init_rasterization_statue_create_info,
-    render_multires::RenderMultires,
+    init_multisample_state_create_info, render_multires::RenderMultires,
 };
 
 pub struct RenderMultiresIndices {
@@ -47,13 +50,11 @@ pub struct RenderMultiresIndices {
 impl RenderMultiresIndices {
     pub fn new(
         core: &Core,
-        screen: &Screen,
-        render_pass: &RenderPass,
+        renderer: &Renderer,
         vertex_buffer: Arc<TBuffer<MeshVert>>,
         result_indices_buffer: Arc<TBuffer<u32>>,
         draw_indexed_indirect_buffer: Arc<TBuffer<vk::DrawIndexedIndirectCommand>>,
         indirect_compute_buffer: Arc<TBuffer<vk::DispatchIndirectCommand>>,
-        descriptor_pool: Arc<DescriptorPool>,
         scene: &Scene,
         compact_indices_pipeline: ComputePipeline,
     ) -> Self {
@@ -61,9 +62,10 @@ impl RenderMultiresIndices {
 
         let graphics_pipeline = create_primitive_graphics_pipeline(
             &core,
-            render_pass,
-            screen.swapchain().extent,
+            &renderer.render_pass,
+            renderer.screen.swapchain().extent,
             ubo_layout.clone(),
+            renderer.fragment(),
         );
 
         // let compact_indices_pipeline = ComputePipeline::create_compute_pipeline(
@@ -75,11 +77,11 @@ impl RenderMultiresIndices {
 
         let descriptor_sets = create_traditional_graphics_descriptor_sets(
             &core.device,
-            &descriptor_pool,
+            &renderer.descriptor_pool,
             &ubo_layout,
             &scene.uniform_transform_buffer,
             &scene.uniform_camera_buffers,
-            screen.swapchain().images.len(),
+            renderer.screen.swapchain().images.len(),
         );
 
         Self {
@@ -210,27 +212,19 @@ pub fn create_primitive_graphics_pipeline(
     render_pass: &RenderPass,
     swapchain_extent: vk::Extent2D,
     ubo_set_layout: Arc<DescriptorSetLayout>,
+    frag_shader_module: &Material,
 ) -> GraphicsPipeline {
     let vert_shader_module = ShaderModule::new(
         core.device.clone(),
         bytemuck::cast_slice(include_bytes!("../../shaders/spv/vert.vert")),
     );
-    let frag_shader_module = ShaderModule::new(
-        core.device.clone(),
-        bytemuck::cast_slice(include_bytes!("../../shaders/spv/frag_pbr.frag")),
-    );
-
-    let main_function_name = ffi::CString::new("main").unwrap(); // the beginning function name in shader code.
 
     let shader_stages = [
         vk::PipelineShaderStageCreateInfo::default()
             .module(vert_shader_module.handle())
-            .name(&main_function_name)
+            .name(&MAIN_FUNCTION_NAME)
             .stage(vk::ShaderStageFlags::VERTEX),
-        vk::PipelineShaderStageCreateInfo::default()
-            .module(frag_shader_module.handle())
-            .name(&main_function_name)
-            .stage(vk::ShaderStageFlags::FRAGMENT),
+        frag_shader_module.shader_stage_create_info(),
     ];
 
     let binding_description = MeshVert::get_binding_descriptions();
@@ -264,7 +258,7 @@ pub fn create_primitive_graphics_pipeline(
         .scissors(&scissors)
         .viewports(&viewports);
 
-    let rasterization_statue_create_info = init_rasterization_statue_create_info();
+    let rasterization_statue_create_info = frag_shader_module.rasterization_statue_create_info();
 
     let multisample_state_create_info = init_multisample_state_create_info();
 

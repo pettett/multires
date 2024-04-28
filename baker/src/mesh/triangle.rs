@@ -1,6 +1,4 @@
-use baker::mesh::plane::Plane;
-
-use super::line::Line;
+use super::{line::Line, plane::Plane};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Triangle {
@@ -20,6 +18,12 @@ impl Triangle {
 
     pub fn area(&self) -> f32 {
         (self.c - self.a).cross(self.c - self.b).length() / 2.0
+    }
+
+    pub fn dot(&self) -> f32 {
+        ((self.c - self.a).normalize())
+            .dot((self.c - self.b).normalize())
+            .abs()
     }
 
     /// Generate self.a random point on self.a triangle by sampling from self.a parallelogram and reflecting

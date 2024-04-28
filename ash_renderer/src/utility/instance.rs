@@ -81,7 +81,7 @@ impl Instance {
             .collect();
 
         let create_info = vk::InstanceCreateInfo {
-            p_next: if VALIDATION.is_enable {
+            p_next: if is_enable_debug {
                 &debug_utils_create_info as *const vk::DebugUtilsMessengerCreateInfoEXT
                     as *const c_void
             } else {
@@ -188,12 +188,14 @@ impl Instance {
         });
 
         match result {
-            Some((p_physical_device, (swapchain_support, supported_extensions))) => Arc::new(PhysicalDevice::new(
-                *p_physical_device,
-                self.clone(),
-				swapchain_support,
-                supported_extensions,
-            )),
+            Some((p_physical_device, (swapchain_support, supported_extensions))) => {
+                Arc::new(PhysicalDevice::new(
+                    *p_physical_device,
+                    self.clone(),
+                    swapchain_support,
+                    supported_extensions,
+                ))
+            }
             None => panic!("Failed to find a suitable GPU!"),
         }
     }
@@ -233,7 +235,8 @@ impl Instance {
                         present_required_extensions.union(&present_optional_extensions),
                     )
                 })
-            }).flatten()
+            })
+            .flatten()
     }
 
     pub fn find_queue_family(

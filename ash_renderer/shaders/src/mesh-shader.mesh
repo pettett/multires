@@ -85,7 +85,7 @@ void main() {
 
 		OUT[i].world_normal = (model * vec4(verts[vert_idx].normal.xyz, 0)).xyz;
 
-		OUT[i].fragColor = colour;
+		OUT[i].fragColor = vec3(0); // colour;
 
 		OUT[i].fragTexCoord = vec2(1, 1);
 	}

@@ -15,6 +15,7 @@ use crate::{
                 DescriptorPool, DescriptorSet, DescriptorSetLayout, DescriptorSetLayoutBinding,
                 DescriptorWriteData,
             },
+            query_pool::TypelessQueryPool,
         },
         render_pass::RenderPass,
         screen::Screen,
@@ -36,6 +37,7 @@ pub struct ComputeCulledIndices {
     draw_indexed_indirect_buffer: Arc<TBuffer<vk::DrawIndexedIndirectCommand>>,
     indirect_compute_buffer: Arc<TBuffer<vk::DispatchIndirectCommand>>,
     render_indices: RenderMultiresIndices,
+    timestamp_query_pool: Option<Arc<TypelessQueryPool>>,
 }
 
 impl ComputeCulledIndices {
@@ -163,13 +165,11 @@ impl ComputeCulledIndices {
 
         let render_indices = RenderMultiresIndices::new(
             &core,
-            &renderer.screen,
-            &renderer.render_pass,
+            &renderer,
             mesh_data.vertex_buffer.clone(),
             result_indices_buffer.clone(),
             draw_indexed_indirect_buffer.clone(),
             indirect_compute_buffer.clone(),
-            renderer.descriptor_pool.clone(),
             scene,
             compact_indices_pipeline,
         );
@@ -184,6 +184,7 @@ impl ComputeCulledIndices {
             indirect_compute_buffer,
             allocate_indices_pipeline,
             render_indices,
+            timestamp_query_pool: renderer.get_timestamp_query(),
         }
     }
 }
@@ -264,6 +265,13 @@ impl ScreenData {
                 vk::DependencyInfo::default().buffer_memory_barriers(&draw_indirect_buffer_barrier);
 
             unsafe {
+                if i == 0 {
+                    core_draw
+                        .timestamp_query_pool
+                        .as_ref()
+                        .map(|pool| pool.write_timestamp_top(*command_buffer));
+                }
+
                 device.cmd_bind_descriptor_sets(
                     *command_buffer,
                     vk::PipelineBindPoint::COMPUTE,
@@ -375,6 +383,13 @@ impl ScreenData {
                     render_pass,
                     i,
                 );
+
+                if i == 0 {
+                    core_draw
+                        .timestamp_query_pool
+                        .as_ref()
+                        .map(|pool| pool.write_timestamp_bottom(*command_buffer));
+                }
             }
         }
 

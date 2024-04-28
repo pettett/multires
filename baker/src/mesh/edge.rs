@@ -19,9 +19,9 @@ pub struct HalfEdge {
     //pub vert_destination: VertID,
     pub face: FaceID,
     /// Edge leading on from the dest vert
-    pub edge_left_cw: EdgeID,
+    pub edge_back_cw: EdgeID,
     /// Edge connecting into the origin vert
-    pub edge_left_ccw: EdgeID,
+    pub edge_next_ccw: EdgeID,
 
     pub age: u32,
 
@@ -88,7 +88,7 @@ impl<'a> Iterator for EdgeIter<'a> {
         let current = self.current;
 
         if let Some(current) = current {
-            self.current = Some(self.mesh.get_edge(current).edge_left_cw);
+            self.current = Some(self.mesh.get_edge(current).edge_back_cw);
             if self.current == Some(self.start) {
                 self.current = None;
             }
@@ -113,8 +113,8 @@ impl HalfEdge {
 
     pub fn dst(&self, mesh: &WingedMesh) -> Result<VertID> {
         Ok(mesh
-            .try_get_edge(self.edge_left_cw)
-            .context(MeshError::InvalidCwEdge(self.edge_left_cw))?
+            .try_get_edge(self.edge_next_ccw)
+            .context(MeshError::InvalidCCwEdge(self.edge_next_ccw))?
             .vert_origin)
     }
 }

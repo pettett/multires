@@ -97,7 +97,7 @@ impl MeshData {
 
             // error /= 200000000;
 
-            println!("Size: {}, Error: {}", l.len(), error);
+            // println!("Size: {}, Error: {}", l.len(), error);
             lod_chain.push(LODChainLevel {
                 index_buffer,
                 error,
@@ -112,6 +112,8 @@ impl MeshData {
         // );
 
         let size = cluster_data[0].radius;
+
+        println!("{}  ---  Size: {}", mesh_name, size);
 
         let (clusters, meshlets, stripped_meshlets) = multires::generate_meshlets(&cluster_order);
 

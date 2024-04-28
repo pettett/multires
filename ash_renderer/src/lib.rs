@@ -38,6 +38,7 @@ use serde::Deserialize;
 pub struct Config {
     mesh_names: Vec<String>,
     starting_error: f32,
+    validation: bool,
 }
 
 pub trait VkHandle {

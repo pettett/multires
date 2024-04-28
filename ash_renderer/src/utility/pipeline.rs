@@ -2,7 +2,7 @@ use std::{ffi::CString, mem, sync::Arc};
 
 use ash::vk::{self, PushConstantRange};
 
-use crate::{core::Core, VkHandle};
+use crate::{app::material::MAIN_FUNCTION_NAME, core::Core, VkHandle};
 
 use super::{
     device::Device,
@@ -148,11 +148,9 @@ impl ComputePipeline {
         let comp_shader_module =
             ShaderModule::new(core.device.clone(), bytemuck::cast_slice(shader));
 
-        let main_function_name = CString::new("main").unwrap(); // the beginning function name in shader code.
-
         let shader_stage = vk::PipelineShaderStageCreateInfo::default()
             .module(comp_shader_module.handle())
-            .name(&main_function_name)
+            .name(&MAIN_FUNCTION_NAME)
             .stage(vk::ShaderStageFlags::COMPUTE);
 
         let pipeline_create_infos = [
@@ -182,11 +180,9 @@ impl ComputePipeline {
         let comp_shader_module =
             ShaderModule::new(core.device.clone(), bytemuck::cast_slice(shader));
 
-        let main_function_name = CString::new("main").unwrap(); // the beginning function name in shader code.
-
         let shader_stage = vk::PipelineShaderStageCreateInfo::default()
             .module(comp_shader_module.handle())
-            .name(&main_function_name)
+            .name(&MAIN_FUNCTION_NAME)
             .stage(vk::ShaderStageFlags::COMPUTE);
 
         let pipeline_layout = PipelineLayout::new(core.device.clone(), ubo_layout);

@@ -8,6 +8,7 @@ use crate::{mesh::winged_mesh::WingedMesh, STARTING_CLUSTER_SIZE};
 
 pub mod lod_chain;
 pub mod meshopt_chain;
+pub mod meshopt_multiresolution;
 pub mod multiresolution;
 
 fn stat_readout(multi_res: &mut MultiResMesh) {

@@ -14,6 +14,7 @@ use crate::{
             command_buffer_group::CommandBufferGroup,
             command_pool::{CommandBuffer, CommandPool},
             descriptor_pool::{DescriptorPool, DescriptorSet},
+            query_pool::TypelessQueryPool,
         },
         render_pass::RenderPass,
         screen::Screen,
@@ -41,6 +42,8 @@ pub struct DrawFullRes {
     index_buffer: Arc<TBuffer<u32>>,
     query: bool,
     instance_count: usize,
+
+    timestamp_query_pool: Option<Arc<TypelessQueryPool>>,
 }
 
 impl DrawFullRes {
@@ -52,6 +55,7 @@ impl DrawFullRes {
             &renderer.render_pass,
             renderer.screen.swapchain().extent,
             ubo_layout.clone(),
+            renderer.fragment(),
         );
 
         let index_buffer = mesh_data.lod_chain[0].index_buffer.clone();
@@ -95,6 +99,7 @@ impl DrawFullRes {
             //    draw_indexed_indirect_buffer,
             index_buffer,
             instance_count,
+            timestamp_query_pool: renderer.get_timestamp_query(),
         }
     }
 }
@@ -151,6 +156,12 @@ impl ScreenData {
                 })
                 .clear_values(&CLEAR_VALUES);
 
+            if i == 0 {
+                core_draw
+                    .timestamp_query_pool
+                    .as_ref()
+                    .map(|pool| pool.write_timestamp_top(*command_buffer));
+            }
             unsafe {
                 device.cmd_begin_render_pass(
                     *command_buffer,
@@ -201,6 +212,12 @@ impl ScreenData {
                 );
 
                 device.cmd_end_render_pass(*command_buffer);
+            }
+            if i == 0 {
+                core_draw
+                    .timestamp_query_pool
+                    .as_ref()
+                    .map(|pool| pool.write_timestamp_bottom(*command_buffer));
             }
         }
 

@@ -1,4 +1,4 @@
-use baker::mesh::plane::Plane;
+use super::plane::Plane;
 
 pub struct Line {
     s: glam::Vec3A,

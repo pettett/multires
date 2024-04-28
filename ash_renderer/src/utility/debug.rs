@@ -29,7 +29,6 @@ unsafe extern "system" fn vulkan_debug_utils_callback(
 }
 
 pub struct ValidationInfo {
-    pub is_enable: bool,
     pub required_validation_layers: [&'static str; 1],
 }
 
@@ -44,7 +43,7 @@ pub fn check_validation_layer_support(
             .enumerate_instance_layer_properties()
             .expect("Failed to enumerate Instance Layers Properties")
     };
-	
+
     if layer_properties.len() == 0 {
         eprintln!("No available layers.");
         return false;
@@ -74,12 +73,16 @@ pub fn setup_debug_utils(
     entry: &ash::Entry,
     instance: &ash::Instance,
     device: &ash::Device,
-) -> (ash::ext::debug_utils::Instance,ash::ext::debug_utils::Device, vk::DebugUtilsMessengerEXT) {
+) -> (
+    ash::ext::debug_utils::Instance,
+    ash::ext::debug_utils::Device,
+    Option<vk::DebugUtilsMessengerEXT>,
+) {
     let debug_utils_instance = ash::ext::debug_utils::Instance::new(entry, instance);
     let debug_utils_device = ash::ext::debug_utils::Device::new(instance, device);
 
     if !is_enable_debug {
-        (debug_utils_instance,debug_utils_device, ash::vk::DebugUtilsMessengerEXT::null())
+        (debug_utils_instance, debug_utils_device, None)
     } else {
         let messenger_ci = populate_debug_messenger_create_info();
 
@@ -89,7 +92,11 @@ pub fn setup_debug_utils(
                 .expect("Debug Utils Callback")
         };
 
-        (debug_utils_instance,debug_utils_device, utils_messenger)
+        (
+            debug_utils_instance,
+            debug_utils_device,
+            Some(utils_messenger),
+        )
     }
 }
 
