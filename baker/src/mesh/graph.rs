@@ -19,16 +19,16 @@ impl HalfEdgeMesh {
             // Estimate each partition hits roughly 3 other partitions
             self.cluster_count() * 3,
         );
-        let mut ids = HashMap::with_capacity(self.face_count());
-        for (fid, _f) in self.iter_faces() {
+        let mut ids = HashMap::with_capacity(self.faces().len());
+        for fid in self.faces().iter_keys() {
             // Each node should directly correspond to a partition
             ids.insert(fid, graph.add_node(fid));
         }
 
-        for (fid, face) in self.iter_faces() {
+        for (fid, face) in self.faces().iter_items() {
             for e in self.iter_edge_loop(face.edge) {
                 for twin in self.twin_loop(e) {
-                    let other_face = &self.get_edge(twin).face;
+                    let other_face = &twin.edge(self).face;
 
                     graph.update_edge(ids[&fid], ids[other_face], ());
                 }
@@ -54,7 +54,7 @@ impl HalfEdgeMesh {
         let mut faces = HashMap::new();
 
         // Give every triangle a node
-        for (fid, face) in self.iter_faces() {
+        for (fid, face) in self.faces().iter_items() {
             let key = key_lookup(face); // self.clusters[face.cluster_idx].group_index;
             let n = graphs[key].add_node(fid);
 
@@ -65,13 +65,13 @@ impl HalfEdgeMesh {
             faces.insert(fid, n);
         }
         // Apply links between nodes
-        for (fid, face) in self.iter_faces() {
+        for (fid, face) in self.faces().iter_items() {
             let key = key_lookup(face); // self.clusters[face.cluster_idx].group_index;
 
             for e in self.iter_edge_loop(face.edge) {
                 for twin in self.twin_loop(e) {
-                    let other_face = self.get_edge(twin).face;
-                    let o_key = key_lookup(self.get_face(other_face)); // self.clusters[self.get_face(other_face).cluster_idx].group_index;
+                    let other_face = twin.edge(self).face;
+                    let o_key = key_lookup(other_face.face(self)); // self.clusters[self.get_face(other_face).cluster_idx].group_index;
 
                     if key == o_key {
                         graphs[key].update_edge(faces[&fid], faces[&other_face], ());
@@ -120,14 +120,14 @@ impl HalfEdgeMesh {
 
         //let mut map: HashMap<usize, HashMap<usize, usize>> = HashMap::new();
 
-        for (_fid, face) in self.iter_faces() {
+        for (fid, face) in self.faces().iter_items() {
             let n0 = petgraph::graph::NodeIndex::new(face.cluster_idx);
 
             *graph.node_weight_mut(n0).unwrap() += 1;
 
             for e in self.iter_edge_loop(face.edge) {
                 for twin in self.twin_loop(e) {
-                    let other_face = &self.get_face(self.get_edge(twin).face);
+                    let other_face = twin.edge(self).face.face(self);
 
                     //let c0 = face.cluster_idx.min(other_face.cluster_idx);
                     //let c1 = face.cluster_idx.max(other_face.cluster_idx);
@@ -150,7 +150,7 @@ impl HalfEdgeMesh {
                         {
                             graph.update_edge(n0, n1, ());
                             // Increase by a small proportion of the edges
-                            if _fid.0 % 16 == 0 {
+                            if fid.0 % 16 == 0 {
                                 graph.add_edge(n0, n1, ());
                             }
                         } else {
@@ -242,15 +242,15 @@ impl HalfEdgeMesh {
 
         let mut groups = HashSet::new();
 
-        for (_, vert) in self.iter_verts() {
+        for vert in self.verts().iter() {
             for &out in vert.outgoing_edges() {
                 groups.insert(
-                    self.clusters[self.get_face(self.get_edge(out).face).cluster_idx].group_index(),
+                    self.clusters[out.edge(self).face.face(self).cluster_idx].group_index(),
                 );
             }
             for &out in vert.incoming_edges() {
                 groups.insert(
-                    self.clusters[self.get_face(self.get_edge(out).face).cluster_idx].group_index(),
+                    self.clusters[out.edge(self).face.face(self).cluster_idx].group_index(),
                 );
             }
 
@@ -343,11 +343,11 @@ pub mod test {
 
     use crate::mesh::{
         graph::colour_graph,
-        partition::PartitionCount,
         half_edge_mesh::{
             test::{TEST_MESH_LOW, TEST_MESH_LOWER, TEST_MESH_PLANE_LOW},
             HalfEdgeMesh,
         },
+        partition::PartitionCount,
     };
 
     pub const HIERARCHY_SVG_OUT: &str = "hierarchy_graph.svg";
@@ -384,8 +384,8 @@ pub mod test {
 
         println!(
             "Faces: {}, Verts: {}, Partitions: {}",
-            mesh.face_count(),
-            mesh.vert_count(),
+            mesh.faces().len(),
+            mesh.verts().len(),
             mesh.clusters.len()
         );
 
@@ -396,7 +396,7 @@ pub mod test {
             FACE_SVG_OUT,
             &|_, (_n, &fid)| {
                 let p = fid.center(&mesh, &tri_mesh.verts);
-                let part = mesh.get_face(fid).cluster_idx;
+                let part = fid.face(&mesh).cluster_idx;
                 format!(
                     "shape=point, color={}, pos=\"{},{}\"",
                     COLS[part % COLS.len()],
@@ -424,7 +424,7 @@ pub mod test {
             FACE_SVG_OUT_2,
             &|_, (_n, &fid)| {
                 let p = fid.center(&mesh, &tri_mesh.verts);
-                let part = mesh.get_face(fid).cluster_idx;
+                let part = fid.face(&mesh).cluster_idx;
                 format!(
                     "shape=point, color={}, pos=\"{},{}\"",
                     COLS[part % COLS.len()],
@@ -485,7 +485,11 @@ pub mod test {
         let mesh = TEST_MESH_LOW;
         let (mut mesh, tri_mesh) = HalfEdgeMesh::from_gltf(mesh);
 
-        println!("Faces: {}, Verts: {}", mesh.face_count(), mesh.vert_count());
+        println!(
+            "Faces: {}, Verts: {}",
+            mesh.faces().len(),
+            mesh.verts().len()
+        );
 
         // Apply primary partition, that will define the lowest level clusterings
         mesh.cluster_full_mesh(test_config, 60, &tri_mesh.verts)
@@ -535,7 +539,11 @@ pub mod test {
         let mesh = TEST_MESH_LOW;
         let (mut mesh, tri_mesh) = HalfEdgeMesh::from_gltf(mesh);
 
-        println!("Faces: {}, Verts: {}", mesh.face_count(), mesh.vert_count());
+        println!(
+            "Faces: {}, Verts: {}",
+            mesh.faces().len(),
+            mesh.verts().len()
+        );
 
         mesh.group_unity();
         // Apply primary partition, that will define the lowest level clusterings

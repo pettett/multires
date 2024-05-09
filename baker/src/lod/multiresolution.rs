@@ -57,7 +57,7 @@ pub fn group_and_partition_and_simplify(
     // Apply primary partition, that will define the lowest level clusterings
     mesh.cluster_full_mesh(
         triangle_clustering_config,
-        mesh.face_count().div_ceil(starting_cluster_size) as _,
+        mesh.faces().len().div_ceil(starting_cluster_size) as _,
         &tri_mesh.verts,
     )?;
 
@@ -105,7 +105,7 @@ pub fn group_and_partition_and_simplify(
         // i = index of previous mesh layer
         //working_mesh = reduce_mesh(working_mesh);
 
-        println!("Face count L{}: {}", i, mesh.face_count());
+        println!("Face count L{}: {}", i, mesh.faces().len());
 
         // We must regenerate the queue each time, as boundaries change.
 

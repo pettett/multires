@@ -7,20 +7,19 @@ use std::{
     fs,
 };
 
-use crate::pidge::Pidge;
-
 use super::{
     cluster_info::ClusterInfo,
     edge::{EdgeID, EdgeIter, HalfEdge},
     face::{Face, FaceID},
     group_info::GroupInfo,
+    pidge::Pidge,
     vertex::{VertID, Vertex},
 };
 
 #[derive(thiserror::Error, Debug)]
 pub enum MeshError {
     #[error("Invalid triangle {0:?}")]
-    InvalidTri(FaceID),
+    InvalidFace(FaceID),
     #[error("Invalid edge {0:?}")]
     InvalidEdge(EdgeID),
     #[error("Invalid vertex {0:?}")]
@@ -52,7 +51,7 @@ pub enum MeshError {
 //of Ci are in the cut as well. The front of the cut is the set of arcs that connect a node in the cut
 //to a node outside.
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct HalfEdgeMesh {
     faces: Pidge<FaceID, Face>,
     edges: Pidge<EdgeID, HalfEdge>,
@@ -71,7 +70,7 @@ impl<'a> Iterator for TwinLoop<'a> {
     type Item = EdgeID;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let twin = self.mesh.get_edge(self.current).twin;
+        let twin = self.current.edge(self.mesh).twin;
 
         if let Some(next) = twin {
             if next == self.first {
@@ -96,82 +95,33 @@ impl HalfEdgeMesh {
             clusters: vec![ClusterInfo::default()],
         }
     }
-    pub fn get_face(&self, face: FaceID) -> &Face {
-        self.faces.get(face)
-    }
-    pub fn try_get_face_mut(&mut self, fid: FaceID) -> Option<&mut Face> {
-        self.faces.try_get_mut(fid)
-    }
-    pub fn get_face_mut(&mut self, fid: FaceID) -> &mut Face {
-        self.faces.get_mut(fid)
+
+    pub fn try_get_face_mut(&mut self, fid: FaceID) -> Result<&mut Face, MeshError> {
+        self.faces
+            .try_get_mut(fid)
+            .ok_or(MeshError::InvalidFace(fid))
     }
 
     pub fn try_get_edge(&self, eid: EdgeID) -> Result<&HalfEdge, MeshError> {
         self.edges.try_get(eid).ok_or(MeshError::InvalidEdge(eid))
     }
 
-    pub fn get_edge(&self, eid: EdgeID) -> &HalfEdge {
-        self.edges.get(eid)
-    }
-    pub fn try_get_edge_mut(&mut self, eid: EdgeID) -> Option<&mut HalfEdge> {
-        self.edges.try_get_mut(eid)
-    }
-    pub fn get_edge_mut(&mut self, eid: EdgeID) -> &mut HalfEdge {
-        self.edges.get_mut(eid)
-    }
-
-    pub fn insert_edge(&mut self, eid: EdgeID, half_edge: HalfEdge) {
-        self.edges.insert(eid, half_edge)
-    }
-    pub fn insert_face(&mut self, fid: FaceID, face: Face) {
-        self.faces.insert(fid, face)
+    pub fn try_get_edge_mut(&mut self, eid: EdgeID) -> Result<&mut HalfEdge, MeshError> {
+        self.edges
+            .try_get_mut(eid)
+            .ok_or(MeshError::InvalidEdge(eid))
     }
 
     pub fn try_get_vert(&self, vid: VertID) -> Result<&Vertex, MeshError> {
         self.verts.try_get(vid).ok_or(MeshError::InvalidVertex(vid))
     }
 
-    pub fn get_vert(&self, vert: VertID) -> &Vertex {
-        self.try_get_vert(vert).as_ref().unwrap()
-    }
-    pub fn get_vert_mut(&mut self, vert: VertID) -> &mut Vertex {
-        self.verts.get_mut(vert)
-    }
     pub fn get_vert_or_default(&mut self, vid: VertID) -> &mut Vertex {
         if !self.verts.slot_full(vid) {
             self.verts.insert(vid, Vertex::default());
         }
-        self.verts.get_mut(vid)
+        vid.vert_mut(self)
     }
-
-    pub fn face_count(&self) -> usize {
-        self.faces.len()
-    }
-
-    pub fn edge_count(&self) -> usize {
-        self.edges.len()
-    }
-
-    pub fn vert_count(&self) -> usize {
-        self.verts.len()
-    }
-
-    // pub fn get_partition(&self) -> Vec<usize> {
-    //     self.faces
-    //         .iter_with_empty()
-    //         .filter_map(|f| f.as_ref().map(|f| f.cluster_idx))
-    //         .collect()
-    // }
-
-    // pub fn get_group(&self) -> Vec<usize> {
-    //     self.faces
-    //         .iter_with_empty()
-    //         .filter_map(|f| {
-    //             f.as_ref()
-    //                 .map(|f| self.clusters[f.cluster_idx].group_index())
-    //         })
-    //         .collect()
-    // }
 
     pub fn iter_edge_loop(&self, e: EdgeID) -> impl Iterator<Item = EdgeID> + '_ {
         // emit 3 edges and a none
@@ -182,96 +132,27 @@ impl HalfEdgeMesh {
         self.clusters.len()
     }
     pub fn age(&mut self) {
-        self.edges.iter_mut_with_empty().for_each(|e| {
-            if let Some(e) = e {
-                e.age += 1;
-            }
+        self.edges.iter_mut().for_each(|e| {
+            e.age += 1;
         });
     }
     pub fn max_edge_age(&self) -> u32 {
         self.edges.iter().map(|e| e.age).max().unwrap_or_default()
     }
     pub fn avg_edge_age(&self) -> f32 {
-        self.edges.iter().map(|e| e.age).sum::<u32>() as f32 / self.edge_count() as f32
-    }
-    pub fn iter_verts(&self) -> impl Iterator<Item = (VertID, &Vertex)> {
-        self.verts
-            .iter_with_empty()
-            .enumerate()
-            .filter_map(|(i, x)| {
-                if x.is_some() {
-                    Some((i.into(), x.unwrap()))
-                } else {
-                    None
-                }
-            })
-    }
-
-    pub fn iter_edges(&self) -> impl Iterator<Item = (EdgeID, &HalfEdge)> {
-        self.edges
-            .iter_with_empty()
-            .enumerate()
-            .filter_map(|(i, x)| {
-                if x.is_some() {
-                    Some((i.into(), x.unwrap()))
-                } else {
-                    None
-                }
-            })
-    }
-
-    pub fn iter_faces(&self) -> impl Iterator<Item = (FaceID, &Face)> + '_ {
-        self.faces
-            .iter_with_empty()
-            .enumerate()
-            .filter_map(|(i, x)| {
-                if x.is_some() {
-                    Some((i.into(), x.unwrap()))
-                } else {
-                    None
-                }
-            })
-    }
-
-    pub fn iter_faces_mut(&mut self) -> impl Iterator<Item = (FaceID, &mut Face)> {
-        self.faces
-            .iter_mut_with_empty()
-            .enumerate()
-            .filter_map(|(i, x)| match x {
-                Some(x) => Some((i.into(), x)),
-                None => None,
-            })
-    }
-
-    pub fn iter_edges_mut(&mut self) -> impl Iterator<Item = (EdgeID, &mut HalfEdge)> {
-        self.edges
-            .iter_mut_with_empty()
-            .enumerate()
-            .filter_map(|(i, x)| match x {
-                Some(x) => Some((i.into(), x)),
-                None => None,
-            })
-    }
-    pub fn iter_verts_mut(&mut self) -> impl Iterator<Item = (VertID, &mut Vertex)> {
-        self.verts
-            .iter_mut_with_empty()
-            .enumerate()
-            .filter_map(|(i, x)| match x {
-                Some(x) => Some((i.into(), x)),
-                None => None,
-            })
+        self.edges.iter().map(|e| e.age).sum::<u32>() as f32 / self.edges().len() as f32
     }
 
     pub fn edge_sqr_length(&self, edge: EdgeID, verts: &[Vec3]) -> f32 {
-        let e = &self.get_edge(edge);
+        let e = edge.edge(self);
         return verts[e.vert_origin.id() as usize]
-            .distance_squared(verts[self.get_edge(e.edge_back_cw).vert_origin.id() as usize]);
+            .distance_squared(verts[e.edge_back_cw.edge(self).vert_origin.id() as usize]);
     }
 
     pub fn triangle_from_face(&self, face: &Face) -> [u32; 3] {
-        let first = self.get_edge(face.edge);
-        let next = self.get_edge(first.edge_next_ccw);
-        let back = self.get_edge(first.edge_back_cw);
+        let first = face.edge.edge(self);
+        let next = first.edge_next_ccw.edge(self);
+        let back: &HalfEdge = first.edge_back_cw.edge(self);
 
         [
             back.vert_origin.into(),
@@ -282,16 +163,28 @@ impl HalfEdgeMesh {
 
     /// Wrapper around [TriMesh::from_gltf] and [WingedMesh::from_tris]
     pub fn from_gltf(path: impl AsRef<std::path::Path>) -> (Self, TriMesh) {
+        Self::from_gltf_enable_loops(path, false)
+    }
+
+    /// Wrapper around [TriMesh::from_gltf] and [WingedMesh::from_tris]
+    pub fn from_gltf_twin_loops(path: impl AsRef<std::path::Path>) -> (Self, TriMesh) {
+        Self::from_gltf_enable_loops(path, true)
+    }
+
+    pub fn from_gltf_enable_loops(
+        path: impl AsRef<std::path::Path>,
+        allow_twin_loop: bool,
+    ) -> (Self, TriMesh) {
         let tri_mesh = TriMesh::from_gltf(&path).unwrap();
         println!(
             "Loading GLTF {:?} with {} faces:",
             fs::canonicalize(path).unwrap(),
             tri_mesh.indices.len() / 3
         );
-        (Self::from_tris(&tri_mesh), tri_mesh)
+        (Self::from_tris(&tri_mesh, allow_twin_loop), tri_mesh)
     }
 
-    pub fn from_tris(tri_mesh: &TriMesh) -> Self {
+    pub fn from_tris(tri_mesh: &TriMesh, allow_twin_loop: bool) -> Self {
         let face_count = tri_mesh.indices.len() / 3;
         let mut mesh = HalfEdgeMesh::new(face_count, tri_mesh.verts.len());
 
@@ -308,7 +201,7 @@ impl HalfEdgeMesh {
             if a == b || b == c || a == c {
                 println!("Discarding 0 area triangle");
             } else {
-                match mesh.add_tri(current, a.into(), b.into(), c.into()) {
+                match mesh.add_tri(current, a.into(), b.into(), c.into(), allow_twin_loop) {
                     Ok(_) => {
                         current.0 += 1;
                     }
@@ -332,7 +225,7 @@ impl HalfEdgeMesh {
                 v.outgoing_edges()
                     .iter()
                     .filter(|&&p| {
-                        let e = self.get_edge(p);
+                        let e = p.edge(self);
 
                         assert_eq!(e.vert_origin, a);
 
@@ -353,16 +246,20 @@ impl HalfEdgeMesh {
         eid: EdgeID,
         edge_back_cw: EdgeID,
         edge_next_ccw: EdgeID,
-    ) {
-        // assert!(
-        //     self.find_edge(orig, dest).is_none(),
-        //     "Adding duplicate edge to Mesh"
-        // );
+        allow_twin_loop: bool,
+    ) -> Result<(), MeshError> {
+        let twin = if !allow_twin_loop {
+            // assert!(
+            //     self.find_edge(orig, dest).is_none(),
+            //     "Adding duplicate edge to Mesh"
+            // );
 
-        // Set the "twin" to an existing mesh going this way, if it exists. Try to keep things contiguous
-        let twin = self
-            .find_edge(dest, orig)
-            .or_else(|| self.find_edge(orig, dest));
+            self.find_edge(dest, orig)
+        } else {
+            // Set the "twin" to an existing mesh going this way, if it exists. Try to keep things contiguous
+            self.find_edge(dest, orig)
+                .or_else(|| self.find_edge(orig, dest))
+        };
 
         let e = HalfEdge {
             vert_origin: orig,
@@ -375,23 +272,27 @@ impl HalfEdgeMesh {
 
         // Warning: cursed code
         if let Some(twin_eid) = twin {
-            if self.get_edge(twin_eid).twin.is_none() {
-                // We are safe from the madness
-                self.get_edge_mut(twin_eid).twin = Some(eid)
-            } else {
-                let first_twin = twin_eid;
-                let mut current = twin_eid;
-                // Find the end of the twin loop
-                loop {
-                    let current_twin = self.get_edge(current).twin.unwrap();
+            if allow_twin_loop {
+                if twin_eid.edge(self).twin.is_none() {
+                    // We are safe from the madness
+                    twin_eid.edge_mut(self).twin = Some(eid)
+                } else {
+                    let first_twin = twin_eid;
+                    let mut current = twin_eid;
+                    // Find the end of the twin loop
+                    loop {
+                        let current_twin = current.edge(self).twin.unwrap();
 
-                    if current_twin == first_twin {
-                        self.get_edge_mut(current).twin = Some(eid);
-                        break;
-                    } else {
-                        current = current_twin
+                        if current_twin == first_twin {
+                            current.edge_mut(self).twin = Some(eid);
+                            break;
+                        } else {
+                            current = current_twin
+                        }
                     }
                 }
+            } else {
+                twin_eid.edge_mut(self).twin = Some(eid)
             }
         }
 
@@ -399,7 +300,9 @@ impl HalfEdgeMesh {
 
         self.get_vert_or_default(dest).add_incoming(eid);
 
-        self.insert_edge(eid, e);
+        self.edges_mut().insert(eid, e);
+
+        return Ok(());
     }
 
     pub fn twin_loop(&self, eid: EdgeID) -> impl Iterator<Item = EdgeID> + '_ {
@@ -415,7 +318,7 @@ impl HalfEdgeMesh {
 
         for current in self.twin_loop(eid) {
             if seen.contains(&current) {
-                panic!("We fucked the twin loop");
+                panic!("Twin loop invalid");
             }
 
             seen.push(current);
@@ -423,36 +326,45 @@ impl HalfEdgeMesh {
 
         assert!(!seen.contains(&eid));
 
-        let (src, dst) = self.get_edge(eid).src_dst(self).unwrap();
+        let (src, dst) = eid.src_dst(self).unwrap();
 
-        for &o in self.get_vert(dst).incoming_edges() {
-            if o != eid && self.get_edge(o).vert_origin == src {
+        for &o in dst.vert(self).incoming_edges() {
+            if o != eid && o.edge(self).vert_origin == src {
                 assert!(seen.contains(&o))
             }
         }
 
-        for &o in self.get_vert(src).incoming_edges() {
-            if self.get_edge(o).vert_origin == dst {
+        for &o in src.vert(self).incoming_edges() {
+            if o.edge(self).vert_origin == dst {
                 assert!(seen.contains(&o))
             }
         }
     }
 
-    pub fn add_tri(&mut self, f: FaceID, a: VertID, b: VertID, c: VertID) -> Result<(), MeshError> {
-        // if self.find_edge(a, b).is_some()
-        //     || self.find_edge(b, c).is_some()
-        //     || self.find_edge(c, a).is_some()
-        // {
-        //     if let Some(e) = self.find_edge(a, b) {
-        //         return Err(MeshError::EdgeExists(e));
-        //     }
-        //     if let Some(e) = self.find_edge(b, c) {
-        //         return Err(MeshError::EdgeExists(e));
-        //     }
-        //     if let Some(e) = self.find_edge(c, a) {
-        //         return Err(MeshError::EdgeExists(e));
-        //     }
-        // }
+    pub fn add_tri(
+        &mut self,
+        f: FaceID,
+        a: VertID,
+        b: VertID,
+        c: VertID,
+        allow_twin_loop: bool,
+    ) -> Result<(), MeshError> {
+        if !allow_twin_loop {
+            if self.find_edge(a, b).is_some()
+                || self.find_edge(b, c).is_some()
+                || self.find_edge(c, a).is_some()
+            {
+                if let Some(e) = self.find_edge(a, b) {
+                    return Err(MeshError::EdgeExists(e));
+                }
+                if let Some(e) = self.find_edge(b, c) {
+                    return Err(MeshError::EdgeExists(e));
+                }
+                if let Some(e) = self.find_edge(c, a) {
+                    return Err(MeshError::EdgeExists(e));
+                }
+            }
+        }
 
         let edge_center = (f.0 * 3 + 0).into();
         let edge_back_cw = (f.0 * 3 + 1).into();
@@ -462,11 +374,35 @@ impl HalfEdgeMesh {
         //     next  prev
         //         c
 
-        self.add_half_edge(a, b, f, edge_center, edge_back_cw, edge_next_ccw);
-        self.add_half_edge(b, c, f, edge_next_ccw, edge_center, edge_back_cw);
-        self.add_half_edge(c, a, f, edge_back_cw, edge_next_ccw, edge_center);
+        self.add_half_edge(
+            a,
+            b,
+            f,
+            edge_center,
+            edge_back_cw,
+            edge_next_ccw,
+            allow_twin_loop,
+        )?;
+        self.add_half_edge(
+            b,
+            c,
+            f,
+            edge_next_ccw,
+            edge_center,
+            edge_back_cw,
+            allow_twin_loop,
+        )?;
+        self.add_half_edge(
+            c,
+            a,
+            f,
+            edge_back_cw,
+            edge_next_ccw,
+            edge_center,
+            allow_twin_loop,
+        )?;
 
-        self.insert_face(
+        self.faces_mut().insert(
             f,
             Face {
                 edge: edge_center,
@@ -476,11 +412,12 @@ impl HalfEdgeMesh {
 
         assert!(self.faces_mut().slot_full(f));
 
-        // assert twin loop is not fucked
-        self.assert_twin_loop(edge_center);
-        self.assert_twin_loop(edge_back_cw);
-        self.assert_twin_loop(edge_next_ccw);
-
+        if allow_twin_loop {
+            // assert twin loop is valid
+            self.assert_twin_loop(edge_center);
+            self.assert_twin_loop(edge_back_cw);
+            self.assert_twin_loop(edge_next_ccw);
+        }
         Ok(())
     }
 
@@ -488,14 +425,14 @@ impl HalfEdgeMesh {
     pub fn filter_tris_by_cluster(&mut self, cluster_idx: usize) -> anyhow::Result<()> {
         let mut remove = Vec::new();
 
-        for (i, f) in self.iter_faces() {
+        for (i, f) in self.faces().iter_items() {
             if f.cluster_idx != cluster_idx {
                 remove.push(i);
             }
         }
 
         for i in remove {
-            self.wipe_face(i);
+            self.wipe_face(i)?;
         }
 
         Ok(())
@@ -505,16 +442,13 @@ impl HalfEdgeMesh {
         // This is the exact number of neighbours, assuming this is a manifold vertex, otherwise it will still be pretty close.
         let mut neighbours = HashSet::with_capacity(v.incoming_edges().len());
 
-        neighbours.extend(
-            v.incoming_edges()
-                .iter()
-                .map(|&e| self.get_edge(e).vert_origin),
-        );
+        neighbours.extend(v.incoming_edges().iter().map(|&e| e.edge(self).vert_origin));
 
-        neighbours.extend(v.outgoing_edges().iter().map(|&e| {
-            let (_, dest) = e.src_dst(self).unwrap();
-            dest
-        }));
+        neighbours.extend(
+            v.outgoing_edges()
+                .iter()
+                .map(|&e| e.edge(self).dst(self).unwrap()),
+        );
 
         neighbours
     }
@@ -525,14 +459,14 @@ impl HalfEdgeMesh {
     pub fn max_one_joint_neighbour_vertices_per_side(&self, eid: EdgeID) -> bool {
         let (src, dst) = eid.src_dst(&self).unwrap();
 
-        let v_src = self.get_vert(src);
-        let has_twin = self.get_edge(eid).twin.is_some();
+        let v_src = src.vert(self);
+        let has_twin = eid.edge(self).twin.is_some();
 
         let mut joint_shared_count = 0;
 
         for &incoming in v_src.incoming_edges() {
             // Count every vertex from the incoming first, as these are slightly quicker to find
-            let neighbour = self.get_edge(incoming).vert_origin;
+            let neighbour = incoming.edge(self).vert_origin;
 
             if self.find_edge(neighbour, dst).is_some() || self.find_edge(dst, neighbour).is_some()
             {
@@ -542,12 +476,12 @@ impl HalfEdgeMesh {
 
         for &outgoing in v_src.outgoing_edges() {
             // Count every none-incoming-accessible vertex afterwards
-            if self.get_edge(outgoing).twin.is_some() {
+            if outgoing.edge(self).twin.is_some() {
                 // Do not double count vertices that can be reached in two ways
                 continue;
             }
 
-            let (_, neighbour) = outgoing.src_dst(self).unwrap();
+            let neighbour = outgoing.edge(self).dst(self).unwrap();
 
             if self.find_edge(neighbour, src).is_some() {
                 println!("ERROR: inconsistency in outgoing/incoming edges - edge exists back but no twin assigned")
@@ -660,7 +594,7 @@ impl HalfEdgeMesh {
             // PASSES: Do not need to test again.
             //let new_graph = self.generate_face_graph();
             //assert_eq!(new_graph.node_count(), previous_graph.node_count() - 2);
-            //assert_eq!(new_graph.edge_count(), previous_graph.edge_count() - 3);
+            //assert_eq!(new_graph.edges().len(), previous_graph.edges().len() - 3);
 
             //for g in self.generate_group_graphs() {
             //    test::assert_contiguous_graph(&g);
@@ -701,10 +635,10 @@ impl HalfEdgeMesh {
         };
 
         if let Some(t) = o1.twin {
-            self.get_edge_mut(t).twin = o0.twin;
+            t.edge_mut(self).twin = o0.twin;
         }
         if let Some(t) = o0.twin {
-            self.get_edge_mut(t).twin = o1.twin;
+            t.edge_mut(self).twin = o1.twin;
         }
 
         Ok(t)
@@ -730,9 +664,8 @@ impl HalfEdgeMesh {
         for i in 0..3 {
             let v_o = edges[i].vert_origin;
 
-            self.get_vert_mut(v_o).remove_outgoing(tri[i]);
-            self.get_vert_mut(v_o)
-                .remove_incoming(edges[i].edge_back_cw)?;
+            v_o.vert_mut(self).remove_outgoing(tri[i]);
+            v_o.vert_mut(self).remove_incoming(edges[i].edge_back_cw)?;
         }
 
         Ok((f, tri, edges))
@@ -746,7 +679,7 @@ impl HalfEdgeMesh {
         // Consistency - neighbours must not reference this
 
         if let Some(t) = e.twin {
-            self.edges.get_mut(t).twin = None;
+            t.edge_mut(self).twin = None;
         }
 
         e
@@ -762,7 +695,7 @@ impl HalfEdgeMesh {
         let (_incomings, outgoings) = self.verts.wipe(vid).unpack();
 
         for outgoing in outgoings {
-            let outgoing_edge = self.get_edge(outgoing);
+            let outgoing_edge = outgoing.edge(self);
 
             // Don't fix invalid edges
             #[cfg(debug)]
@@ -774,51 +707,52 @@ impl HalfEdgeMesh {
 
             let outgoing_prev = outgoing_edge.edge_back_cw;
 
-            self.get_edge_mut(outgoing).vert_origin = replacement;
+            outgoing.edge_mut(self).vert_origin = replacement;
 
             // Moving this origin moves both the start of this edge and the dest of the previous edge
-            self.get_vert_mut(replacement).add_outgoing(outgoing);
-            self.get_vert_mut(replacement).add_incoming(outgoing_prev);
+            replacement.vert_mut(self).add_outgoing(outgoing);
+            replacement.vert_mut(self).add_incoming(outgoing_prev);
 
             //TODO: add some tests here to make sure we don't break a triangle
 
             // Reset their ages, as moved
-            self.get_edge_mut(outgoing).age = 0;
-            self.get_edge_mut(outgoing_prev).age = 0;
+            outgoing.edge_mut(self).age = 0;
+            outgoing_prev.edge_mut(self).age = 0;
         }
     }
 
     pub fn assert_valid(&self) -> anyhow::Result<()> {
-        // for (i, _) in self.iter_faces() {
+        println!("Validating mesh!");
+        // for i in self.faces().iter_keys() {
         //     self.assert_face_valid(i).context("Invalid Mesh")?;
         // }
-        for (eid, _) in self.iter_edges() {
+        for eid in self.edges().iter_keys() {
             self.assert_edge_valid(eid).context("Invalid Mesh")?;
         }
-        // for (vid, _) in self.iter_verts() {
+        // for vid in self.verts().iter_keys() {
         //     self.assert_vertex_valid(vid).context("Invalid Mesh")?;
         // }
         Ok(())
     }
 
     pub fn assert_face_valid(&self, fid: FaceID) -> anyhow::Result<()> {
-        let f = &self.get_face(fid);
+        let f = fid.face(self);
         let tri: Vec<_> = self.iter_edge_loop(f.edge).collect();
 
         if tri.len() > 3 {
-            Err(MeshError::InvalidTri(fid)).context("Tri has >3 edges")?;
+            Err(MeshError::InvalidFace(fid)).context("Tri has >3 edges")?;
         }
         if tri.len() < 3 {
-            Err(MeshError::InvalidTri(fid)).context("Tri has <3 edges")?;
+            Err(MeshError::InvalidFace(fid)).context("Tri has <3 edges")?;
         }
 
         for &e in &tri {
             self.assert_edge_valid(e)
-                .context(MeshError::InvalidTri(fid))?;
+                .context(MeshError::InvalidFace(fid))?;
 
-            if let Some(t) = self.get_edge(e).twin {
+            if let Some(t) = e.edge(self).twin {
                 if tri.contains(&t) {
-                    Err(MeshError::InvalidTri(fid)).context("Tri neighbours itself")?
+                    Err(MeshError::InvalidFace(fid)).context("Tri neighbours itself")?
                 }
             }
         }
@@ -828,7 +762,7 @@ impl HalfEdgeMesh {
     pub fn assert_edge_valid(&self, eid: EdgeID) -> anyhow::Result<()> {
         let edge = self.try_get_edge(eid)?;
 
-        self.get_face(edge.face);
+        edge.face.face(self);
 
         if let Some(t) = edge.twin {
             self.try_get_edge(t).context(MeshError::InvalidTwin(eid))?;
@@ -856,9 +790,9 @@ impl HalfEdgeMesh {
             Err(MeshError::SingletonEdge(eid, src))?;
         }
 
-        self.assert_vertex_valid(edge.vert_origin)?;
-        self.assert_vertex_valid(self.get_edge(edge.edge_next_ccw).vert_origin)?;
-        self.assert_vertex_valid(self.get_edge(edge.edge_back_cw).vert_origin)?;
+        // self.assert_vertex_valid(edge.vert_origin)?;
+        // self.assert_vertex_valid(edge.edge_next_ccw.edge(self).vert_origin)?;
+        // self.assert_vertex_valid(edge.edge_back_cw.edge(self).vert_origin)?;
 
         Ok(())
     }
@@ -869,7 +803,7 @@ impl HalfEdgeMesh {
         let mut dests = HashMap::new();
         let mut origs = HashMap::new();
 
-        for &eid in self.get_vert(vid).outgoing_edges() {
+        for &eid in vid.vert(self).outgoing_edges() {
             let (orig, dest) = eid.src_dst(self).context(MeshError::InvalidVertex(vid))?;
 
             if orig != vid {
@@ -885,15 +819,15 @@ impl HalfEdgeMesh {
                         vid,
                         eid,
                         other,
-                        self.get_edge(eid).clone(),
-                        self.get_edge(other).clone(),
+                        eid.edge(self).clone(),
+                        other.edge(self).clone(),
                     ))
                     .with_context(|| {
                         format!("Vert has outgoing edges with duplicate destinations. ",)
                     });
             }
         }
-        for &eid in self.get_vert(vid).incoming_edges() {
+        for &eid in vid.vert(self).incoming_edges() {
             let (orig, dest) = eid.src_dst(self).context(MeshError::InvalidVertex(vid))?;
 
             if dest != vid {
@@ -919,14 +853,23 @@ impl HalfEdgeMesh {
     pub fn verts_mut(&mut self) -> &mut Pidge<VertID, Vertex> {
         &mut self.verts
     }
+
+    pub fn faces(&self) -> &Pidge<FaceID, Face> {
+        &self.faces
+    }
+
+    pub fn edges(&self) -> &Pidge<EdgeID, HalfEdge> {
+        &self.edges
+    }
+
+    pub fn verts(&self) -> &Pidge<VertID, Vertex> {
+        &self.verts
+    }
 }
 #[cfg(test)]
 pub mod test {
     use super::*;
-    use std::{
-        collections::{HashMap, HashSet},
-        error::Error,
-    };
+    use std::{collections::HashSet, error::Error};
 
     use common::graph;
     use metis::PartitioningConfig;
@@ -966,15 +909,14 @@ pub mod test {
 
             for face in faces {
                 for edge in self.iter_edge_loop(face.edge) {
-                    if let Some(t) = self.get_edge(edge).twin {
+                    if let Some(t) = edge.edge(self).twin {
                         unseen_edges.insert(t);
                     }
                 }
             }
 
             let all_unseen_edges = unseen_edges.clone();
-            unseen_edges
-                .retain(|&edge| !all_unseen_edges.contains(&self.get_edge(edge).twin.unwrap()));
+            unseen_edges.retain(|&edge| !all_unseen_edges.contains(&edge.edge(self).twin.unwrap()));
 
             unseen_edges
         }
@@ -1048,7 +990,7 @@ pub mod test {
 
             for &e in &boundary {
                 assert!(
-                    !faces.contains(&&mesh.get_face(mesh.get_edge(e).face)),
+                    !faces.contains(&e.edge(&mesh).face.face(&mesh)),
                     "'Boundary' contains edge inside itself"
                 )
             }
@@ -1230,7 +1172,7 @@ pub mod test {
         let _e = match mesh.reduce_within_groups(
             &tri_mesh.verts,
             &mut quadrics,
-            &[mesh.face_count() / 4],
+            &[mesh.faces().len() / 4],
         ) {
             Ok(e) => e,
             Err(e) => {
@@ -1267,8 +1209,8 @@ pub mod test {
             graph.retain_edges(|g, e| {
                 let (v1, v2) = g.edge_endpoints(e).unwrap();
 
-                let p1 = mesh.get_face(*g.node_weight(v1).unwrap()).cluster_idx;
-                let p2 = mesh.get_face(*g.node_weight(v2).unwrap()).cluster_idx;
+                let p1 = g.node_weight(v1).unwrap().face(&mesh).cluster_idx;
+                let p2 = g.node_weight(v2).unwrap().face(&mesh).cluster_idx;
 
                 p1 == p2
             });

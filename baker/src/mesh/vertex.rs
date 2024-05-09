@@ -2,9 +2,9 @@ use std::fmt::Display;
 
 use super::{
     edge::EdgeID,
+    half_edge_mesh::{HalfEdgeMesh, MeshError},
     plane::Plane,
     quadric::Quadric,
-    half_edge_mesh::{MeshError, HalfEdgeMesh},
 };
 
 #[derive(Default, Hash, Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,6 +44,8 @@ pub struct Vertex {
     // Edge with vert_source = this id
     outgoing_edges: Vec<EdgeID>,
     incoming_edges: Vec<EdgeID>,
+
+    vert_i: usize,
 }
 
 impl VertID {
@@ -54,6 +56,12 @@ impl VertID {
         self.0
     }
 
+    pub fn vert(self, mesh: &HalfEdgeMesh) -> &Vertex {
+        mesh.verts().get(self)
+    }
+    pub fn vert_mut(self, mesh: &mut HalfEdgeMesh) -> &mut Vertex {
+        mesh.verts_mut().get_mut(self)
+    }
     /// Does this vertex have a complete fan of triangles surrounding it?
     pub fn is_local_manifold(self, mesh: &HalfEdgeMesh) -> bool {
         let v = mesh.try_get_vert(self);
@@ -69,7 +77,7 @@ impl VertID {
 
         for _i in 0..(vert.outgoing_edges().len() * 2) {
             // attempt to move around the fan, by moving to our twin edge and going clockwise
-            let e = mesh.get_edge(eid);
+            let e = eid.edge(mesh);
 
             if e.vert_origin != self {
                 println!("Iteration around vertex escaped vertex");
@@ -85,7 +93,7 @@ impl VertID {
                 return false;
             };
 
-            let e = &mesh.get_edge(twin);
+            let e = twin.edge(mesh);
 
             // Compare against last face's partition
             // if is_group_manifold {
@@ -120,13 +128,12 @@ impl VertID {
         };
 
         let outgoings = &vert.outgoing_edges;
-        let group_index = mesh.clusters
-            [mesh.get_face(mesh.get_edge(outgoings[0]).face).cluster_idx]
-            .group_index();
+        let group_index =
+            mesh.clusters[outgoings[0].edge(mesh).face.face(mesh).cluster_idx].group_index();
 
         for &eid in &outgoings[1..] {
             if group_index
-                != mesh.clusters[mesh.get_face(mesh.get_edge(eid).face).cluster_idx].group_index()
+                != mesh.clusters[eid.edge(mesh).face.face(mesh).cluster_idx].group_index()
             {
                 return false;
             }
@@ -136,7 +143,7 @@ impl VertID {
         for &eid in &vert.incoming_edges {
             assert_eq!(
                 group_index,
-                mesh.clusters[mesh.get_face(mesh.get_edge(eid).face).cluster_idx].group_index()
+                mesh.clusters[eid.edge(mesh).face.face(mesh).cluster_idx].group_index()
             );
         }
 
@@ -146,7 +153,7 @@ impl VertID {
     /// Generate error matrix Q, the sum of Kp for all planes p around this vertex.
     /// TODO: Eventually we can also add a high penality plane if this is a vertex on a boundary, but manually checking may be easier
     pub fn generate_error_matrix(self, mesh: &HalfEdgeMesh, verts: &[glam::Vec3A]) -> Quadric {
-        mesh.get_vert(self).generate_error_matrix(mesh, verts)
+        self.vert(mesh).generate_error_matrix(mesh, verts)
     }
 }
 
@@ -232,7 +239,7 @@ impl Vertex {
         let mut q = Quadric::default();
 
         for &eid in self.outgoing_edges() {
-            let e = mesh.get_edge(eid);
+            let e = eid.edge(mesh);
             let f = e.face;
 
             let plane = f.plane(mesh, verts);

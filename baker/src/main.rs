@@ -25,7 +25,7 @@ fn bake_mesh(
     let start_time = time::Instant::now();
     let (mut mesh, tri_mesh) = HalfEdgeMesh::from_gltf(&input);
 
-    // mesh.assert_valid().unwrap();``
+    mesh.assert_valid().unwrap();
 
     let num_contiguous = mesh.partition_contiguous();
 

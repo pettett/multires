@@ -7,14 +7,11 @@ use meshopt::SimplifyOptions;
 use obj::{Group, IndexTuple, ObjData, Object, SimplePolygon};
 use rayon::prelude::*;
 
-use crate::{
-    mesh::{graph::colour_graph, triangle::Triangle},
-    pidge::Pidge,
-};
+use crate::mesh::graph::colour_graph;
 
 use super::{
-    cluster_info::ClusterInfo, edge::EdgeID, face::FaceID, quadric::Quadric,
-    quadric_error::QuadricError, vertex::VertID, half_edge_mesh::HalfEdgeMesh,
+    cluster_info::ClusterInfo, edge::EdgeID, face::FaceID, half_edge_mesh::HalfEdgeMesh,
+    pidge::Pidge, quadric::Quadric, quadric_error::QuadricError, vertex::VertID,
 };
 use anyhow::Result;
 
@@ -50,7 +47,7 @@ impl HalfEdgeMesh {
     fn group_faces(&self) -> Vec<Vec<FaceID>> {
         let mut groups = vec![Vec::new(); self.groups.len()];
 
-        for (fid, face) in self.iter_faces() {
+        for (fid, face) in self.faces().iter_items() {
             groups[self.clusters[face.cluster_idx].group_index()].push(fid);
         }
         groups
@@ -65,11 +62,11 @@ impl HalfEdgeMesh {
         let mut queue = priority_queue::PriorityQueue::with_capacity(faces.len() * 3);
 
         for &fid in faces {
-            let face = self.get_face(fid);
+            let face = fid.face(self);
             for eid in [
                 face.edge,
-                self.get_edge(face.edge).edge_back_cw,
-                self.get_edge(face.edge).edge_next_ccw,
+                face.edge.edge(self).edge_back_cw,
+                face.edge.edge(self).edge_next_ccw,
             ] {
                 let error = eid.edge_collapse_error(&self, verts, &quadrics).unwrap();
 
@@ -107,7 +104,7 @@ impl HalfEdgeMesh {
 
         let mut new_error = 0.0;
         println!("Beginning Collapse...");
-        // let tris = self.face_count();
+        // let tris = self.faces().len();
         // // Need to remove half the triangles - each reduction removes 2
         // let required_reductions = (tris / 4);
         ////#[cfg(feature = "progress")]
@@ -210,16 +207,16 @@ impl HalfEdgeMesh {
                     }
 
                     // All the edges from src are now in dest, so we only need to check those
-                    let effected_edges = self
-                        .get_vert(dest)
+                    let effected_edges = dest
+                        .vert(self)
                         .outgoing_edges()
                         .iter()
-                        .chain(self.get_vert(dest).incoming_edges());
+                        .chain(dest.vert(self).incoming_edges());
 
                     // Update priority queue with new errors
                     for &eid in effected_edges {
                         if let Ok(edge) = self.try_get_edge(eid) {
-                            if self.clusters[self.get_face(edge.face).cluster_idx].group_index()
+                            if self.clusters[edge.face.face(self).cluster_idx].group_index()
                                 == group_index
                             {
                                 let error =
@@ -246,7 +243,7 @@ impl HalfEdgeMesh {
     pub fn meshopt_reduce_within_groups(&mut self, verts: &[glam::Vec3A]) -> Result<f64> {
         let mut group_tris = vec![Vec::new(); self.groups.len()];
 
-        for (i, f) in self.iter_faces() {
+        for f in self.faces().iter() {
             let gi = self.clusters[f.cluster_idx].group_index();
             group_tris[self.clusters[f.cluster_idx].group_index()]
                 .extend_from_slice(&self.triangle_from_face(f));
@@ -274,8 +271,8 @@ impl HalfEdgeMesh {
         // }
 
         *self.verts_mut() = Pidge::with_capacity(verts.len());
-        *self.edges_mut() = Pidge::with_capacity(self.edge_count());
-        *self.faces_mut() = Pidge::with_capacity(self.face_count());
+        *self.edges_mut() = Pidge::with_capacity(self.edges().len());
+        *self.faces_mut() = Pidge::with_capacity(self.faces().len());
 
         let len_ratio = mem::size_of_val(&verts[0]) / mem::size_of::<u8>();
         let bytes = unsafe {
@@ -340,9 +337,9 @@ impl HalfEdgeMesh {
                     continue;
                 }
 
-                match self.add_tri(id, (*a).into(), (*b).into(), (*c).into()) {
+                match self.add_tri(id, (*a).into(), (*b).into(), (*c).into(), true) {
                     Ok(_) => {
-                        self.get_face_mut(id).cluster_idx = group_idx;
+                        id.face_mut(self).cluster_idx = group_idx;
 
                         pushed_edges += 3;
                         pushed_faces += 1;
@@ -350,13 +347,13 @@ impl HalfEdgeMesh {
                     }
                     Err(me) => match me {
                         crate::mesh::half_edge_mesh::MeshError::EdgeExists(e) => {
-                            let e = self.get_edge(e);
+                            let e = e.edge(self);
 
                             // println!("{:?}", e.twin);
 
                             println!(
                                 "Duplicate face from group {} (we are group {})",
-                                self.get_face(e.face).cluster_idx,
+                                e.face.face(self).cluster_idx,
                                 group_idx
                             );
                         }
@@ -364,8 +361,8 @@ impl HalfEdgeMesh {
                     },
                 }
             }
-            assert_eq!(self.face_count(), pushed_faces);
-            assert_eq!(self.edge_count(), pushed_edges);
+            assert_eq!(self.faces().len(), pushed_faces);
+            assert_eq!(self.edges().len(), pushed_edges);
 
             // println!("{pushed_faces} {}", new_group.len() / 3)
         }
@@ -422,8 +419,8 @@ mod tests {
     use std::error::Error;
 
     use crate::mesh::{
-        plane::Plane,
         half_edge_mesh::test::{TEST_MESH_LOW, TEST_MESH_MONK},
+        plane::Plane,
     };
 
     use super::super::half_edge_mesh::{test::TEST_MESH_HIGH, HalfEdgeMesh};
@@ -440,7 +437,7 @@ mod tests {
         // These operations are not especially accurate, large epsilon value
         let e = 0.000001;
 
-        for (i, (fid, f)) in mesh.iter_faces().enumerate() {
+        for (i, (fid, f)) in mesh.faces().iter_items().enumerate() {
             let plane = fid.plane(&mesh, &tri_mesh.verts);
             let n = plane.normal();
             assert!(
@@ -470,7 +467,7 @@ mod tests {
 
         let random_points = [glam::Vec3A::X, glam::Vec3A::Y * 50.0];
 
-        for (i, (fid, f)) in mesh.iter_faces().enumerate() {
+        for (i, (fid, f)) in mesh.faces().iter_items().enumerate() {
             let plane = fid.plane(&mesh, &tri_mesh.verts);
 
             let mat = plane.fundamental_error_quadric();
@@ -516,7 +513,7 @@ mod tests {
 
         let e = 0.0000000001;
 
-        for (vid, v) in mesh.iter_verts() {
+        for (vid, v) in mesh.verts().iter_items() {
             let q = v.generate_error_matrix(&mesh, &tri_mesh.verts);
 
             let cols = q.0.to_cols_array_2d();
@@ -556,7 +553,7 @@ mod tests {
             mesh.assert_valid().unwrap();
 
             println!("Reduction");
-            mesh.reduce_within_groups(&tri_mesh.verts, &mut quadrics, &[mesh.face_count() / 4])
+            mesh.reduce_within_groups(&tri_mesh.verts, &mut quadrics, &[mesh.faces().len() / 4])
                 .unwrap();
         }
 

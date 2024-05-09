@@ -1,10 +1,10 @@
 use super::{
     face::FaceID,
+    half_edge_mesh::{HalfEdgeMesh, MeshError},
     plane::Plane,
     quadric::Quadric,
     quadric_error::QuadricError,
     vertex::VertID,
-    half_edge_mesh::{MeshError, HalfEdgeMesh},
 };
 use anyhow::{Context, Result};
 use idmap::IntegerId;
@@ -42,14 +42,14 @@ impl IntegerId for EdgeID {
     }
 }
 
-impl Into<usize> for EdgeID {
-    fn into(self) -> usize {
-        self.0 as _
+impl From<usize> for EdgeID {
+    fn from(value: usize) -> Self {
+        Self(value as _)
     }
 }
-impl Into<EdgeID> for usize {
-    fn into(self) -> EdgeID {
-        EdgeID(self as _)
+impl From<EdgeID> for usize {
+    fn from(value: EdgeID) -> Self {
+        value.0 as _
     }
 }
 impl Into<EdgeID> for u32 {
@@ -88,7 +88,7 @@ impl<'a> Iterator for EdgeIter<'a> {
         let current = self.current;
 
         if let Some(current) = current {
-            self.current = Some(self.mesh.get_edge(current).edge_back_cw);
+            self.current = Some(current.edge(&self.mesh).edge_back_cw);
             if self.current == Some(self.start) {
                 self.current = None;
             }
@@ -136,6 +136,13 @@ impl EdgeID {
         Ok(vd - vs)
     }
 
+    pub fn edge(self, mesh: &HalfEdgeMesh) -> &HalfEdge {
+        mesh.edges().get(self)
+    }
+    pub fn edge_mut(self, mesh: &mut HalfEdgeMesh) -> &mut HalfEdge {
+        mesh.edges_mut().get_mut(self)
+    }
+
     /// Evaluate if any restrictions on edge collapse apply to this edge.
     ///
     /// Current restrictions:
@@ -157,7 +164,7 @@ impl EdgeID {
         //    return Ok(false);
         //}
 
-        if mesh.get_edge(self).twin.is_some() {
+        if self.edge(mesh).twin.is_some() {
             // This edge has a twin, so a bad collapse risks splitting the group into 2 pieces.
 
             // If we change the boundary shape, we must move into a manifold embedded position,
@@ -178,20 +185,13 @@ impl EdgeID {
         }
 
         // Test normals of triangles before and after the swap
-        for &e in mesh
-            .get_vert(orig)
-            //.verts
-            //.get(orig)
-            //.ok_or(MeshError::InvalidVertex)
-            //.context("Failed to lookup vertex for finding plane normals")?
-            .outgoing_edges()
-        {
+        for &e in orig.vert(mesh).outgoing_edges() {
             if e == self {
                 continue;
             }
 
-            let f = mesh.get_edge(e).face;
-            let [a, b, c] = mesh.triangle_from_face(&mesh.get_face(f));
+            let f = e.edge(mesh).face;
+            let [a, b, c] = mesh.triangle_from_face(f.face(mesh));
 
             let (v_a, v_b, v_c, new_corner) = (
                 verts[a as usize].into(),

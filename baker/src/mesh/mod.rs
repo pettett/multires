@@ -10,6 +10,7 @@ mod graph;
 mod group_info;
 pub mod line;
 mod partition;
+mod pidge;
 mod quadric_error;
 mod reduction;
 pub mod triangle;

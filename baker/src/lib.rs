@@ -4,7 +4,6 @@ use mimalloc::MiMalloc;
 
 pub mod lod;
 pub mod mesh;
-pub mod pidge;
 
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;

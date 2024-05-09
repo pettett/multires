@@ -79,7 +79,7 @@ pub fn simplify_lod_chain(
         // i = index of previous mesh layer
         //working_mesh = reduce_mesh(working_mesh);
 
-        println!("Face count L{}: {}", i, mesh.face_count());
+        println!("Face count L{}: {}", i, mesh.faces().len());
 
         // We must regenerate the queue each time, as boundaries change.
 

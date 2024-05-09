@@ -17,9 +17,9 @@ pub enum PartitionCount {
 
 impl HalfEdgeMesh {
     pub fn partition_contiguous(&mut self) -> Vec<usize> {
-        println!("Wiping partitions");
+        println!("Partitioning Contiguous");
         // Wipe partitions
-        for (_, f) in self.iter_faces_mut() {
+        for f in self.faces_mut().iter_mut() {
             f.cluster_idx = 0;
         }
 
@@ -31,7 +31,7 @@ impl HalfEdgeMesh {
             assert_eq!(search.len(), 0);
             // select a random face to start the search
 
-            for (fid, f) in self.iter_faces() {
+            for (fid, f) in self.faces().iter_items() {
                 if f.cluster_idx == 0 {
                     search.push(fid);
                     break;
@@ -50,23 +50,23 @@ impl HalfEdgeMesh {
             while let Some(fid) = search.pop() {
                 // Mark
 
-                self.get_face_mut(fid).cluster_idx = p;
+                fid.face_mut(self).cluster_idx = p;
                 counts[p - 1] += 1;
 
                 // Search for unmarked
-                let e0 = self.get_face(fid).edge;
-                let e1 = self.get_edge(e0).edge_back_cw;
-                let e2 = self.get_edge(e0).edge_next_ccw;
+                let e0 = fid.face(self).edge;
+                let e1 = e0.edge(self).edge_back_cw;
+                let e2 = e0.edge(self).edge_next_ccw;
 
                 for e in [e0, e1, e2] {
                     for t in self.twin_loop(e) {
-                        let f = self.get_edge(t).face;
-                        if self.get_face(f).cluster_idx == 0 {
+                        let f = t.edge(self).face;
+                        if f.face(self).cluster_idx == 0 {
                             // splitting by contiguous, we should not be able to access others
 
                             search.push(f);
                         } else {
-                            assert_eq!(self.get_face(f).cluster_idx, p);
+                            assert_eq!(f.face(self).cluster_idx, p);
                         }
                     }
                 }
@@ -77,9 +77,9 @@ impl HalfEdgeMesh {
 
     /// Partition the mesh into a single cluster
     pub fn cluster_unity(&mut self) {
-        self.clusters = vec![ClusterInfo::new(None, self.face_count())];
+        self.clusters = vec![ClusterInfo::new(None, self.faces().len())];
 
-        for (_fid, f) in self.iter_faces_mut() {
+        for f in self.faces_mut().iter_mut() {
             f.cluster_idx = 0;
         }
     }
@@ -118,7 +118,7 @@ impl HalfEdgeMesh {
 
         metis::pack_partitioning(&mut cluster_indexes);
 
-        assert_eq!(cluster_indexes.len(), self.face_count());
+        assert_eq!(cluster_indexes.len(), self.faces().len());
 
         let cluster_count = *cluster_indexes.iter().max().unwrap() as usize + 1;
 
@@ -128,7 +128,7 @@ impl HalfEdgeMesh {
             let fid = *mesh_dual
                 .node_weight(petgraph::graph::node_index(i))
                 .unwrap();
-            let face = self.get_face_mut(fid);
+            let face = fid.face_mut(self);
 
             face.cluster_idx = cluster_indexes[i] as usize;
             occupancies[face.cluster_idx] += 1;
@@ -386,16 +386,14 @@ impl HalfEdgeMesh {
             }
 
             // Each new part needs to register its dependence on the group we were a part of before
-            let child_group = self.clusters[self
-                .get_face(graph[petgraph::graph::node_index(0)])
-                .cluster_idx]
+            let child_group = self.clusters
+                [graph[petgraph::graph::node_index(0)].face(self).cluster_idx]
                 .group_index();
             assert_eq!(group_idx, child_group);
 
             // Update partitions of the actual triangles
             for x in graph.node_indices() {
-                self.get_face_mut(graph[x]).cluster_idx =
-                    new_clusters.len() + part[x.index()] as usize;
+                graph[x].face_mut(self).cluster_idx = new_clusters.len() + part[x.index()] as usize;
             }
             // If we have not been grouped yet,
             let cluster_template = if self.groups.len() == 0 {
@@ -431,7 +429,7 @@ impl HalfEdgeMesh {
 
     /// Construct a tight bounding cone for each cluster based on vertices in the mesh
     fn construct_tight_cluster_bounds(&self, clusters: &mut [ClusterInfo], verts: &[glam::Vec3A]) {
-        for (_fid, f) in self.iter_faces() {
+        for f in self.faces().iter() {
             let cluster = &mut clusters[f.cluster_idx];
 
             let tri = self.triangle_from_face(f);
@@ -468,7 +466,7 @@ impl HalfEdgeMesh {
             cluster.tight_cone.normalise_axis();
         }
 
-        for (_fid, f) in self.iter_faces() {
+        for f in self.faces().iter() {
             let cluster = &mut clusters[f.cluster_idx];
 
             let face_plane = f.plane(self, verts);
@@ -508,7 +506,7 @@ pub mod tests {
 
         mesh.cluster_full_mesh(
             test_config,
-            mesh.face_count().div_ceil(STARTING_CLUSTER_SIZE) as _,
+            mesh.faces().len().div_ceil(STARTING_CLUSTER_SIZE) as _,
             &tri_mesh.verts,
         )?;
 
@@ -529,7 +527,7 @@ pub mod tests {
 
         mesh.cluster_full_mesh(
             test_config,
-            mesh.face_count().div_ceil(STARTING_CLUSTER_SIZE) as _,
+            mesh.faces().len().div_ceil(STARTING_CLUSTER_SIZE) as _,
             &tri_mesh.verts,
         )?;
         mesh.group(test_config)?;
@@ -544,17 +542,17 @@ pub mod tests {
 
         // This must be correct for the purposes of parallelisation, as we don't want to parallel collapse edges in neighbouring groups.
 
-        for (_, vert) in mesh.iter_verts() {
+        for vert in mesh.verts().iter() {
             let mut groups = HashSet::new();
 
             for &out in vert.outgoing_edges() {
                 groups.insert(
-                    mesh.clusters[mesh.get_face(mesh.get_edge(out).face).cluster_idx].group_index(),
+                    mesh.clusters[out.edge(&mesh).face.face(&mesh).cluster_idx].group_index(),
                 );
             }
             for &out in vert.incoming_edges() {
                 groups.insert(
-                    mesh.clusters[mesh.get_face(mesh.get_edge(out).face).cluster_idx].group_index(),
+                    mesh.clusters[out.edge(&mesh).face.face(&mesh).cluster_idx].group_index(),
                 );
             }
 

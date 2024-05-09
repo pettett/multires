@@ -1,9 +1,9 @@
 use std::{marker::PhantomData, mem};
 
-pub trait Key: Into<usize> {}
+pub trait Key: Into<usize> + From<usize> {}
 pub trait Value: Clone + PartialEq {}
 
-impl<T> Key for T where T: Into<usize> {}
+impl<T> Key for T where T: Into<usize> + From<usize> {}
 impl<T> Value for T where T: Clone + PartialEq {}
 
 /// A `Pidge` is a form of slotmap without key generations
@@ -25,43 +25,6 @@ pub struct Pidge<K: Key, V> {
 enum PidgeHole<V> {
     Filled(V),
     Empty { span_start: usize, span_end: usize },
-}
-struct Iter<'a, V> {
-    idx: usize,
-    data: &'a Vec<PidgeHole<V>>,
-}
-
-impl<'a, V> Iterator for Iter<'a, V> {
-    type Item = &'a V;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.idx >= self.data.len() {
-            return None;
-        }
-        loop {
-            match &self.data[self.idx] {
-                PidgeHole::Filled(v) => {
-                    self.idx += 1;
-                    return Some(v);
-                }
-                PidgeHole::Empty { .. } => {
-                    if self.idx + 1 >= self.data.len() {
-                        // Break the iterator, no data after this span
-                        return None;
-                    } else {
-                        self.idx += 1;
-                    }
-                }
-            }
-        }
-        // match &self.data[self.idx] {
-        //     PidgeHole::Filled(v) => {
-        //         self.idx += 1;
-        //         Some(v)
-        //     }
-        //     _ => panic!("Span end should be followed by a valid filled pidge hole"),
-        // }
-    }
 }
 
 impl<V> Into<Option<V>> for PidgeHole<V> {
@@ -124,51 +87,6 @@ impl<K: Key, V> Pidge<K, V> {
         let new_span_start = None;
         let new_span_end = None;
 
-        //TODO: test if this improves performance
-
-        // if id > 1 {
-        //     // Merge with span on the left
-        //     match &self.data[id - 1] {
-        //         PidgeHole::Empty { span_start, .. } => new_span_start = Some(*span_start),
-        //         _ => (),
-        //     }
-        // }
-
-        // if id < self.data.len() - 1 {
-        //     // Merge with span on the left
-        //     match &self.data[id + 1] {
-        //         PidgeHole::Empty { span_end, .. } => new_span_end = Some(*span_end),
-        //         _ => (),
-        //     }
-        // }
-
-        // // Write in the new span. Only write over data if it has changed
-        // if let Some(new_span_start) = new_span_start {
-        //     match &mut self.data[new_span_start] {
-        //         PidgeHole::Empty {
-        //             span_start,
-        //             span_end,
-        //         } => {
-        //             *span_start = new_span_start;
-        //             *span_end = new_span_end.unwrap_or(id);
-        //         }
-        //         _ => panic!("Invalid Span Start"),
-        //     }
-        // }
-
-        // if let Some(new_span_end) = new_span_end {
-        //     match &mut self.data[new_span_end] {
-        //         PidgeHole::Empty {
-        //             span_start,
-        //             span_end,
-        //         } => {
-        //             *span_start = new_span_start.unwrap_or(id);
-        //             *span_end = new_span_end;
-        //         }
-        //         _ => panic!("Invalid Span End"),
-        //     }
-        // }
-
         // And write in ourself to have correct values, in the case that either of the above span points are still None.
         let mut data = PidgeHole::Empty {
             span_start: new_span_start.unwrap_or(id),
@@ -208,16 +126,32 @@ impl<K: Key, V> Pidge<K, V> {
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &V> + '_ {
-        Iter {
-            idx: 0,
-            data: &self.data,
-        }
+        self.data.iter().filter_map(|p| p.as_ref())
     }
-    pub fn iter_with_empty(&self) -> impl Iterator<Item = Option<&V>> + '_ {
-        self.data.iter().map(|x| x.as_ref())
+
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut V> + '_ {
+        self.data.iter_mut().filter_map(|p| p.as_mut())
     }
-    pub fn iter_mut_with_empty(&mut self) -> impl Iterator<Item = Option<&mut V>> + '_ {
-        self.data.iter_mut().map(|x| x.as_mut())
+
+    pub fn iter_items(&self) -> impl Iterator<Item = (K, &V)> + '_ {
+        self.data
+            .iter()
+            .enumerate()
+            .filter_map(|(i, p)| p.as_ref().map(|v| (K::from(i), v)))
+    }
+
+    pub fn iter_items_mut(&mut self) -> impl Iterator<Item = (K, &mut V)> + '_ {
+        self.data
+            .iter_mut()
+            .enumerate()
+            .filter_map(|(i, p)| p.as_mut().map(|v| (K::from(i), v)))
+    }
+
+    pub fn iter_keys(&self) -> impl Iterator<Item = K> + '_ {
+        self.data
+            .iter()
+            .enumerate()
+            .filter_map(|(i, p)| p.as_ref().and(Some(K::from(i))))
     }
 }
 

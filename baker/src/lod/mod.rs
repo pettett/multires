@@ -36,9 +36,9 @@ fn stat_readout(multi_res: &mut MultiResMesh) {
 }
 
 pub fn grab_indices(mesh: &HalfEdgeMesh) -> Vec<u32> {
-    let mut indices = Vec::with_capacity(mesh.face_count() * 3);
+    let mut indices = Vec::with_capacity(mesh.faces().len() * 3);
 
-    for (_fid, f) in mesh.iter_faces() {
+    for f in mesh.faces().iter() {
         let [a, b, c] = mesh.triangle_from_face(f);
         indices.push(a as _);
         indices.push(b as _);
@@ -65,7 +65,7 @@ pub fn generate_clusters(
 ) -> Vec<MeshCluster> {
     println!("Generating meshlets!");
 
-    //let inds = 5.0 / mesh.face_count() as f32;
+    //let inds = 5.0 / mesh.faces().len() as f32;
 
     // Precondition: partition indexes completely span in some range 0..N
     let mut clusters: Vec<_> = mesh
@@ -97,7 +97,7 @@ pub fn generate_clusters(
         let cluster_count = (mesh.clusters.len() - i).min(step);
         let cluster_range = i..i + cluster_count;
 
-        for (_fid, face) in mesh.iter_faces() {
+        for face in mesh.faces().iter() {
             if cluster_range.contains(&face.cluster_idx) {
                 let verts = mesh.triangle_from_face(face);
 
