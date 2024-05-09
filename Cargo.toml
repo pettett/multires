@@ -16,6 +16,8 @@ resolver = "2"
 authors = ["mp2015@cam.ac.uk"]
 version = "0.1.0"
 edition = "2021"
+license-file = "LICENSE"
+license = "GPL-3.0"
 
 
 [workspace.dependencies]

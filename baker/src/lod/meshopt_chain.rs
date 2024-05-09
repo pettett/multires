@@ -30,22 +30,7 @@ pub fn meshopt_simplify_lod_chain(tri_mesh: TriMesh, name: String) -> anyhow::Re
     )
     .unwrap();
 
-    for _i in 0..10 {
-        indices = meshopt::simplify(
-            &indices,
-            &verts_adapter,
-            indices.len() / 2,
-            1.0,
-            meshopt::SimplifyOptions::None,
-            None,
-        );
-
-        println!("Simplified to {} indices", indices.len());
-
-        if indices.len() == 0 {
-            break;
-        }
-
+    for i in 0..10 {
         let meshlets = meshopt::build_meshlets(&indices, &verts_adapter, 64, 124, 0.1);
 
         //cluster.error += inds * indices.len() as f32;
@@ -62,7 +47,24 @@ pub fn meshopt_simplify_lod_chain(tri_mesh: TriMesh, name: String) -> anyhow::Re
             cluster.add_meshlet(Meshlet::from_local_indices(m.triangles.to_vec(), verts));
         }
 
+        cluster.lod = i;
+
         multi_res.clusters.push(cluster);
+
+        indices = meshopt::simplify(
+            &indices,
+            &verts_adapter,
+            indices.len() / 2,
+            1.0,
+            meshopt::SimplifyOptions::None,
+            None,
+        );
+
+        println!("Simplified to {} indices", indices.len());
+
+        if indices.len() == 0 {
+            break;
+        }
     }
 
     //opt_multires(&mut multi_res);

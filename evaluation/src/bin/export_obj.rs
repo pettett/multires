@@ -1,5 +1,5 @@
 use common::{Asset, MultiResMesh};
-use obj::{Group, IndexTuple, Obj, ObjData, Object, SimplePolygon};
+use obj::{Group, IndexTuple, ObjData, Object, SimplePolygon};
 
 fn main() {
     export("assets/sphere");

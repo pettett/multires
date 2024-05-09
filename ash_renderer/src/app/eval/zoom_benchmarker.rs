@@ -6,9 +6,9 @@ use common_renderer::components::{camera::Camera, transform::Transform};
 
 use glam::Vec3A;
 
-use crate::{app::scene::SceneEvent, Config};
+use crate::app::scene::SceneEvent;
 
-use super::{fps_limiter::FPSMeasure, renderer::Renderer, scene::Scene};
+use super::super::{fps_limiter::FPSMeasure, renderer::Renderer, scene::Scene};
 
 enum BenchmarkStage {
     Start,
@@ -25,27 +25,31 @@ pub struct Benchmarker {
     end: glam::Vec3A,
 
     t: f32,
-    time: f32,
+    samples: usize,
     rounds: usize,
     stage: BenchmarkStage,
 
-    total_instances: usize,
+    instances: usize,
 
-    instances_per_round: usize,
-
-    results: Vec<(usize, Vec<(f32, f64, u32)>)>,
+    results: Vec<(usize, Vec<(f32, f64, u32, f32)>)>,
 }
 
 impl Benchmarker {
     pub fn default() -> Self {
-        Benchmarker::new(glam::Vec3A::Z * 10.0, glam::Vec3A::Z * 1500.0, 15.0, 500, 5)
+        Benchmarker::new(
+            glam::Vec3A::Z * 10.0,
+            glam::Vec3A::Z * 1500.0,
+            2000,
+            2500,
+            10,
+        )
     }
 
     pub fn new(
         start: glam::Vec3A,
         end: glam::Vec3A,
-        time: f32,
-        instances_per_round: usize,
+        samples: usize,
+        instances: usize,
         rounds: usize,
     ) -> Self {
         println!("Beginning benchmark between {} and {}", start, end);
@@ -54,12 +58,11 @@ impl Benchmarker {
             start,
             end,
             t: 0.0,
-            time,
+            samples,
             stage: BenchmarkStage::Start,
             rounds,
             results: Vec::new(),
-            total_instances: 0,
-            instances_per_round,
+            instances,
         }
     }
 
@@ -84,8 +87,9 @@ impl Benchmarker {
         for (i, r) in &self.results {
             let mut f =
                 fs::File::create(format!("{p}/{i}.txt")).expect("Failed to create log file");
-            for (t, dt, prims) in r {
-                writeln!(&mut f, "{t}, {dt}, {prims}").expect("Failed to write line in file");
+            for (t, dt, prims, dt2) in r {
+                writeln!(&mut f, "{t}, {dt}, {prims}, {dt2}")
+                    .expect("Failed to write line in file");
             }
         }
     }
@@ -98,7 +102,6 @@ pub fn benchmark(
     mut scene_events: EventWriter<SceneEvent>,
     mut renderer: ResMut<Renderer>,
     scene: Res<Scene>,
-    config: Res<Config>,
     time: Res<FPSMeasure>,
 ) {
     if let Some(mut bench) = benchmarker {
@@ -115,12 +118,12 @@ pub fn benchmark(
                 if i == bench.rounds {
                     bench.stage = BenchmarkStage::Finish;
                 } else {
-                    scene_events.send(SceneEvent::AddInstances(bench.instances_per_round));
-                    bench.total_instances += bench.instances_per_round;
+                    if i == 0 {
+                        scene_events.send(SceneEvent::AddInstances(bench.instances));
+                    }
 
                     // Get next data ready
-                    let ti = bench.total_instances;
-                    bench.results.push((ti, Vec::new()));
+                    bench.results.push((i, Vec::new()));
 
                     println!("Benchmark Warming up");
                     bench.stage = BenchmarkStage::Heating(i);
@@ -137,16 +140,19 @@ pub fn benchmark(
                 }
             }
             BenchmarkStage::Running(i) => {
-                bench.t += time.delta_time() / bench.time;
                 // use longer running deltatime for recording
                 let t = bench.t;
                 bench.results[i].1.push((
                     t,
                     renderer.gpu_time.last_sample(),
                     renderer.primitives.last_sample(),
+                    time.delta_time(),
                 ));
+                bench.t += 1.0 / bench.samples as f32;
+
                 camera.set_pos(bench.start.lerp(bench.end, bench.t));
                 camera.look_at(Vec3A::ZERO);
+
                 if bench.t > 1.0 {
                     bench.t = 0.0;
 

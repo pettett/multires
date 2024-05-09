@@ -1,16 +1,18 @@
+use crate::app::eval::random_benchmarker::random_benchmark;
+use crate::app::eval::scene_complexity_benchmarker::scene_complexity_benchmark;
 use crate::app::{fps_limiter::FPSMeasure, scene::Scene};
 use crate::gui::gui::Gui;
 use crate::utility::buffer::TBuffer;
 use crate::VkHandle;
 use crate::{
     app::{
-        benchmarker::benchmark,
         draw_systems::{
             acquire_swapchain, draw_frame, draw_gui, gather_queries, start_gui, tick_clocks,
             update_pipeline,
         },
+        eval::recorder::record,
+        eval::zoom_benchmarker::benchmark,
         mesh_data::MeshData,
-        recorder::record,
         renderer::{MeshDrawingPipelineType, Renderer},
         scene::{
             process_scene_events, CameraUniformBufferObject, ModelUniformBufferObject, SceneEvent,
@@ -70,6 +72,12 @@ impl<T> AssetLib<T> {
     pub fn get(&self, name: &str) -> &T {
         &self.assets[name]
     }
+}
+
+#[derive(Event, Debug)]
+pub enum QueryEvent {
+    ClippedPrimitives(u32),
+    GPUMilliseconds(f64),
 }
 
 impl App {
@@ -222,12 +230,13 @@ impl App {
         world.insert_resource(Events::<MouseIn>::default());
         world.insert_resource(Events::<MouseMv>::default());
         world.insert_resource(Events::<KeyIn>::default());
+        world.insert_resource(Events::<QueryEvent>::default());
         world.insert_resource(Events::<SceneEvent>::default());
         world.insert_resource(Events::<MeshDrawingPipelineType>::default());
         world.insert_resource(Time::default());
 
         if core.device.features.mesh_shader {
-            world.send_event(MeshDrawingPipelineType::DrawIndirect);
+            world.send_event(MeshDrawingPipelineType::LocalSelectMesh);
         } else {
             world.send_event(MeshDrawingPipelineType::DrawIndirect);
         }
@@ -240,6 +249,8 @@ impl App {
         schedule.add_systems((
             camera_handle_input,
             benchmark,
+            scene_complexity_benchmark,
+            random_benchmark,
             update_camera,
             process_scene_events,
             update_pipeline.after(process_scene_events),

@@ -2,7 +2,7 @@
 
 use crate::mesh::{cluster_info::ClusterInfo, group_info::GroupInfo};
 
-use super::winged_mesh::WingedMesh;
+use super::half_edge_mesh::HalfEdgeMesh;
 use common::{
     graph::{assert_graph_contiguous, petgraph_to_svg},
     BoundingSphere,
@@ -15,7 +15,7 @@ pub enum PartitionCount {
     Partitions(u32),
 }
 
-impl WingedMesh {
+impl HalfEdgeMesh {
     pub fn partition_contiguous(&mut self) -> Vec<usize> {
         println!("Wiping partitions");
         // Wipe partitions
@@ -486,7 +486,7 @@ pub mod tests {
     use std::collections::HashSet;
 
     use crate::{
-        mesh::winged_mesh::test::{TEST_MESH_DRAGON, TEST_MESH_LOW},
+        mesh::half_edge_mesh::test::{TEST_MESH_DRAGON, TEST_MESH_LOW},
         STARTING_CLUSTER_SIZE,
     };
 
@@ -500,7 +500,7 @@ pub mod tests {
             ..Default::default()
         }
         .into();
-        let (mut mesh, tri_mesh) = WingedMesh::from_gltf(TEST_MESH_DRAGON);
+        let (mut mesh, tri_mesh) = HalfEdgeMesh::from_gltf(TEST_MESH_DRAGON);
 
         println!("{:?}", mesh.partition_contiguous());
 
@@ -525,7 +525,7 @@ pub mod tests {
             ..Default::default()
         }
         .into();
-        let (mut mesh, tri_mesh) = WingedMesh::from_gltf(TEST_MESH_LOW);
+        let (mut mesh, tri_mesh) = HalfEdgeMesh::from_gltf(TEST_MESH_LOW);
 
         mesh.cluster_full_mesh(
             test_config,

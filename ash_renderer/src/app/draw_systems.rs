@@ -25,11 +25,13 @@ use crate::{
 };
 
 use super::{
-    app::AssetLib,
-    benchmarker::Benchmarker,
+    app::{AssetLib, QueryEvent},
+    eval::{
+        random_benchmarker::RandomBenchmarker, recorder::Recorder,
+        scene_complexity_benchmarker::SceneComplexityBenchmarker, zoom_benchmarker::Benchmarker,
+    },
     fps_limiter::FPSMeasure,
     material::Fragment,
-    recorder::Recorder,
     renderer::{MeshDrawingPipelineType, Renderer},
     scene::{Scene, SceneEvent},
 };
@@ -125,13 +127,15 @@ pub fn start_gui(mut gui: NonSendMut<Gui>, renderer: Res<Renderer>) {
     }
 }
 
-pub fn gather_queries(mut renderer: ResMut<Renderer>) {
+pub fn gather_queries(mut renderer: ResMut<Renderer>, mut query_events: EventWriter<QueryEvent>) {
     if renderer.query {
         if renderer.last_sample.elapsed() > time::Duration::from_secs_f32(0.01) {
             if let Some(results) = renderer.query_primitives.get_results(0) {
                 assert!(results.avail > 0);
 
                 renderer.primitives.tick(results.clipping_primitives);
+
+                query_events.send(QueryEvent::ClippedPrimitives(results.clipping_primitives));
             }
 
             renderer.last_sample = time::Instant::now();
@@ -155,9 +159,12 @@ pub fn gather_queries(mut renderer: ResMut<Renderer>) {
                     && results[1].avail > 0
                     && results[1].timestamp > results[0].timestamp
                 {
-                    renderer.gpu_time.tick(
-                        (timestamp_period) * ((results[1].timestamp - results[0].timestamp) as f64),
-                    );
+                    let gpu_ms =
+                        (timestamp_period) * ((results[1].timestamp - results[0].timestamp) as f64);
+
+                    renderer.gpu_time.tick(gpu_ms);
+
+                    query_events.send(QueryEvent::GPUMilliseconds(gpu_ms));
 
                     renderer.last_sample = time::Instant::now();
                 }
@@ -316,6 +323,18 @@ pub fn draw_gui(
 
             if ui.button("Begin Benchmarking").clicked() {
                 commands.insert_resource(Benchmarker::default())
+            }
+
+            if ui.button("Begin Random Benchmarking").clicked() {
+                renderer.query = true;
+
+                commands.insert_resource(RandomBenchmarker::default())
+            }
+
+            if ui.button("Begin Scene Complexity Benchmarking").clicked() {
+                renderer.query = true;
+
+                commands.insert_resource(SceneComplexityBenchmarker::default())
             }
 
             if ui.button("Begin Recorded Run").clicked() {

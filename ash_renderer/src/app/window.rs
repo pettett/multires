@@ -6,8 +6,7 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::Fullscreen;
 
 use super::app::App;
-use super::benchmarker::Benchmarker;
-use super::recorder::Recorder;
+use super::eval::recorder::Recorder;
 use super::renderer::{MeshDrawingPipelineType, Renderer};
 use super::scene::SceneEvent;
 

@@ -2,12 +2,12 @@ use common::{MeshVert, MultiResMesh, TriMesh};
 
 use crate::{
     lod::{generate_clusters, stat_readout},
-    mesh::{winged_mesh::WingedMesh, PartitionCount},
+    mesh::{half_edge_mesh::HalfEdgeMesh, PartitionCount},
     CLUSTERS_PER_SIMPLIFIED_GROUP,
 };
 
 pub fn meshopt_multiresolution(
-    mut mesh: WingedMesh,
+    mut mesh: HalfEdgeMesh,
     tri_mesh: TriMesh,
     name: String,
     starting_cluster_size: usize,
@@ -222,7 +222,7 @@ mod test {
 
     use crate::{
         lod::multiresolution::group_and_partition_and_simplify,
-        mesh::winged_mesh::{test::TEST_MESH_LOW, WingedMesh},
+        mesh::half_edge_mesh::{test::TEST_MESH_LOW, HalfEdgeMesh},
         STARTING_CLUSTER_SIZE,
     };
 
@@ -231,7 +231,7 @@ mod test {
     #[test]
     fn test_group_and_partition_and_simplify() {
         println!("Loading from gltf!");
-        let (mesh, tri_mesh) = WingedMesh::from_gltf(TEST_MESH_LOW);
+        let (mesh, tri_mesh) = HalfEdgeMesh::from_gltf(TEST_MESH_LOW);
 
         //group_and_partition_full_res(working_mesh, &verts, mesh_name.to_owned());
         //apply_simplification(working_mesh, &verts, mesh_name.to_owned());
@@ -245,7 +245,7 @@ mod test {
         let mesh_name = "../../assets/sphere.glb";
 
         println!("Loading from gltf!");
-        let (mesh, tri_mesh) = WingedMesh::from_gltf(mesh_name);
+        let (mesh, tri_mesh) = HalfEdgeMesh::from_gltf(mesh_name);
 
         //group_and_partition_full_res(working_mesh, &verts, mesh_name.to_owned());
         //apply_simplification(working_mesh, &verts, mesh_name.to_owned());

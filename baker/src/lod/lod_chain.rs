@@ -1,11 +1,11 @@
 use common::{MeshVert, MultiResMesh, TriMesh};
 
-use crate::mesh::winged_mesh::WingedMesh;
+use crate::mesh::half_edge_mesh::HalfEdgeMesh;
 
 use super::{generate_clusters, stat_readout};
 
 pub fn simplify_lod_chain(
-    mut mesh: WingedMesh,
+    mut mesh: HalfEdgeMesh,
     tri_mesh: TriMesh,
     name: String,
 ) -> anyhow::Result<MultiResMesh> {

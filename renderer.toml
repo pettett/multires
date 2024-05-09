@@ -1,7 +1,11 @@
 # mesh_names = ["assets/lucy.glb.bin"]
 mesh_names = [
+	# "assets/lucy.glb.bin",
+	# "assets/temp/cruft.glb.bin",
+	# "assets/temp/non_cruft.glb.bin",
 	"assets/dragon_high.glb.bin",
-	"assets/meshopt_multires/dragon_high.glb.bin",
+	# "assets/meshopt_multires/dragon_high.glb.bin",
+	# "assets/torrin_main.glb.bin",
 ]
 
 

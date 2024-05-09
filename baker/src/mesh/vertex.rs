@@ -1,6 +1,11 @@
 use std::fmt::Display;
 
-use super::{edge::EdgeID, plane::Plane, quadric::Quadric, winged_mesh::WingedMesh};
+use super::{
+    edge::EdgeID,
+    plane::Plane,
+    quadric::Quadric,
+    half_edge_mesh::{MeshError, HalfEdgeMesh},
+};
 
 #[derive(Default, Hash, Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(transparent)]
@@ -50,7 +55,7 @@ impl VertID {
     }
 
     /// Does this vertex have a complete fan of triangles surrounding it?
-    pub fn is_local_manifold(self, mesh: &WingedMesh) -> bool {
+    pub fn is_local_manifold(self, mesh: &HalfEdgeMesh) -> bool {
         let v = mesh.try_get_vert(self);
         let Ok(vert) = v else {
             return false;
@@ -65,6 +70,11 @@ impl VertID {
         for _i in 0..(vert.outgoing_edges().len() * 2) {
             // attempt to move around the fan, by moving to our twin edge and going clockwise
             let e = mesh.get_edge(eid);
+
+            if e.vert_origin != self {
+                println!("Iteration around vertex escaped vertex");
+                return false;
+            }
 
             assert_eq!(
                 e.vert_origin, self,
@@ -90,7 +100,7 @@ impl VertID {
             //     last_e_part = Some(e_part);
             // }
 
-            eid = e.edge_back_cw;
+            eid = e.edge_next_ccw;
 
             if eid == eid_first {
                 return true;
@@ -104,7 +114,7 @@ impl VertID {
         return false;
     }
 
-    pub fn is_group_embedded(self, mesh: &WingedMesh) -> bool {
+    pub fn is_group_embedded(self, mesh: &HalfEdgeMesh) -> bool {
         let Ok(vert) = mesh.try_get_vert(self) else {
             return false;
         };
@@ -135,7 +145,7 @@ impl VertID {
 
     /// Generate error matrix Q, the sum of Kp for all planes p around this vertex.
     /// TODO: Eventually we can also add a high penality plane if this is a vertex on a boundary, but manually checking may be easier
-    pub fn generate_error_matrix(self, mesh: &WingedMesh, verts: &[glam::Vec3A]) -> Quadric {
+    pub fn generate_error_matrix(self, mesh: &HalfEdgeMesh, verts: &[glam::Vec3A]) -> Quadric {
         mesh.get_vert(self).generate_error_matrix(mesh, verts)
     }
 }
@@ -162,26 +172,28 @@ impl Vertex {
             assert!(!self.outgoing_edges.contains(&e));
         }
     }
-    pub fn remove_incoming(&mut self, e: EdgeID) {
-        #[cfg(test)]
-        {
-            assert!(
-                self.incoming_edges.contains(&e),
-                "Attempted to remove invalid incoming edge"
-            );
-        }
+    pub fn remove_incoming(&mut self, e: EdgeID) -> Result<(), MeshError> {
+        // #[cfg(test)]
+        // {
+        //     assert!(
+        //         self.incoming_edges.contains(&e),
+        //         "Attempted to remove invalid incoming edge"
+        //     );
+        // }
 
         let index = self
             .incoming_edges
             .iter()
             .position(|&x| x == e)
-            .expect("Incoming edges should contain edge id we are removing");
+            .ok_or(MeshError::InvalidEdge(e))?;
+
         self.incoming_edges.swap_remove(index);
 
         #[cfg(test)]
         {
             assert!(!self.incoming_edges.contains(&e));
         }
+        return Ok(());
     }
     pub fn add_outgoing(&mut self, e: EdgeID) {
         #[cfg(test)]
@@ -216,7 +228,7 @@ impl Vertex {
 
     /// Generate error matrix Q, the sum of Kp for all planes p around this vertex.
     /// We can also add a high penality plane if this is a vertex on a boundary, but manually checking may be easier
-    pub fn generate_error_matrix(&self, mesh: &WingedMesh, verts: &[glam::Vec3A]) -> Quadric {
+    pub fn generate_error_matrix(&self, mesh: &HalfEdgeMesh, verts: &[glam::Vec3A]) -> Quadric {
         let mut q = Quadric::default();
 
         for &eid in self.outgoing_edges() {

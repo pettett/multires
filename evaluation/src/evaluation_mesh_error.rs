@@ -13,7 +13,7 @@ use rand::{
     thread_rng,
 };
 
-enum SampleMode {
+pub enum SampleMode {
     PointsPerTri(f32),
     Points(usize),
 }
@@ -193,7 +193,7 @@ impl MeshErrorEval for MultiResMesh {
 
 pub fn sample_multires_error(mesh_name: &(impl AsRef<path::Path> + std::fmt::Debug)) {
     let Ok(multires) = MultiResMesh::load(mesh_name) else {
-        return;
+        panic!("Unable to load {:?}", mesh_name);
     };
 
     let mut out = PathBuf::new();
@@ -230,7 +230,7 @@ pub fn sample_multires_error(mesh_name: &(impl AsRef<path::Path> + std::fmt::Deb
 pub mod tests {
 
     use baker::{
-        lod::multiresolution::group_and_partition_and_simplify, mesh::winged_mesh::WingedMesh,
+        lod::multiresolution::group_and_partition_and_simplify, mesh::half_edge_mesh::HalfEdgeMesh,
         STARTING_CLUSTER_SIZE,
     };
 
@@ -241,7 +241,7 @@ pub mod tests {
     fn test_same_layer_multires_sampling() {
         let mesh_name = "../../assets/sphere.glb";
 
-        let (mesh, tri_mesh) = WingedMesh::from_gltf(mesh_name);
+        let (mesh, tri_mesh) = HalfEdgeMesh::from_gltf(mesh_name);
 
         let multires =
             group_and_partition_and_simplify(mesh, tri_mesh, "".to_owned(), STARTING_CLUSTER_SIZE)
@@ -261,7 +261,7 @@ pub mod tests {
 
     #[test]
     fn sample_simple_multires_error() {
-        sample_multires_error(&"../assets/sphere.glb.bin")
+        sample_multires_error(&"../assets/sphere.glb.bin");
     }
 
     #[test]
@@ -285,7 +285,7 @@ pub mod tests {
 
     #[test]
     fn sample_all_multires_error() {
-        for entry in glob::glob("../assets/*.glb.bin").expect("Failed to read glob") {
+        for entry in glob::glob("../assets/sphere*.glb.bin").expect("Failed to read glob") {
             match entry {
                 Ok(path) => {
                     println!("{:?}", path.display());

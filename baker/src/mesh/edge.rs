@@ -4,7 +4,7 @@ use super::{
     quadric::Quadric,
     quadric_error::QuadricError,
     vertex::VertID,
-    winged_mesh::{MeshError, WingedMesh},
+    half_edge_mesh::{MeshError, HalfEdgeMesh},
 };
 use anyhow::{Context, Result};
 use idmap::IntegerId;
@@ -18,9 +18,9 @@ pub struct HalfEdge {
     // This is not actually needed, as the destination is the origin of the cw edge
     //pub vert_destination: VertID,
     pub face: FaceID,
-    /// Edge leading on from the dest vert
-    pub edge_back_cw: EdgeID,
     /// Edge connecting into the origin vert
+    pub edge_back_cw: EdgeID,
+    /// Edge leading on from the dest vert
     pub edge_next_ccw: EdgeID,
 
     pub age: u32,
@@ -59,7 +59,7 @@ impl Into<EdgeID> for u32 {
 }
 
 pub struct EdgeIter<'a> {
-    mesh: &'a WingedMesh,
+    mesh: &'a HalfEdgeMesh,
     start: EdgeID,
     current: Option<EdgeID>,
     max_iter: usize,
@@ -67,7 +67,7 @@ pub struct EdgeIter<'a> {
 
 impl<'a> EdgeIter<'a> {
     pub fn new(
-        mesh: &'a WingedMesh,
+        mesh: &'a HalfEdgeMesh,
         start: EdgeID,
         current: Option<EdgeID>,
         max_iter: usize,
@@ -107,11 +107,11 @@ impl<'a> Iterator for EdgeIter<'a> {
 impl HalfEdge {
     /// Grab the source and destination vertex IDs from this edge.
     /// Source vertex is just `HalfEdge.vert_origin`, destination vertex is `HalfEdge.edge_left_cw`'s vert_origin
-    pub fn src_dst(&self, mesh: &WingedMesh) -> Result<(VertID, VertID)> {
+    pub fn src_dst(&self, mesh: &HalfEdgeMesh) -> Result<(VertID, VertID)> {
         Ok((self.vert_origin, self.dst(mesh)?))
     }
 
-    pub fn dst(&self, mesh: &WingedMesh) -> Result<VertID> {
+    pub fn dst(&self, mesh: &HalfEdgeMesh) -> Result<VertID> {
         Ok(mesh
             .try_get_edge(self.edge_next_ccw)
             .context(MeshError::InvalidCCwEdge(self.edge_next_ccw))?
@@ -122,14 +122,14 @@ impl HalfEdge {
 impl EdgeID {
     /// Grab the source and destination vertex IDs from this edge.
     /// Source vertex is just `HalfEdge.vert_origin`, destination vertex is `HalfEdge.edge_left_cw`'s vert_origin
-    pub fn src_dst(self, mesh: &WingedMesh) -> Result<(VertID, VertID)> {
+    pub fn src_dst(self, mesh: &HalfEdgeMesh) -> Result<(VertID, VertID)> {
         let edge = mesh.try_get_edge(self)?;
 
         edge.src_dst(mesh)
     }
 
     /// Get a vector A-B for the source and destinations from [`EdgeID::src_dst`]
-    pub fn edge_vec(&self, mesh: &WingedMesh, verts: &[glam::Vec3A]) -> Result<glam::Vec3A> {
+    pub fn edge_vec(&self, mesh: &HalfEdgeMesh, verts: &[glam::Vec3A]) -> Result<glam::Vec3A> {
         let (src, dst) = self.src_dst(mesh)?;
         let vd = verts[dst.id() as usize];
         let vs = verts[src.id() as usize];
@@ -143,7 +143,7 @@ impl EdgeID {
     /// - Cannot split group into non-contiguous segments.
     /// - Cannot split with connected triangles which would cause an overlap.
     /// - Cannot flip normals of any triangles when collapsing.
-    pub fn can_collapse_edge(self, mesh: &WingedMesh, verts: &[glam::Vec3A]) -> Result<bool> {
+    pub fn can_collapse_edge(self, mesh: &HalfEdgeMesh, verts: &[glam::Vec3A]) -> Result<bool> {
         let (orig, dest) = self.src_dst(mesh)?;
 
         if !orig.is_group_embedded(mesh) {
@@ -220,7 +220,7 @@ impl EdgeID {
     /// Estimate the error introduced by collapsing this edge. Does not take into account penalties from flipping triangles
     pub fn edge_collapse_error(
         self,
-        mesh: &WingedMesh,
+        mesh: &HalfEdgeMesh,
         verts: &[glam::Vec3A],
         quadric_errors: &[Quadric],
     ) -> Result<QuadricError> {

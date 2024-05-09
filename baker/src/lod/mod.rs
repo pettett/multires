@@ -4,7 +4,7 @@ use common::{MeshCluster, MeshVert, Meshlet, MultiResMesh};
 use indicatif::ProgressIterator;
 use rayon::prelude::*;
 
-use crate::{mesh::winged_mesh::WingedMesh, STARTING_CLUSTER_SIZE};
+use crate::{mesh::half_edge_mesh::HalfEdgeMesh, STARTING_CLUSTER_SIZE};
 
 pub mod lod_chain;
 pub mod meshopt_chain;
@@ -35,7 +35,7 @@ fn stat_readout(multi_res: &mut MultiResMesh) {
     //assert_eq!(partitions1.len() * 3, layer_1_indices.len());
 }
 
-pub fn grab_indices(mesh: &WingedMesh) -> Vec<u32> {
+pub fn grab_indices(mesh: &HalfEdgeMesh) -> Vec<u32> {
     let mut indices = Vec::with_capacity(mesh.face_count() * 3);
 
     for (_fid, f) in mesh.iter_faces() {
@@ -56,7 +56,7 @@ pub fn grab_indices(mesh: &WingedMesh) -> Vec<u32> {
 /// Generate clusters, splitting too large meshlets by colour
 /// Also fix group indexing to be global scope, both in our own data and the global group array
 pub fn generate_clusters(
-    mesh: &WingedMesh,
+    mesh: &HalfEdgeMesh,
     lod: usize,
     verts: &[MeshVert],
     child_group_offset: usize,

@@ -1,15 +1,4 @@
-use std::{
-    f32::consts,
-    fs,
-    io::Write,
-    rc::Rc,
-    sync::{
-        mpsc::{self, Sender},
-        Arc,
-    },
-    thread::{self, sleep},
-    time::Duration,
-};
+use std::{f32::consts, sync::Arc};
 
 use bevy_ecs::prelude::*;
 
@@ -18,7 +7,7 @@ use glam::{vec3a, FloatExt, Vec3A};
 
 use crate::{app::scene::SceneEvent, Config};
 
-use super::{fps_limiter::FPSMeasure, renderer::Renderer};
+use super::super::{fps_limiter::FPSMeasure, renderer::Renderer};
 
 #[derive(Clone)]
 enum RecordStage {

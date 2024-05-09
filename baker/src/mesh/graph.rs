@@ -5,10 +5,10 @@ use std::{
 
 use super::{
     face::{Face, FaceID},
-    winged_mesh::WingedMesh,
+    half_edge_mesh::HalfEdgeMesh,
 };
 
-impl WingedMesh {
+impl HalfEdgeMesh {
     /// Generates a graph that is the dual of this mesh - connections from each face to their neighbours
     pub fn generate_face_graph(&self) -> petgraph::graph::UnGraph<FaceID, ()> {
         //TODO: Give lower weight to grouping partitions that have not been recently grouped, to ensure we are
@@ -137,10 +137,12 @@ impl WingedMesh {
 
                         let n1 = petgraph::graph::NodeIndex::new(other_face.cluster_idx);
 
-                        let _w = graph
-                            .find_edge(n0, n1)
-                            .map(|e| graph.edge_weight(e))
-                            .flatten();
+                        // let _w = graph
+                        //     .find_edge(n0, n1)
+                        //     .map(|e| graph.edge_weight(e))
+                        //     .flatten();
+
+                        graph.update_edge(n0, n1, ());
 
                         // We don't want to encourage groupings between previously grouped clusters
                         if self.clusters[other_face.cluster_idx].try_get_group_index()
@@ -342,9 +344,9 @@ pub mod test {
     use crate::mesh::{
         graph::colour_graph,
         partition::PartitionCount,
-        winged_mesh::{
+        half_edge_mesh::{
             test::{TEST_MESH_LOW, TEST_MESH_LOWER, TEST_MESH_PLANE_LOW},
-            WingedMesh,
+            HalfEdgeMesh,
         },
     };
 
@@ -375,7 +377,7 @@ pub mod test {
             ..Default::default()
         };
         let mesh = TEST_MESH_PLANE_LOW;
-        let (mut mesh, tri_mesh) = WingedMesh::from_gltf(mesh);
+        let (mut mesh, tri_mesh) = HalfEdgeMesh::from_gltf(mesh);
 
         // Apply primary partition, that will define the lowest level clusterings
         mesh.cluster_full_mesh(test_config, 9, &tri_mesh.verts)?;
@@ -448,7 +450,7 @@ pub mod test {
             ..Default::default()
         };
         let mesh = TEST_MESH_LOW;
-        let (mut mesh, tri_mesh) = WingedMesh::from_gltf(mesh);
+        let (mut mesh, tri_mesh) = HalfEdgeMesh::from_gltf(mesh);
 
         mesh.group_unity();
         // Apply primary partition, that will define the lowest level clusterings
@@ -481,7 +483,7 @@ pub mod test {
             ..Default::default()
         };
         let mesh = TEST_MESH_LOW;
-        let (mut mesh, tri_mesh) = WingedMesh::from_gltf(mesh);
+        let (mut mesh, tri_mesh) = HalfEdgeMesh::from_gltf(mesh);
 
         println!("Faces: {}, Verts: {}", mesh.face_count(), mesh.vert_count());
 
@@ -531,7 +533,7 @@ pub mod test {
         };
 
         let mesh = TEST_MESH_LOW;
-        let (mut mesh, tri_mesh) = WingedMesh::from_gltf(mesh);
+        let (mut mesh, tri_mesh) = HalfEdgeMesh::from_gltf(mesh);
 
         println!("Faces: {}, Verts: {}", mesh.face_count(), mesh.vert_count());
 

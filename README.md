@@ -1,32 +1,17 @@
-# Multiresolution Mesh Renderer
+# Multires
 
-`Baker` converts meshes into a multiresolution asset, in this case a DAG of variable resolution clusters of triangles that serves as a basis for flexible view dependant LOD calculations.
+This repository is a proof of concept implementation of a multiresolution mesh rendering system following designs originally developed in _Batched Multi-Triangulation_ and _Nanite_.
 
-Such a DAG may look like this:
+It contains:
 
-![graph](baker/hierarchy_graph.svg)
+- Two simplification backends:
+   	- Quadric error metrics (custom implementation, non uniform tessellation)
+   	- `meshopt` (no support for simplifying boundaries)
+- Two procedural geometry backends:
+   	- Primitive shading (proof of concept, slow)
+   	- Mesh Shading (blazing fast)
+- Two cluster selection algroithms:
+   	- DAG traverse - explore the DAG from the roots down, finding clusters that fit the error threshold.
+   	- Adaptive Select - dispatch an invocation for each cluster that may be drawn (based on last frame). With mesh shading, this dispatches task shaders, with no intermediate memory usage.
 
-Each level has its triangle count halved, and so each level contains half the clusters. Simplification takes place within groups, marked above with different coloured nodes, such that the boundaries of groups is not allowed to be changed. This allows an LOD renderer to substitute the sets of clusters within groups.
-
-This format of mesh is perfect for the flexibility introduced by Mesh Shaders. `ash_renderer` is a Vulkan based multiresolution renderer capable of processing billions of source triangles to select LODs that keep screen space triangle density as close to a constant value as possible.
-
-## TODO
-
-### Ash-Renderer
-
-- [ ] Compute culling stage (CCS)
-   	- [ ] CCS -> Index compaction pipeline
-   	- [x] CCS -> Mesh Shader output
-
-- LOD viewer pipeline
-- Instanced renderer pipeline
-
-- Spacial locality for clusters in the same group
-
-- Investigations:
-   	- 2 phase occlusion culling
-   	- Parallel work expansion techniques (using a queue in a compute shader)
-
-## Diagrams
-
-![flamegraph](flamegraph.svg)
+More details to come when my dissertation is finished.

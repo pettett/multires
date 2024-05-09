@@ -1,9 +1,9 @@
 pub mod edge;
 pub mod face;
+pub mod half_edge_mesh;
 pub mod plane;
 pub mod quadric;
 pub mod vertex;
-pub mod winged_mesh;
 
 mod cluster_info;
 mod graph;

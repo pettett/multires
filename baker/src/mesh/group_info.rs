@@ -1,8 +1,6 @@
-
-
 use common::BoundingSphere;
 
-use super::winged_mesh::WingedMesh;
+use super::half_edge_mesh::HalfEdgeMesh;
 
 /// Information for a group on layer n
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -21,7 +19,7 @@ pub struct GroupInfo {
 }
 
 impl GroupInfo {
-    pub fn num_tris(&self, mesh: &WingedMesh) -> usize {
+    pub fn num_tris(&self, mesh: &HalfEdgeMesh) -> usize {
         self.clusters
             .iter()
             .map(|&i| mesh.clusters[i].num_tris)

@@ -1,6 +1,6 @@
 use idmap::IntegerId;
 
-use super::{edge::EdgeID, plane::Plane, winged_mesh::WingedMesh};
+use super::{edge::EdgeID, plane::Plane, half_edge_mesh::HalfEdgeMesh};
 
 #[derive(Default, Debug, Clone, PartialEq)]
 pub struct Face {
@@ -39,7 +39,7 @@ impl IntegerId for FaceID {
 
 impl Face {
     /// Generate plane from the 3 points a,b,c on this face.
-    pub fn plane(&self, mesh: &WingedMesh, verts: &[glam::Vec3A]) -> Plane {
+    pub fn plane(&self, mesh: &HalfEdgeMesh, verts: &[glam::Vec3A]) -> Plane {
         let [a, b, c] = mesh.triangle_from_face(self);
 
         Plane::from_three_points(verts[a as usize], verts[b as usize], verts[c as usize])
@@ -47,14 +47,14 @@ impl Face {
 }
 
 impl FaceID {
-    pub fn center(self, mesh: &WingedMesh, verts: &[glam::Vec3A]) -> glam::Vec3A {
+    pub fn center(self, mesh: &HalfEdgeMesh, verts: &[glam::Vec3A]) -> glam::Vec3A {
         let [a, b, c] = mesh.triangle_from_face(&mesh.get_face(self));
 
         (verts[a as usize] + verts[b as usize] + verts[c as usize]) / 3.0
     }
 
     /// Generate plane from the 3 points a,b,c on this face.
-    pub fn plane(self, mesh: &WingedMesh, verts: &[glam::Vec3A]) -> Plane {
+    pub fn plane(self, mesh: &HalfEdgeMesh, verts: &[glam::Vec3A]) -> Plane {
         mesh.get_face(self).plane(mesh, verts)
     }
 }

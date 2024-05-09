@@ -6,7 +6,7 @@ use baker::{
         meshopt_multiresolution::meshopt_multiresolution,
         multiresolution::group_and_partition_and_simplify,
     },
-    mesh::winged_mesh::WingedMesh,
+    mesh::half_edge_mesh::HalfEdgeMesh,
     Args, Mode, Simplifier, STARTING_CLUSTER_SIZE,
 };
 use clap::Parser;
@@ -23,7 +23,7 @@ fn bake_mesh(
 ) {
     println!("Loading from gltf!");
     let start_time = time::Instant::now();
-    let (mut mesh, tri_mesh) = WingedMesh::from_gltf(&input);
+    let (mut mesh, tri_mesh) = HalfEdgeMesh::from_gltf(&input);
 
     // mesh.assert_valid().unwrap();``
 
