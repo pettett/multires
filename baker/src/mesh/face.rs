@@ -1,5 +1,3 @@
-use idmap::IntegerId;
-
 use super::{edge::EdgeID, half_edge_mesh::HalfEdgeMesh, plane::Plane};
 
 #[derive(Default, Debug, Clone, PartialEq)]
@@ -19,20 +17,6 @@ impl From<usize> for FaceID {
 impl From<FaceID> for usize {
     fn from(value: FaceID) -> Self {
         value.0 as _
-    }
-}
-
-impl IntegerId for FaceID {
-    fn from_id(id: u64) -> Self {
-        FaceID(id as _)
-    }
-
-    fn id(&self) -> u64 {
-        self.0 as u64
-    }
-
-    fn id32(&self) -> u32 {
-        self.0 as u32
     }
 }
 

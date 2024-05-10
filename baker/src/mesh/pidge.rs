@@ -24,14 +24,14 @@ pub struct Pidge<K: Key, V> {
 #[derive(Debug, Clone, PartialEq)]
 enum PidgeHole<V> {
     Filled(V),
-    Empty { span_start: usize, span_end: usize },
+    Empty,
 }
 
 impl<V> Into<Option<V>> for PidgeHole<V> {
     fn into(self) -> Option<V> {
         match self {
             PidgeHole::Filled(v) => Some(v),
-            PidgeHole::Empty { .. } => None,
+            PidgeHole::Empty => None,
         }
     }
 }
@@ -40,14 +40,14 @@ impl<V> PidgeHole<V> {
     fn as_ref(&self) -> Option<&V> {
         match self {
             PidgeHole::Filled(v) => Some(v),
-            PidgeHole::Empty { .. } => None,
+            PidgeHole::Empty => None,
         }
     }
 
     fn as_mut(&mut self) -> Option<&mut V> {
         match self {
             PidgeHole::Filled(v) => Some(v),
-            PidgeHole::Empty { .. } => None,
+            PidgeHole::Empty => None,
         }
     }
 }
@@ -62,10 +62,7 @@ impl<K: Key, V> Pidge<K, V> {
 
         // We assume that every value in the pidge will be written over
         for _ in 0..capacity {
-            p.data.push(PidgeHole::Empty {
-                span_start: 0,
-                span_end: capacity - 1,
-            })
+            p.data.push(PidgeHole::Empty)
         }
 
         p
@@ -84,21 +81,15 @@ impl<K: Key, V> Pidge<K, V> {
     pub fn wipe(&mut self, key: K) -> V {
         let id = key.into();
 
-        let new_span_start = None;
-        let new_span_end = None;
-
         // And write in ourself to have correct values, in the case that either of the above span points are still None.
-        let mut data = PidgeHole::Empty {
-            span_start: new_span_start.unwrap_or(id),
-            span_end: new_span_end.unwrap_or(id),
-        };
+        let mut data = PidgeHole::Empty;
         mem::swap(&mut data, &mut self.data[id]);
 
         self.len -= 1;
 
         match data {
             PidgeHole::Filled(d) => d,
-            PidgeHole::Empty { .. } => unreachable!(),
+            PidgeHole::Empty => unreachable!(),
         }
     }
     pub fn get(&self, key: K) -> &V {
@@ -106,10 +97,6 @@ impl<K: Key, V> Pidge<K, V> {
     }
 
     pub fn get_mut(&mut self, key: K) -> &mut V {
-        self.data[key.into()].as_mut().unwrap()
-    }
-
-    pub fn get_mut_or_default(&mut self, key: K) -> &mut V {
         self.data[key.into()].as_mut().unwrap()
     }
 

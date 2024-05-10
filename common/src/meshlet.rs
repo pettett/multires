@@ -52,6 +52,11 @@ impl Meshlet {
 #[cfg(test)]
 mod tests {
 
+    use bincode::{
+        config::{self, BigEndian, Configuration},
+        Encode,
+    };
+
     use crate::Meshlet;
 
     #[test]
@@ -68,5 +73,32 @@ mod tests {
         assert_eq!(indices, vec![0, 100, 200, 300]);
 
         assert_eq!(m.verts(), &verts);
+    }
+
+    #[test]
+    fn test_verts() {
+        let verts = vec![100, 200, 300];
+        let m = Meshlet::from_local_indices(vec![0, 1, 2], verts.clone());
+
+        assert_eq!(m.vert_count(), 3);
+        assert_eq!(m.local_to_global_vert_index(0), 100);
+        assert_eq!(m.verts(), verts);
+        assert_eq!(m.calc_indices(), verts);
+        let mut verts2 = Vec::new();
+        m.calc_indices_to_vec(&mut verts2);
+        assert_eq!(verts2, verts);
+    }
+
+    #[test]
+    fn test_bincode() {
+        let config = config::standard();
+        let verts = vec![100, 200, 300];
+        let m = Meshlet::from_local_indices(vec![0, 1, 2], verts.clone());
+
+        let e = bincode::encode_to_vec(&m, config).unwrap();
+
+        let m2: Meshlet = bincode::decode_from_slice(&e, config).unwrap().0;
+
+        assert_eq!(m.calc_indices(), m2.calc_indices())
     }
 }

@@ -7,7 +7,6 @@ use super::{
     vertex::VertID,
 };
 use anyhow::{Context, Result};
-use idmap::IntegerId;
 
 #[derive(Default, Hash, Debug, Clone, Copy, PartialEq, PartialOrd, Ord, Eq)]
 #[repr(transparent)]
@@ -28,20 +27,6 @@ pub struct HalfEdge {
     pub twin: Option<EdgeID>,
 }
 
-impl IntegerId for EdgeID {
-    fn from_id(id: u64) -> Self {
-        EdgeID(id as _)
-    }
-
-    fn id(&self) -> u64 {
-        self.0 as u64
-    }
-
-    fn id32(&self) -> u32 {
-        self.0 as u32
-    }
-}
-
 impl From<usize> for EdgeID {
     fn from(value: usize) -> Self {
         Self(value as _)
@@ -52,9 +37,9 @@ impl From<EdgeID> for usize {
         value.0 as _
     }
 }
-impl Into<EdgeID> for u32 {
-    fn into(self) -> EdgeID {
-        EdgeID(self)
+impl From<u32> for EdgeID {
+    fn from(value: u32) -> Self {
+        EdgeID(value)
     }
 }
 
@@ -237,5 +222,42 @@ impl EdgeID {
         );
 
         Ok(QuadricError::new(error, self))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::mesh::{half_edge_mesh::HalfEdgeMesh, vertex::VertID};
+
+    #[test]
+    fn test_int_casts() {
+        let v: VertID = 0usize.into();
+        let i: usize = v.into();
+        assert_eq!(i, 0);
+        let v: VertID = 0u32.into();
+        let i: usize = v.into();
+        assert_eq!(i, 0);
+    }
+
+    #[test]
+    fn test_src_dst() {
+        let mut m = HalfEdgeMesh::new(1, 3);
+
+        m.add_tri(0.into(), 0usize.into(), 1usize.into(), 2usize.into(), false)
+            .unwrap();
+
+        for (e_num, (src, dst)) in [(0usize, (0usize, 1usize)), (1, (2, 0)), (2, (1, 2))] {
+            let eid = e_num.into();
+
+            let e = m.edges().get(eid);
+
+            assert_eq!(
+                e.dst(&m).unwrap(),
+                VertID::from(dst),
+                "Edge {e_num} should be {src}->{dst}"
+            );
+
+            assert_eq!(eid.src_dst(&m).unwrap(), (src.into(), dst.into()));
+        }
     }
 }

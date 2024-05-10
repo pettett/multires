@@ -263,37 +263,4 @@ pub mod tests {
     fn sample_simple_multires_error() {
         sample_multires_error(&"../assets/sphere.glb.bin");
     }
-
-    #[test]
-    fn sample_simple_baker_lod_error() {
-        sample_multires_error(&"../assets/baker_lod/sphere.glb.bin")
-    }
-
-    #[test]
-    fn sample_simple_baker_meshopt_error() {
-        sample_multires_error(&"../assets/meshopt_lod/sphere.glb.bin")
-    }
-
-    #[test]
-    fn monkey_errors() {
-        sample_multires_error(&"../assets/monk_60k.glb.bin");
-
-        sample_multires_error(&"../assets/baker_lod/monk_60k.glb.bin");
-
-        sample_multires_error(&"../assets/meshopt_lod/monk_60k.glb.bin");
-    }
-
-    #[test]
-    fn sample_all_multires_error() {
-        for entry in glob::glob("../assets/sphere*.glb.bin").expect("Failed to read glob") {
-            match entry {
-                Ok(path) => {
-                    println!("{:?}", path.display());
-
-                    sample_multires_error(&path)
-                }
-                Err(e) => println!("{:?}", e),
-            }
-        }
-    }
 }

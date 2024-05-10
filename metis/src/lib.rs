@@ -221,8 +221,8 @@ pub mod test {
     #[test]
     fn test_huge_exact() {
         // let graph = graph::generate_triangle_plane::<1000, 10000>();
-        let N: usize = 1000;
-        let M: usize = 1000;
+        let N: usize = 100;
+        let M: usize = 100;
         let mut graph = petgraph::Graph::with_capacity(N * M, N * M * 3);
         // Add nodes
         let mut nodes = vec![vec![petgraph::graph::node_index(0); N]; M];

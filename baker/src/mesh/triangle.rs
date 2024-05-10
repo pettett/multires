@@ -20,12 +20,6 @@ impl Triangle {
         (self.c - self.a).cross(self.c - self.b).length() / 2.0
     }
 
-    pub fn dot(&self) -> f32 {
-        ((self.c - self.a).normalize())
-            .dot((self.c - self.b).normalize())
-            .abs()
-    }
-
     /// Generate self.a random point on self.a triangle by sampling from self.a parallelogram and reflecting
     ///
     /// https://blogs.sas.com/content/iml/2020/10/19/random-points-in-triangle.html
@@ -101,6 +95,13 @@ pub mod tests {
 
         assert_eq!(tri.closest_to_point(Vec3A::Y), Vec3A::Y);
 
+        assert_eq!(tri.closest_to_point(Vec3A::Y * 2.0), Vec3A::Y);
+        assert_eq!(tri.closest_to_point(Vec3A::X * 2.0), Vec3A::X);
+        assert_eq!(
+            tri.closest_to_point(Vec3A::ZERO - Vec3A::X * 2.0),
+            Vec3A::ZERO
+        );
+
         assert_eq!(
             tri.closest_to_point(Vec3A::Y.lerp(Vec3A::X, 0.5),),
             Vec3A::Y.lerp(Vec3A::X, 0.5)
@@ -115,5 +116,30 @@ pub mod tests {
             tri.closest_to_point((Vec3A::ZERO + Vec3A::X + Vec3A::Y) / 3.0 + Vec3A::Z,),
             (Vec3A::ZERO + Vec3A::X + Vec3A::Y) / 3.0
         );
+    }
+
+    #[test]
+    fn test_sqr_dst() {
+        let tri = Triangle::new(Vec3A::ZERO, Vec3A::X, Vec3A::Y);
+        assert_eq!(tri.square_dist_from_point(Vec3A::ZERO), 0.0);
+
+        assert_eq!(tri.square_dist_from_point(Vec3A::X), 0.0);
+
+        assert_eq!(tri.square_dist_from_point(Vec3A::Y), 0.0);
+
+        assert_eq!(tri.square_dist_from_point(Vec3A::Y + Vec3A::Z), 1.0);
+        assert_eq!(tri.square_dist_from_point(Vec3A::Y + 2.0 * Vec3A::Z), 4.0);
+    }
+
+    #[test]
+    fn test_random_point() {
+        let tri = Triangle::new(Vec3A::ZERO, Vec3A::X, Vec3A::Y);
+        let mut rand = rand::rngs::OsRng::default();
+        for _ in 0..100 {
+            assert_eq!(
+                tri.square_dist_from_point(tri.sample_random_point(&mut rand)),
+                0.0
+            );
+        }
     }
 }

@@ -23,3 +23,26 @@ impl OriginCone {
         self.cutoff = self.cutoff.min(cutoff);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use glam::{vec4, Vec3};
+
+    use crate::OriginCone;
+
+    #[test]
+    fn general_test() {
+        let mut c = OriginCone::default();
+
+        c.add_axis(Vec3::Z);
+        c.add_axis(Vec3::Z);
+
+        c.normalise_axis();
+
+        assert!(c.axis() == Vec3::Z);
+
+        c.min_cutoff(1.0);
+
+        assert_eq!(c.packed(), vec4(0.0, 0.0, 1.0, 0.0));
+    }
+}
