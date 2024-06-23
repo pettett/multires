@@ -266,7 +266,7 @@ def internal_comparison(
                 DRAGON,
                 FRAMETIME,
                 ERR01,
-                "Local Select + Mesh Shading",
+                "Adaptive Select + Mesh Shading",
                 col="C3",
             ),
             Benchmark(
@@ -275,7 +275,7 @@ def internal_comparison(
                 DRAGON,
                 FRAMETIME,
                 ERR01,
-                "Traverse Select + Mesh Shading",
+                "DAG Traverse + Mesh Shading",
                 col="C2",
             ),
             Benchmark(
@@ -284,7 +284,7 @@ def internal_comparison(
                 DRAGON,
                 FRAMETIME,
                 ERR01,
-                "Local Select + Primitive Shading",
+                "Adaptive Select + Primitive Shading",
                 col="C3",
                 dashing="--",
             ),
@@ -294,7 +294,7 @@ def internal_comparison(
                 DRAGON,
                 FRAMETIME,
                 ERR01,
-                "Traverse Select + Primitive Shading",
+                "DAG Traverse + Primitive Shading",
                 col="C2",
                 dashing="--",
             ),
@@ -597,9 +597,9 @@ def stress_test():
 
 
 # nanite_comparison("2500")
-# internal_comparison("2500")
+internal_comparison("2500")
 
-stress_test()
+# stress_test()
 
 # mesh_nanite_comparison("2500")
 # mesh_lines_comparison("2500")
