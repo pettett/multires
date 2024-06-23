@@ -17,8 +17,9 @@ It contains:
 ## Baking Meshes
 
 First, obtain a `.glb` mesh. For best results, ensure no microholes/small gaps and smooth geometry.
+My demo mesh is a cleaned up version of the stanford dragon, available [here](https://github.com/pettett/dragon_high).
 
-The demo mesh is a cleaned up version of the stanford dragon, available here.
+Bake the mesh with default settings:
 
 ```
 mkdir assets
@@ -55,7 +56,17 @@ Once a `.glb.bin` file is obtained, the mesh can be viewed with `ash_renderer`. 
 
 `renderer.toml` contains the configuration for the renderer, as opposed to command line arguments. `mesh_names` contains the list of meshes that will be loaded for possible viewing, although currently only one mesh can be previewed at a time.
 
-Building this requires compiling vulkan shaders
+```toml
+mesh_names = [
+	"assets/dragon_high.glb.bin",
+]
+starting_error = 0.10
+validation = false
+```
+
+`validation` enables Vulkan validation layers if true, for debug only. `starting_error` controls the default "error" of generated view-dependent LODs.
+
+Building the renderer requires the Vulkan SDK to be installed to compile shaders.
 
 ```
 cargo run -r --bin=ash_renderer 

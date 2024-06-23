@@ -89,6 +89,12 @@ fn main() {
                 out_path.pop();
 
                 out_path.push("spv");
+
+                // git does not sync empty folders
+                if !out_path.is_dir() {
+                    fs::create_dir(&out_path).unwrap();
+                }
+
                 out_path.push(name);
 
                 println!("{out_path:?} : {:#?}", shader.get_warning_messages());

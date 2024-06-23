@@ -8,9 +8,6 @@ mesh_names = [
 	# "assets/torrin_main.glb.bin",
 ]
 
-
-# mesh_name = "assets/torrin_main.glb.bin"
-
 starting_error = 0.10
 
 validation = false
