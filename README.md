@@ -1,3 +1,5 @@
+[Read the dissertation on this project!](https://pettett.github.io/projects/meshes/main.pdf)
+
 # Multires
 
 This repository is a proof of concept implementation of a multiresolution mesh rendering system following designs originally developed in _Batched Multi-Triangulation_ and _Nanite_.
